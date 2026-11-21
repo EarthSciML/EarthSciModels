@@ -1,0 +1,263 @@
+---
+title: "ElementalCarbon"
+slug: "elementalcarbon"
+domains: ["aerosol"]
+component_types: ["model"]
+domain: "aerosol"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/elemental_carbon.esm"
+reference: "Fierce, L., et al. (2023) ACP 23, 4327–4339. https://doi.org/10.5194/acp-23-4327-2023 — default particle density. Migrated from Aerosol.jl src/elemental_carbon.jl `ElementalCarbon` (esm-hv0)."
+description: "A holder for elemental carbon (EC) concentrations in the atmosphere. By default it does not include any dynamics — EC is treated as a conserved tracer whose concentration is set as an initial condition and carried forward unchanged. The model carries particle physical properties (density, diameter, temperature, pressure) so that coupled models (e.g. Mie scattering, mass transfer) can access them through the shared system. Particle density default from Fierce et al. (2023)."
+tags: ["aerosol", "model", "elemental-carbon", "tracer", "black-carbon"]
+---
+
+## Description
+
+A holder for elemental carbon (EC) concentrations in the atmosphere. By default it does not include any dynamics — EC is treated as a conserved tracer whose concentration is set as an initial condition and carried forward unchanged. The model carries particle physical properties (density, diameter, temperature, pressure) so that coupled models (e.g. Mie scattering, mass transfer) can access them through the shared system. Particle density default from Fierce et al. (2023).
+
+## Reference
+
+Fierce, L., et al. (2023) ACP 23, 4327–4339. https://doi.org/10.5194/acp-23-4327-2023 — default particle density. Migrated from Aerosol.jl src/elemental_carbon.jl `ElementalCarbon` (esm-hv0).
+
+_source_ref: Aerosol.jl@main:src/elemental_carbon.jl:13
+
+Upstream `ElementalCarbon` is an MTK `@component` with four parameters (ρ, d_p, T, P) and two variables: EC (ODE state, D(EC)~0) and v_placeholder (algebraic, v_placeholder~ρ*d_p*T*P*1e-20). The sole purpose of v_placeholder is to prevent MTK's dead-code elimination from pruning the four parameters that are not referenced in the D(EC)~0 equation. There is no physical content in v_placeholder.
+
+ESM representation:
+- EC is a `state` variable with ODE D(EC)/dt = 0 (EC conserved, constant at its initial condition).
+- ρ, d_p, T, P are `parameter` types. Parameters in ESM are preserved by definition and do not require a placeholder equation, so v_placeholder is deliberately omitted.
+- The constant `zero = 0 ppb/s` from the upstream source is folded into the literal 0 on the RHS of the D(EC) equation.
+
+Migration tracker note: features list 'equations (with DataInterpolations.LinearInterpolation)' with blocking_gap 'none (data is constants in-place)'. This means the relevant data (particle density, diameter defaults) is given as hardcoded scalar constants in the source, so no interpolation table is needed in the ESM.
+
+Test strategy: since D(EC)/dt = 0, EC(t) equals its initial condition for all t. Tests verify this conservation law at multiple times and initial conditions. The parameters ρ, d_p, T, P do not appear in any equation and cannot affect EC — this invariance is tested in parameter_variation._
+
+## Variables
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `EC` | `ppb` |  | Elemental Carbon concentration. Conserved tracer: D(EC)/dt = 0, so EC is constant at its initial condition. Coupled models (e.g. NEI emissions) can add source/sink terms via the coupling mechanism. |
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `ρ` | `kg/m^3` | `1.1` | Particle density. Default from Fierce et al. (2023), DOI:10.5194/acp-23-4327-2023. |
+| `d_p` | `m` | `8e-07` | Particle diameter. |
+| `T` | `K` | `298.15` | Temperature. |
+| `P` | `Pa` | `101325.0` | Pressure. |
+
+## Equations
+
+$$
+\mathrm{D}\left(EC\right) = 0
+$$
+
+## Analyses
+
+### ec_time_series
+
+Time series of EC concentration from t = 0 to 3600 s (1 hour) with default initial condition EC = 1.0 ppb. Because D(EC)/dt = 0, the output is a flat line — this example illustrates the conserved-tracer behavior and serves as a reference for models that couple an emission source to ElementalCarbon.
+
+**Time span:** 0.0 → 3600.0
+
+![Elemental Carbon concentration vs time. Flat at 1.0 ppb, confirming the conserved-tracer equation D(EC)/dt = 0.](/plots/aerosol/elementalcarbon/ec_time_series-ec_vs_time.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Fierce, L., et al. (2023) ACP 23, 4327–4339. https://doi.org/10.5194/acp-23-4327-2023 — default particle density. Migrated from Aerosol.jl src/elemental_carbon.jl `ElementalCarbon` (esm-hv0).",
+    "notes": "source_ref: Aerosol.jl@main:src/elemental_carbon.jl:13\n\nUpstream `ElementalCarbon` is an MTK `@component` with four parameters (ρ, d_p, T, P) and two variables: EC (ODE state, D(EC)~0) and v_placeholder (algebraic, v_placeholder~ρ*d_p*T*P*1e-20). The sole purpose of v_placeholder is to prevent MTK's dead-code elimination from pruning the four parameters that are not referenced in the D(EC)~0 equation. There is no physical content in v_placeholder.\n\nESM representation:\n- EC is a `state` variable with ODE D(EC)/dt = 0 (EC conserved, constant at its initial condition).\n- ρ, d_p, T, P are `parameter` types. Parameters in ESM are preserved by definition and do not require a placeholder equation, so v_placeholder is deliberately omitted.\n- The constant `zero = 0 ppb/s` from the upstream source is folded into the literal 0 on the RHS of the D(EC) equation.\n\nMigration tracker note: features list 'equations (with DataInterpolations.LinearInterpolation)' with blocking_gap 'none (data is constants in-place)'. This means the relevant data (particle density, diameter defaults) is given as hardcoded scalar constants in the source, so no interpolation table is needed in the ESM.\n\nTest strategy: since D(EC)/dt = 0, EC(t) equals its initial condition for all t. Tests verify this conservation law at multiple times and initial conditions. The parameters ρ, d_p, T, P do not appear in any equation and cannot affect EC — this invariance is tested in parameter_variation."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {
+    "EC": {
+      "type": "unknown",
+      "units": "ppb",
+      "description": "Elemental Carbon concentration. Conserved tracer: D(EC)/dt = 0, so EC is constant at its initial condition. Coupled models (e.g. NEI emissions) can add source/sink terms via the coupling mechanism."
+    },
+    "ρ": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 1.1,
+      "description": "Particle density. Default from Fierce et al. (2023), DOI:10.5194/acp-23-4327-2023."
+    },
+    "d_p": {
+      "type": "parameter",
+      "units": "m",
+      "default": 8e-07,
+      "description": "Particle diameter."
+    },
+    "T": {
+      "type": "parameter",
+      "units": "K",
+      "default": 298.15,
+      "description": "Temperature."
+    },
+    "P": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 101325.0,
+      "description": "Pressure."
+    }
+  },
+  "equations": [
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "EC"
+        ]
+      },
+      "rhs": 0
+    }
+  ],
+  "tests": [
+    {
+      "id": "default_ic_conserved",
+      "description": "Default initial condition EC = 1.0 ppb. Since D(EC)/dt = 0, EC must equal 1.0 ppb at all times. Checks t = 0, 50, 100 s.",
+      "time_span": {
+        "start": 0.0,
+        "end": 100.0
+      },
+      "initial_conditions": {
+        "EC": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "EC",
+          "time": 0.0,
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "EC",
+          "time": 50.0,
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "EC",
+          "time": 100.0,
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "custom_ic_conserved",
+      "description": "Custom initial condition EC = 5.0 ppb. EC must remain 5.0 ppb for all t.",
+      "time_span": {
+        "start": 0.0,
+        "end": 100.0
+      },
+      "initial_conditions": {
+        "EC": 5.0
+      },
+      "assertions": [
+        {
+          "variable": "EC",
+          "time": 0.0,
+          "expected": 5.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "EC",
+          "time": 100.0,
+          "expected": 5.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "parameter_variation_no_ec_effect",
+      "description": "Varying particle properties (ρ, d_p, T, P) cannot affect EC because none appear in the D(EC)/dt = 0 equation. EC = 2.0 ppb with non-default parameters must remain 2.0 ppb.",
+      "time_span": {
+        "start": 0.0,
+        "end": 100.0
+      },
+      "initial_conditions": {
+        "EC": 2.0
+      },
+      "parameter_overrides": {
+        "ρ": 2.0,
+        "d_p": 5e-07,
+        "T": 280.0,
+        "P": 90000.0
+      },
+      "assertions": [
+        {
+          "variable": "EC",
+          "time": 0.0,
+          "expected": 2.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "EC",
+          "time": 100.0,
+          "expected": 2.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "ec_time_series",
+      "description": "Time series of EC concentration from t = 0 to 3600 s (1 hour) with default initial condition EC = 1.0 ppb. Because D(EC)/dt = 0, the output is a flat line — this example illustrates the conserved-tracer behavior and serves as a reference for models that couple an emission source to ElementalCarbon.",
+      "initial_state": {
+        "EC": 1.0
+      },
+      "parameters": {
+        "ρ": 1.1,
+        "d_p": 8e-07,
+        "T": 298.15,
+        "P": 101325.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 3600.0
+      },
+      "plots": [
+        {
+          "id": "ec_vs_time",
+          "type": "line",
+          "description": "Elemental Carbon concentration vs time. Flat at 1.0 ppb, confirming the conserved-tracer equation D(EC)/dt = 0.",
+          "x": {
+            "variable": "t",
+            "label": "Time (s)"
+          },
+          "y": {
+            "variable": "EC",
+            "label": "EC (ppb)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

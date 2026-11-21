@@ -1,0 +1,1157 @@
+---
+title: "BrownianCoagulationCoefficient"
+slug: "browniancoagulationcoefficient"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["dynamics"]
+domain: "aerosol"
+subdomain: "dynamics"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/dynamics/brownian_coag_coeff.esm"
+reference: "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 13, Table 13.1 and Eq. 13.47 — Brownian coagulation coefficient K_12 via the Fuchs interpolation formula. Migrated from Aerosol.jl src/dynamics.jl:75 @ commit c8c640bb636b22f2425460e9ed5cba50793bfee1 (esm-wlo)."
+description: "Brownian coagulation coefficient K_12 for two particles using the Fuchs interpolation formula (Seinfeld & Pandis 2006, Table 13.1). Valid across the continuum, transition, and free-molecular regimes. Computes Knudsen numbers, Cunningham slip corrections, Brownian diffusion coefficients, mean thermal velocities, particle mean free paths, and the Fuchs interpolation parameters g_1, g_2 as intermediate observed variables before assembling K_12. Migrated from Aerosol.jl src/dynamics.jl:75."
+tags: ["aerosol", "dynamics", "model", "coagulation", "brownian", "fuchs", "seinfeld-pandis"]
+---
+
+## Description
+
+Brownian coagulation coefficient K_12 for two particles using the Fuchs interpolation formula (Seinfeld & Pandis 2006, Table 13.1). Valid across the continuum, transition, and free-molecular regimes. Computes Knudsen numbers, Cunningham slip corrections, Brownian diffusion coefficients, mean thermal velocities, particle mean free paths, and the Fuchs interpolation parameters g_1, g_2 as intermediate observed variables before assembling K_12. Migrated from Aerosol.jl src/dynamics.jl:75.
+
+## Reference
+
+Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 13, Table 13.1 and Eq. 13.47 — Brownian coagulation coefficient K_12 via the Fuchs interpolation formula. Migrated from Aerosol.jl src/dynamics.jl:75 @ commit c8c640bb636b22f2425460e9ed5cba50793bfee1 (esm-wlo).
+
+_source_ref: Aerosol.jl@c8c640bb:src/dynamics.jl:75
+
+Upstream BrownianCoagulationCoefficient is an MTK @component with 2 constants (k_B=1.380649e-23 J/K, π_val=3.14159265358979), 6 parameters (T, μ, ρ_p, λ_air, D_p1, D_p2), and 14 algebraic variables determined by explicit equations with no time derivative — all purely observed.
+
+Constants k_B and π_val are folded as floating-point literals into the expression trees. π/6 = 0.5235987755982988 is folded into m_1 and m_2.
+
+Equation chain (S&P 2006, Table 13.1 and Eq. 13.47):
+  m_i     = ρ_p · (π/6) · D_pi³                                    [particle mass]
+  Kn_i    = 2 λ_air / D_pi                                          [Knudsen number]
+  C_ci    = 1 + Kn_i (1.257 + 0.4 exp(-1.1/Kn_i))                  [Cunningham slip correction]
+  D_i     = k_B T C_ci / (3 π μ D_pi)                               [diffusion coefficient, Eq. 13.47]
+  c_bar_i = √(8 k_B T / (π m_i))                                    [mean thermal velocity]
+  l_i     = 8 D_i / (π c_bar_i)                                     [particle mean free path]
+  g_i     = [(D_pi + l_i)³ - (D_pi² + l_i²)^(3/2)] / (3 D_pi l_i) - D_pi  [Fuchs parameter]
+  K_12    = 2π(D_1+D_2)(D_p1+D_p2) / [den1 + den2]                 [coagulation coefficient]
+    den1  = (D_p1+D_p2) / (D_p1+D_p2 + 2√(g_1²+g_2²))
+    den2  = 8(D_1+D_2) / (√(c_bar_1²+c_bar_2²) · (D_p1+D_p2))
+
+All 14 variables are algebraic — the system has no state variables and no ODEs. The variable name l_1/l_2 corresponds to ℓ_1/ℓ_2 in the upstream Julia source (ASCII substitution to avoid Unicode in JSON keys).
+
+Topological evaluation order: m_i → Kn_i → C_ci → D_i → c_bar_i → l_i → g_i → K_12. The dependency graph is acyclic.
+
+Physics: The Fuchs formula interpolates between the continuum limit (Kn ≪ 1, K → 8kT/3μ for equal sizes, Eq. 13.52) and the free-molecular limit (Kn ≫ 1, K ∝ √T/m). The minimum of K_12 lies in the transition regime (~0.1–1 µm at standard conditions).
+
+Tolerance rationale (model-level rel=1e-9): purely algebraic system. All expressions are finite compositions of *, /, ^, exp, sqrt in float64. Round-off is ~1e-15 relative. rel=1e-9 leaves six orders of magnitude of headroom above machine epsilon._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `T` | `K` | `298.0` | Temperature. Default 298 K (≈ 25 °C), standard atmospheric. |
+| `μ` | `Pa*s` | `1.83e-05` | Dynamic viscosity of air. Default 1.83×10⁻⁵ Pa·s at 298 K. |
+| `ρ_p` | `kg/m^3` | `1000.0` | Particle density. Default 1000 kg/m³ (liquid water / ammonium sulfate). |
+| `λ_air` | `m` | `6.86e-08` | Mean free path of air molecules. Default 6.86×10⁻⁸ m at 298 K, 1 atm. |
+| `D_p1` | `m` | `1e-07` | Diameter of particle 1. Default 100 nm — transition-regime aerosol. |
+| `D_p2` | `m` | `1e-07` | Diameter of particle 2. Default 100 nm — transition-regime aerosol. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `m_1` | `kg` |  | Mass of particle 1: m_1 = ρ_p (π/6) D_p1³. Derived from diameter assuming a sphere. |
+| `m_2` | `kg` |  | Mass of particle 2: m_2 = ρ_p (π/6) D_p2³. Derived from diameter assuming a sphere. |
+| `Kn_1` | `1` |  | Knudsen number for particle 1: Kn_1 = 2λ_air/D_p1. Kn ≪ 1: continuum; Kn ≫ 1: free-molecular; Kn ~ 1: transition. |
+| `Kn_2` | `1` |  | Knudsen number for particle 2: Kn_2 = 2λ_air/D_p2. |
+| `C_c1` | `1` |  | Cunningham slip correction factor for particle 1: C_c1 = 1 + Kn_1(1.257 + 0.4 exp(−1.1/Kn_1)). Dimensionless correction for non-continuum effects; C_c1 → 1 for large particles (Kn → 0) and grows for small particles (Kn → ∞). |
+| `C_c2` | `1` |  | Cunningham slip correction factor for particle 2: C_c2 = 1 + Kn_2(1.257 + 0.4 exp(−1.1/Kn_2)). |
+| `D_1` | `m^2/s` |  | Brownian diffusion coefficient of particle 1 (Eq. 13.47): D_1 = k_B T C_c1 / (3π μ D_p1). k_B = 1.380649×10⁻²³ J/K folded as literal. |
+| `D_2` | `m^2/s` |  | Brownian diffusion coefficient of particle 2 (Eq. 13.47): D_2 = k_B T C_c2 / (3π μ D_p2). |
+| `c_bar_1` | `m/s` |  | Mean thermal velocity of particle 1 (Table 13.1): c_bar_1 = √(8 k_B T / (π m_1)). k_B = 1.380649×10⁻²³ J/K folded as literal. |
+| `c_bar_2` | `m/s` |  | Mean thermal velocity of particle 2 (Table 13.1): c_bar_2 = √(8 k_B T / (π m_2)). |
+| `l_1` | `m` |  | Particle mean free path of particle 1 (Table 13.1, ℓ_1 in source): l_1 = 8 D_1 / (π c_bar_1). |
+| `l_2` | `m` |  | Particle mean free path of particle 2 (Table 13.1, ℓ_2 in source): l_2 = 8 D_2 / (π c_bar_2). |
+| `g_1` | `m` |  | Fuchs interpolation parameter for particle 1 (Table 13.1): g_1 = [(D_p1+l_1)³ − (D_p1²+l_1²)^(3/2)] / (3 D_p1 l_1) − D_p1. Smoothly connects diffusive and kinetic regimes. |
+| `g_2` | `m` |  | Fuchs interpolation parameter for particle 2 (Table 13.1): g_2 = [(D_p2+l_2)³ − (D_p2²+l_2²)^(3/2)] / (3 D_p2 l_2) − D_p2. |
+| `K_12` | `m^3/s` |  | Brownian coagulation coefficient (Table 13.1, Fuchs form): K_12 = 2π(D_1+D_2)(D_p1+D_p2) / [(D_p1+D_p2)/(D_p1+D_p2+2√(g_1²+g_2²)) + 8(D_1+D_2)/(√(c_bar_1²+c_bar_2²)(D_p1+D_p2))]. Units m³/s; rate of formation of doublets per collision pair concentration [m⁻⁶]. |
+
+## Observed expressions
+
+$$
+m_{1} = ρ_{p} \cdot 0.5235987755982988 \cdot D_{p1}^{3}
+$$
+_Mass of particle 1: m_1 = ρ_p (π/6) D_p1³. Derived from diameter assuming a sphere._
+
+$$
+m_{2} = ρ_{p} \cdot 0.5235987755982988 \cdot D_{p2}^{3}
+$$
+_Mass of particle 2: m_2 = ρ_p (π/6) D_p2³. Derived from diameter assuming a sphere._
+
+$$
+Kn_{1} = \frac{2 \cdot λ_{air}}{D_{p1}}
+$$
+_Knudsen number for particle 1: Kn_1 = 2λ_air/D_p1. Kn ≪ 1: continuum; Kn ≫ 1: free-molecular; Kn ~ 1: transition._
+
+$$
+Kn_{2} = \frac{2 \cdot λ_{air}}{D_{p2}}
+$$
+_Knudsen number for particle 2: Kn_2 = 2λ_air/D_p2._
+
+$$
+C_{c1} = 1 + Kn_{1} \cdot \left(1.257 + 0.4 \cdot e^{\frac{-1.1}{Kn_{1}}}\right)
+$$
+_Cunningham slip correction factor for particle 1: C_c1 = 1 + Kn_1(1.257 + 0.4 exp(−1.1/Kn_1)). Dimensionless correction for non-continuum effects; C_c1 → 1 for large particles (Kn → 0) and grows for small particles (Kn → ∞)._
+
+$$
+C_{c2} = 1 + Kn_{2} \cdot \left(1.257 + 0.4 \cdot e^{\frac{-1.1}{Kn_{2}}}\right)
+$$
+_Cunningham slip correction factor for particle 2: C_c2 = 1 + Kn_2(1.257 + 0.4 exp(−1.1/Kn_2))._
+
+$$
+D_{1} = \frac{1.380649 \times 10^{-23} \cdot T \cdot C_{c1}}{3 \cdot 3.14159265358979 \cdot μ \cdot D_{p1}}
+$$
+_Brownian diffusion coefficient of particle 1 (Eq. 13.47): D_1 = k_B T C_c1 / (3π μ D_p1). k_B = 1.380649×10⁻²³ J/K folded as literal._
+
+$$
+D_{2} = \frac{1.380649 \times 10^{-23} \cdot T \cdot C_{c2}}{3 \cdot 3.14159265358979 \cdot μ \cdot D_{p2}}
+$$
+_Brownian diffusion coefficient of particle 2 (Eq. 13.47): D_2 = k_B T C_c2 / (3π μ D_p2)._
+
+$$
+c_{bar\,1} = \sqrt{\frac{8 \cdot 1.380649 \times 10^{-23} \cdot T}{3.14159265358979 \cdot m_{1}}}
+$$
+_Mean thermal velocity of particle 1 (Table 13.1): c_bar_1 = √(8 k_B T / (π m_1)). k_B = 1.380649×10⁻²³ J/K folded as literal._
+
+$$
+c_{bar\,2} = \sqrt{\frac{8 \cdot 1.380649 \times 10^{-23} \cdot T}{3.14159265358979 \cdot m_{2}}}
+$$
+_Mean thermal velocity of particle 2 (Table 13.1): c_bar_2 = √(8 k_B T / (π m_2))._
+
+$$
+l_{1} = \frac{8 \cdot D_{1}}{3.14159265358979 \cdot c_{bar\,1}}
+$$
+_Particle mean free path of particle 1 (Table 13.1, ℓ_1 in source): l_1 = 8 D_1 / (π c_bar_1)._
+
+$$
+l_{2} = \frac{8 \cdot D_{2}}{3.14159265358979 \cdot c_{bar\,2}}
+$$
+_Particle mean free path of particle 2 (Table 13.1, ℓ_2 in source): l_2 = 8 D_2 / (π c_bar_2)._
+
+$$
+g_{1} = \frac{1}{3 \cdot D_{p1} \cdot l_{1}} \cdot \left(\left(D_{p1} + l_{1}\right)^{3} - \left(D_{p1}^{2} + l_{1}^{2}\right)^{1.5}\right) - D_{p1}
+$$
+_Fuchs interpolation parameter for particle 1 (Table 13.1): g_1 = [(D_p1+l_1)³ − (D_p1²+l_1²)^(3/2)] / (3 D_p1 l_1) − D_p1. Smoothly connects diffusive and kinetic regimes._
+
+$$
+g_{2} = \frac{1}{3 \cdot D_{p2} \cdot l_{2}} \cdot \left(\left(D_{p2} + l_{2}\right)^{3} - \left(D_{p2}^{2} + l_{2}^{2}\right)^{1.5}\right) - D_{p2}
+$$
+_Fuchs interpolation parameter for particle 2 (Table 13.1): g_2 = [(D_p2+l_2)³ − (D_p2²+l_2²)^(3/2)] / (3 D_p2 l_2) − D_p2._
+
+$$
+K_{12} = \frac{2 \cdot 3.14159265358979 \cdot \left(D_{1} + D_{2}\right) \cdot \left(D_{p1} + D_{p2}\right)}{\frac{D_{p1} + D_{p2}}{D_{p1} + D_{p2} + 2 \cdot \sqrt{g_{1}^{2} + g_{2}^{2}}} + \frac{8 \cdot \left(D_{1} + D_{2}\right)}{\sqrt{c_{bar\,1}^{2} + c_{bar\,2}^{2}} \cdot \left(D_{p1} + D_{p2}\right)}}
+$$
+_Brownian coagulation coefficient (Table 13.1, Fuchs form): K_12 = 2π(D_1+D_2)(D_p1+D_p2) / [(D_p1+D_p2)/(D_p1+D_p2+2√(g_1²+g_2²)) + 8(D_1+D_2)/(√(c_bar_1²+c_bar_2²)(D_p1+D_p2))]. Units m³/s; rate of formation of doublets per collision pair concentration [m⁻⁶]._
+
+## Analyses
+
+### K12_vs_particle_diameter
+
+K_12 as a function of particle 1 diameter D_p1 (log sweep 1 nm to 100 µm) with D_p2 fixed at 100 nm. Shows the three transport regimes: free-molecular (D_p1 ≪ λ_air, K_12 large), transition, and continuum (D_p1 ≫ λ_air, K_12 approaches a plateau). The enhancement of K_12 for very small or very large D_p1 relative to D_p2=100 nm demonstrates the size-differential coagulation effect of Table 13.1.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `D_p1`
+
+![Brownian coagulation coefficient K_12 vs particle diameter D_p1 (D_p2 = 100 nm fixed). Illustrates the regime dependence: enhancement at small D_p1 (free-molecular, high D_1) and the approach to the continuum plateau at large D_p1.](/plots/aerosol/dynamics/browniancoagulationcoefficient/K12_vs_particle_diameter-K12_vs_Dp1.png)
+
+### K12_vs_temperature
+
+K_12 as a function of temperature T from 200 K to 350 K (linear sweep) for equal 100 nm particles. K_12 increases approximately linearly with T because D_i ∝ T (Eq. 13.47) dominates the weak √T dependence of c_bar. Relevant to cloud-resolving models where particle dynamics vary across the tropospheric temperature range.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `T`
+
+![K_12 vs temperature T for equal D_p=100 nm particles. Shows the near-linear temperature dependence of the Brownian coagulation coefficient.](/plots/aerosol/dynamics/browniancoagulationcoefficient/K12_vs_temperature-K12_vs_T.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 13, Table 13.1 and Eq. 13.47 — Brownian coagulation coefficient K_12 via the Fuchs interpolation formula. Migrated from Aerosol.jl src/dynamics.jl:75 @ commit c8c640bb636b22f2425460e9ed5cba50793bfee1 (esm-wlo).",
+    "notes": "source_ref: Aerosol.jl@c8c640bb:src/dynamics.jl:75\n\nUpstream BrownianCoagulationCoefficient is an MTK @component with 2 constants (k_B=1.380649e-23 J/K, π_val=3.14159265358979), 6 parameters (T, μ, ρ_p, λ_air, D_p1, D_p2), and 14 algebraic variables determined by explicit equations with no time derivative — all purely observed.\n\nConstants k_B and π_val are folded as floating-point literals into the expression trees. π/6 = 0.5235987755982988 is folded into m_1 and m_2.\n\nEquation chain (S&P 2006, Table 13.1 and Eq. 13.47):\n  m_i     = ρ_p · (π/6) · D_pi³                                    [particle mass]\n  Kn_i    = 2 λ_air / D_pi                                          [Knudsen number]\n  C_ci    = 1 + Kn_i (1.257 + 0.4 exp(-1.1/Kn_i))                  [Cunningham slip correction]\n  D_i     = k_B T C_ci / (3 π μ D_pi)                               [diffusion coefficient, Eq. 13.47]\n  c_bar_i = √(8 k_B T / (π m_i))                                    [mean thermal velocity]\n  l_i     = 8 D_i / (π c_bar_i)                                     [particle mean free path]\n  g_i     = [(D_pi + l_i)³ - (D_pi² + l_i²)^(3/2)] / (3 D_pi l_i) - D_pi  [Fuchs parameter]\n  K_12    = 2π(D_1+D_2)(D_p1+D_p2) / [den1 + den2]                 [coagulation coefficient]\n    den1  = (D_p1+D_p2) / (D_p1+D_p2 + 2√(g_1²+g_2²))\n    den2  = 8(D_1+D_2) / (√(c_bar_1²+c_bar_2²) · (D_p1+D_p2))\n\nAll 14 variables are algebraic — the system has no state variables and no ODEs. The variable name l_1/l_2 corresponds to ℓ_1/ℓ_2 in the upstream Julia source (ASCII substitution to avoid Unicode in JSON keys).\n\nTopological evaluation order: m_i → Kn_i → C_ci → D_i → c_bar_i → l_i → g_i → K_12. The dependency graph is acyclic.\n\nPhysics: The Fuchs formula interpolates between the continuum limit (Kn ≪ 1, K → 8kT/3μ for equal sizes, Eq. 13.52) and the free-molecular limit (Kn ≫ 1, K ∝ √T/m). The minimum of K_12 lies in the transition regime (~0.1–1 µm at standard conditions).\n\nTolerance rationale (model-level rel=1e-9): purely algebraic system. All expressions are finite compositions of *, /, ^, exp, sqrt in float64. Round-off is ~1e-15 relative. rel=1e-9 leaves six orders of magnitude of headroom above machine epsilon."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {
+    "T": {
+      "type": "parameter",
+      "units": "K",
+      "default": 298.0,
+      "description": "Temperature. Default 298 K (≈ 25 °C), standard atmospheric."
+    },
+    "μ": {
+      "type": "parameter",
+      "units": "Pa*s",
+      "default": 1.83e-05,
+      "description": "Dynamic viscosity of air. Default 1.83×10⁻⁵ Pa·s at 298 K."
+    },
+    "ρ_p": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 1000.0,
+      "description": "Particle density. Default 1000 kg/m³ (liquid water / ammonium sulfate)."
+    },
+    "λ_air": {
+      "type": "parameter",
+      "units": "m",
+      "default": 6.86e-08,
+      "description": "Mean free path of air molecules. Default 6.86×10⁻⁸ m at 298 K, 1 atm."
+    },
+    "D_p1": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1e-07,
+      "description": "Diameter of particle 1. Default 100 nm — transition-regime aerosol."
+    },
+    "D_p2": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1e-07,
+      "description": "Diameter of particle 2. Default 100 nm — transition-regime aerosol."
+    },
+    "m_1": {
+      "type": "unknown",
+      "units": "kg",
+      "description": "Mass of particle 1: m_1 = ρ_p (π/6) D_p1³. Derived from diameter assuming a sphere."
+    },
+    "m_2": {
+      "type": "unknown",
+      "units": "kg",
+      "description": "Mass of particle 2: m_2 = ρ_p (π/6) D_p2³. Derived from diameter assuming a sphere."
+    },
+    "Kn_1": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Knudsen number for particle 1: Kn_1 = 2λ_air/D_p1. Kn ≪ 1: continuum; Kn ≫ 1: free-molecular; Kn ~ 1: transition."
+    },
+    "Kn_2": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Knudsen number for particle 2: Kn_2 = 2λ_air/D_p2."
+    },
+    "C_c1": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Cunningham slip correction factor for particle 1: C_c1 = 1 + Kn_1(1.257 + 0.4 exp(−1.1/Kn_1)). Dimensionless correction for non-continuum effects; C_c1 → 1 for large particles (Kn → 0) and grows for small particles (Kn → ∞)."
+    },
+    "C_c2": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Cunningham slip correction factor for particle 2: C_c2 = 1 + Kn_2(1.257 + 0.4 exp(−1.1/Kn_2))."
+    },
+    "D_1": {
+      "type": "unknown",
+      "units": "m^2/s",
+      "description": "Brownian diffusion coefficient of particle 1 (Eq. 13.47): D_1 = k_B T C_c1 / (3π μ D_p1). k_B = 1.380649×10⁻²³ J/K folded as literal."
+    },
+    "D_2": {
+      "type": "unknown",
+      "units": "m^2/s",
+      "description": "Brownian diffusion coefficient of particle 2 (Eq. 13.47): D_2 = k_B T C_c2 / (3π μ D_p2)."
+    },
+    "c_bar_1": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Mean thermal velocity of particle 1 (Table 13.1): c_bar_1 = √(8 k_B T / (π m_1)). k_B = 1.380649×10⁻²³ J/K folded as literal."
+    },
+    "c_bar_2": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Mean thermal velocity of particle 2 (Table 13.1): c_bar_2 = √(8 k_B T / (π m_2))."
+    },
+    "l_1": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Particle mean free path of particle 1 (Table 13.1, ℓ_1 in source): l_1 = 8 D_1 / (π c_bar_1)."
+    },
+    "l_2": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Particle mean free path of particle 2 (Table 13.1, ℓ_2 in source): l_2 = 8 D_2 / (π c_bar_2)."
+    },
+    "g_1": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Fuchs interpolation parameter for particle 1 (Table 13.1): g_1 = [(D_p1+l_1)³ − (D_p1²+l_1²)^(3/2)] / (3 D_p1 l_1) − D_p1. Smoothly connects diffusive and kinetic regimes."
+    },
+    "g_2": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Fuchs interpolation parameter for particle 2 (Table 13.1): g_2 = [(D_p2+l_2)³ − (D_p2²+l_2²)^(3/2)] / (3 D_p2 l_2) − D_p2."
+    },
+    "K_12": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "Brownian coagulation coefficient (Table 13.1, Fuchs form): K_12 = 2π(D_1+D_2)(D_p1+D_p2) / [(D_p1+D_p2)/(D_p1+D_p2+2√(g_1²+g_2²)) + 8(D_1+D_2)/(√(c_bar_1²+c_bar_2²)(D_p1+D_p2))]. Units m³/s; rate of formation of doublets per collision pair concentration [m⁻⁶]."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "m_1",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "ρ_p",
+          0.5235987755982988,
+          {
+            "op": "^",
+            "args": [
+              "D_p1",
+              3
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "m_2",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "ρ_p",
+          0.5235987755982988,
+          {
+            "op": "^",
+            "args": [
+              "D_p2",
+              3
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "Kn_1",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              2,
+              "λ_air"
+            ]
+          },
+          "D_p1"
+        ]
+      }
+    },
+    {
+      "lhs": "Kn_2",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              2,
+              "λ_air"
+            ]
+          },
+          "D_p2"
+        ]
+      }
+    },
+    {
+      "lhs": "C_c1",
+      "rhs": {
+        "op": "+",
+        "args": [
+          1,
+          {
+            "op": "*",
+            "args": [
+              "Kn_1",
+              {
+                "op": "+",
+                "args": [
+                  1.257,
+                  {
+                    "op": "*",
+                    "args": [
+                      0.4,
+                      {
+                        "op": "exp",
+                        "args": [
+                          {
+                            "op": "/",
+                            "args": [
+                              -1.1,
+                              "Kn_1"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "C_c2",
+      "rhs": {
+        "op": "+",
+        "args": [
+          1,
+          {
+            "op": "*",
+            "args": [
+              "Kn_2",
+              {
+                "op": "+",
+                "args": [
+                  1.257,
+                  {
+                    "op": "*",
+                    "args": [
+                      0.4,
+                      {
+                        "op": "exp",
+                        "args": [
+                          {
+                            "op": "/",
+                            "args": [
+                              -1.1,
+                              "Kn_2"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "D_1",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              1.380649e-23,
+              "T",
+              "C_c1"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              3,
+              3.14159265358979,
+              "μ",
+              "D_p1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "D_2",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              1.380649e-23,
+              "T",
+              "C_c2"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              3,
+              3.14159265358979,
+              "μ",
+              "D_p2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "c_bar_1",
+      "rhs": {
+        "op": "sqrt",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  8,
+                  1.380649e-23,
+                  "T"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  3.14159265358979,
+                  "m_1"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "c_bar_2",
+      "rhs": {
+        "op": "sqrt",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  8,
+                  1.380649e-23,
+                  "T"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  3.14159265358979,
+                  "m_2"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "l_1",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              8,
+              "D_1"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              3.14159265358979,
+              "c_bar_1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "l_2",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              8,
+              "D_2"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              3.14159265358979,
+              "c_bar_2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "g_1",
+      "rhs": {
+        "op": "-",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1,
+                  {
+                    "op": "*",
+                    "args": [
+                      3,
+                      "D_p1",
+                      "l_1"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "-",
+                "args": [
+                  {
+                    "op": "^",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          "D_p1",
+                          "l_1"
+                        ]
+                      },
+                      3
+                    ]
+                  },
+                  {
+                    "op": "^",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          {
+                            "op": "^",
+                            "args": [
+                              "D_p1",
+                              2
+                            ]
+                          },
+                          {
+                            "op": "^",
+                            "args": [
+                              "l_1",
+                              2
+                            ]
+                          }
+                        ]
+                      },
+                      1.5
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "D_p1"
+        ]
+      }
+    },
+    {
+      "lhs": "g_2",
+      "rhs": {
+        "op": "-",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1,
+                  {
+                    "op": "*",
+                    "args": [
+                      3,
+                      "D_p2",
+                      "l_2"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "-",
+                "args": [
+                  {
+                    "op": "^",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          "D_p2",
+                          "l_2"
+                        ]
+                      },
+                      3
+                    ]
+                  },
+                  {
+                    "op": "^",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          {
+                            "op": "^",
+                            "args": [
+                              "D_p2",
+                              2
+                            ]
+                          },
+                          {
+                            "op": "^",
+                            "args": [
+                              "l_2",
+                              2
+                            ]
+                          }
+                        ]
+                      },
+                      1.5
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "D_p2"
+        ]
+      }
+    },
+    {
+      "lhs": "K_12",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              2,
+              3.14159265358979,
+              {
+                "op": "+",
+                "args": [
+                  "D_1",
+                  "D_2"
+                ]
+              },
+              {
+                "op": "+",
+                "args": [
+                  "D_p1",
+                  "D_p2"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "+",
+                    "args": [
+                      "D_p1",
+                      "D_p2"
+                    ]
+                  },
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          "D_p1",
+                          "D_p2"
+                        ]
+                      },
+                      {
+                        "op": "*",
+                        "args": [
+                          2,
+                          {
+                            "op": "sqrt",
+                            "args": [
+                              {
+                                "op": "+",
+                                "args": [
+                                  {
+                                    "op": "^",
+                                    "args": [
+                                      "g_1",
+                                      2
+                                    ]
+                                  },
+                                  {
+                                    "op": "^",
+                                    "args": [
+                                      "g_2",
+                                      2
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      8,
+                      {
+                        "op": "+",
+                        "args": [
+                          "D_1",
+                          "D_2"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "sqrt",
+                        "args": [
+                          {
+                            "op": "+",
+                            "args": [
+                              {
+                                "op": "^",
+                                "args": [
+                                  "c_bar_1",
+                                  2
+                                ]
+                              },
+                              {
+                                "op": "^",
+                                "args": [
+                                  "c_bar_2",
+                                  2
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "+",
+                        "args": [
+                          "D_p1",
+                          "D_p2"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "default_conditions",
+      "description": "Default parameters: T=298 K, μ=1.83×10⁻⁵ Pa·s, ρ_p=1000 kg/m³, λ_air=6.86×10⁻⁸ m, D_p1=D_p2=100 nm. Both particles are identical in the transition regime (Kn=1.372). Checks the full chain: Kn, C_c, D, c_bar, l, g, K_12. K_12 = 1.491×10⁻¹⁵ m³/s (Table 13.1 benchmark).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "Kn_1",
+          "time": 0.0,
+          "expected": 1.372,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        },
+        {
+          "variable": "Kn_2",
+          "time": 0.0,
+          "expected": 1.372,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        },
+        {
+          "variable": "C_c1",
+          "time": 0.0,
+          "expected": 2.970764756761217,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "C_c2",
+          "time": 0.0,
+          "expected": 2.970764756761217,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "m_1",
+          "time": 0.0,
+          "expected": 5.235987755982983e-19,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "D_1",
+          "time": 0.0,
+          "expected": 7.08672520203204e-10,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "c_bar_1",
+          "time": 0.0,
+          "expected": 0.1414557218874665,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "l_1",
+          "time": 0.0,
+          "expected": 1.275748856179422e-08,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "g_1",
+          "time": 0.0,
+          "expected": 6.895371895082644e-09,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "K_12",
+          "time": 0.0,
+          "expected": 1.491012954151819e-15,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "continuum_limit",
+      "description": "Large particles D_p1=D_p2=10 µm: Kn = 2×6.86e-8/10e-6 = 0.01372 ≪ 1, firmly in the continuum regime. K_12 should approach the continuum limit 8kT/(3μ) = 5.995×10⁻¹⁶ m³/s (Eq. 13.52) to within ~2% (slip-correction deviation at Kn=0.014). K_12 = 6.059×10⁻¹⁶; ratio to K_continuum = 1.011.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "D_p1": 1e-05,
+        "D_p2": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "K_12",
+          "time": 0.0,
+          "expected": 6.058699993308035e-16,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "equal_size_1um",
+      "description": "Equal particles D_p1=D_p2=1 µm: transition-to-continuum regime (Kn = 0.137). K_12 = 6.864×10⁻¹⁶ m³/s. This is the benchmark for the size-dependence test: K_12 at unequal sizes must exceed this value.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "D_p1": 1e-06,
+        "D_p2": 1e-06
+      },
+      "assertions": [
+        {
+          "variable": "K_12",
+          "time": 0.0,
+          "expected": 6.863899942138817e-16,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "unequal_sizes_coag_enhancement",
+      "description": "Unequal particles D_p1=0.1 µm, D_p2=1 µm: K_12 = 4.997×10⁻¹⁵ m³/s — 7.3× larger than the equal-1-µm case. Physically, the small particle has a much larger D_i and c_bar_i, so it collides far more often with the large particle than two 1-µm particles collide with each other. Confirms the size-dependence physics of Table 13.1.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "D_p1": 1e-07,
+        "D_p2": 1e-06
+      },
+      "assertions": [
+        {
+          "variable": "K_12",
+          "time": 0.0,
+          "expected": 4.996599756674888e-15,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "temperature_sensitivity",
+      "description": "Elevated temperature T=350 K with default D_p=100 nm: K_12 = 1.727×10⁻¹⁵ m³/s — 15.8% higher than the 298 K default. K_12 ∝ T (D_i ∝ T, c_bar ∝ √T, the T dominates the denominator Fuchs correction). Exercises the T wiring across the full chain.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 350.0
+      },
+      "assertions": [
+        {
+          "variable": "D_1",
+          "time": 0.0,
+          "expected": 8.323334968829579e-10,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "K_12",
+          "time": 0.0,
+          "expected": 1.727344394759691e-15,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "K12_vs_particle_diameter",
+      "description": "K_12 as a function of particle 1 diameter D_p1 (log sweep 1 nm to 100 µm) with D_p2 fixed at 100 nm. Shows the three transport regimes: free-molecular (D_p1 ≪ λ_air, K_12 large), transition, and continuum (D_p1 ≫ λ_air, K_12 approaches a plateau). The enhancement of K_12 for very small or very large D_p1 relative to D_p2=100 nm demonstrates the size-differential coagulation effect of Table 13.1.",
+      "initial_state": {},
+      "parameters": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "D_p1",
+            "range": {
+              "start": 1e-09,
+              "stop": 0.0001,
+              "count": 61,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "K12_vs_Dp1",
+          "type": "line",
+          "description": "Brownian coagulation coefficient K_12 vs particle diameter D_p1 (D_p2 = 100 nm fixed). Illustrates the regime dependence: enhancement at small D_p1 (free-molecular, high D_1) and the approach to the continuum plateau at large D_p1.",
+          "x": {
+            "variable": "D_p1",
+            "label": "Particle 1 diameter D_p1 (m)"
+          },
+          "y": {
+            "variable": "K_12",
+            "label": "K_12 (m³/s)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "K12_vs_temperature",
+      "description": "K_12 as a function of temperature T from 200 K to 350 K (linear sweep) for equal 100 nm particles. K_12 increases approximately linearly with T because D_i ∝ T (Eq. 13.47) dominates the weak √T dependence of c_bar. Relevant to cloud-resolving models where particle dynamics vary across the tropospheric temperature range.",
+      "initial_state": {},
+      "parameters": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "T",
+            "range": {
+              "start": 200.0,
+              "stop": 350.0,
+              "count": 31,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "K12_vs_T",
+          "type": "line",
+          "description": "K_12 vs temperature T for equal D_p=100 nm particles. Shows the near-linear temperature dependence of the Brownian coagulation coefficient.",
+          "x": {
+            "variable": "T",
+            "label": "Temperature T (K)"
+          },
+          "y": {
+            "variable": "K_12",
+            "label": "K_12 (m³/s)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

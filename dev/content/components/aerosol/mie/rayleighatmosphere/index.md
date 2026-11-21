@@ -1,0 +1,363 @@
+---
+title: "RayleighAtmosphere"
+slug: "rayleighatmosphere"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["mie"]
+domain: "aerosol"
+subdomain: "mie"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/mie/rayleigh_atmosphere.esm"
+reference: "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 15, Problem 15.1A (Rayleigh scattering coefficient b_sg) and Eq. 15.36 (maximum visual range x_v_max). Migrated from Aerosol.jl src/mie_scattering.jl `RayleighAtmosphere` (esm-8sm)."
+description: "Rayleigh scattering coefficient and maximum visual range for a clean Rayleigh atmosphere. The scattering coefficient b_sg scales as λ^-4 (Seinfeld & Pandis 2006, Chapter 15, Problem 15.1A), and the maximum visual range x_v_max = 3.912/b_sg (Eq. 15.36). Both outputs depend only on temperature, pressure, and wavelength — no aerosol loading. Migrated from Aerosol.jl src/mie_scattering.jl `RayleighAtmosphere`."
+tags: ["aerosol", "mie", "model", "rayleigh", "visibility", "optical"]
+---
+
+## Description
+
+Rayleigh scattering coefficient and maximum visual range for a clean Rayleigh atmosphere. The scattering coefficient b_sg scales as λ^-4 (Seinfeld & Pandis 2006, Chapter 15, Problem 15.1A), and the maximum visual range x_v_max = 3.912/b_sg (Eq. 15.36). Both outputs depend only on temperature, pressure, and wavelength — no aerosol loading. Migrated from Aerosol.jl src/mie_scattering.jl `RayleighAtmosphere`.
+
+## Reference
+
+Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 15, Problem 15.1A (Rayleigh scattering coefficient b_sg) and Eq. 15.36 (maximum visual range x_v_max). Migrated from Aerosol.jl src/mie_scattering.jl `RayleighAtmosphere` (esm-8sm).
+
+_source_ref: Aerosol.jl@main:src/mie_scattering.jl:329
+
+Upstream `RayleighAtmosphere` is an MTK `@component` with four `@constants` (b_sg_ref=11.4e-6 m^-1, T_ref=293.0 K, p_ref=101325.0 Pa, λ_ref=550.0e-9 m), three `@parameters` (T, p, λ), and two time-indexed `@variables` (b_sg, x_v_max). The two algebraic equations are:
+  • b_sg ~ b_sg_ref * (T_ref/T) * (p/p_ref) * (λ_ref/λ)^4     [Problem 15.1A]
+  • x_v_max ~ 3.912 / b_sg                                      [Eq. 15.36]
+
+ESM representation:
+  The four constants are folded directly into the b_sg expression. T, p, and λ (renamed to `λ` in this ESM) are `parameter` variables. b_sg is a `state` variable (primary computed quantity, with its defining equation in the `equations` array). x_v_max is an `observed` variable (diagnostic quantity derived from b_sg, with its expression inline). The system is purely algebraic — no ODE integration.
+
+Physics: Rayleigh scattering arises from molecular-scale density fluctuations. The λ^-4 dependence explains why the sky is blue (stronger scattering at short wavelengths). The b_sg formula is a semi-empirical fit valid at sea-level reference conditions, scaled linearly with p/p_ref (ideal gas: number density ∝ p at fixed T) and inversely with T (number density ∝ 1/T). The reference coefficient b_sg_ref = 11.4×10^-6 m^-1 is the Rayleigh scattering coefficient at T=293 K, p=1 atm, λ=550 nm.
+
+Topological substitution order: b_sg depends only on parameters, so it resolves first; x_v_max then depends on b_sg (now known) and is computed second. The dependency graph is acyclic — no SimulationError.
+
+Tolerance rationale (model-level rel=1e-9): purely algebraic system, no ODE integration. All expressions are finite compositions of *, /, ^ in float64; round-off is ~1e-15 relative. rel=1e-9 leaves six orders of magnitude of headroom._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `T` | `K` | `293.0` | Atmospheric temperature. Default is the reference temperature 293 K (approximately 20°C). |
+| `p` | `Pa` | `101325.0` | Atmospheric pressure. Default is 1 atm (101325 Pa) at sea level. |
+| `λ` | `m` | `5.5e-07` | Wavelength of light. Default is 550 nm (green light, near the peak of the solar spectrum). |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `b_sg` | `m^-1` |  | Rayleigh (gas-phase) scattering coefficient at temperature T, pressure p, and wavelength λ. Scales as λ^-4, giving the characteristic blue colour of the sky. Reference value 11.4×10^-6 m^-1 at T=293 K, p=1 atm, λ=550 nm (Seinfeld & Pandis 2006, Problem 15.1A). |
+| `x_v_max` | `m` |  | Maximum visual range in a clean Rayleigh atmosphere. Equal to 3.912/b_sg (Seinfeld & Pandis 2006, Eq. 15.36). Represents the upper bound on visibility in the absence of aerosol scattering and absorption. |
+
+## Observed expressions
+
+$$
+b_{sg} = 1.14 \times 10^{-5} \cdot \frac{293.0}{T} \cdot \frac{p}{101325.0} \cdot \frac{5.5 \times 10^{-7}}{λ}^{4}
+$$
+_Rayleigh (gas-phase) scattering coefficient at temperature T, pressure p, and wavelength λ. Scales as λ^-4, giving the characteristic blue colour of the sky. Reference value 11.4×10^-6 m^-1 at T=293 K, p=1 atm, λ=550 nm (Seinfeld & Pandis 2006, Problem 15.1A)._
+
+$$
+x_{v\,max} = \frac{3.912}{b_{sg}}
+$$
+_Maximum visual range in a clean Rayleigh atmosphere. Equal to 3.912/b_sg (Seinfeld & Pandis 2006, Eq. 15.36). Represents the upper bound on visibility in the absence of aerosol scattering and absorption._
+
+## Analyses
+
+### rayleigh_wavelength_dependence
+
+Sweep wavelength λ from 300 nm (near-UV) to 800 nm (near-IR) at reference temperature and pressure. b_sg scales as λ^-4 (Rayleigh scattering), so it drops by a factor of (8/3)^4 ≈ 20 across the visible range. x_v_max correspondingly increases from ≈ 70 km at 300 nm to ≈ 1400 km at 800 nm. The plot illustrates the physical origin of the blue sky: blue light is scattered far more strongly than red.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `λ`
+
+![Rayleigh scattering coefficient b_sg vs. wavelength λ. Demonstrates the λ^-4 power law: short (blue) wavelengths are scattered much more strongly than long (red) wavelengths.](/plots/aerosol/mie/rayleighatmosphere/rayleigh_wavelength_dependence-scattering_coefficient_vs_wavelength.png)
+
+![Maximum visual range x_v_max vs. wavelength λ. Inversely proportional to b_sg; grows steeply toward the red end of the spectrum.](/plots/aerosol/mie/rayleighatmosphere/rayleigh_wavelength_dependence-visual_range_vs_wavelength.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 15, Problem 15.1A (Rayleigh scattering coefficient b_sg) and Eq. 15.36 (maximum visual range x_v_max). Migrated from Aerosol.jl src/mie_scattering.jl `RayleighAtmosphere` (esm-8sm).",
+    "notes": "source_ref: Aerosol.jl@main:src/mie_scattering.jl:329\n\nUpstream `RayleighAtmosphere` is an MTK `@component` with four `@constants` (b_sg_ref=11.4e-6 m^-1, T_ref=293.0 K, p_ref=101325.0 Pa, λ_ref=550.0e-9 m), three `@parameters` (T, p, λ), and two time-indexed `@variables` (b_sg, x_v_max). The two algebraic equations are:\n  • b_sg ~ b_sg_ref * (T_ref/T) * (p/p_ref) * (λ_ref/λ)^4     [Problem 15.1A]\n  • x_v_max ~ 3.912 / b_sg                                      [Eq. 15.36]\n\nESM representation:\n  The four constants are folded directly into the b_sg expression. T, p, and λ (renamed to `λ` in this ESM) are `parameter` variables. b_sg is a `state` variable (primary computed quantity, with its defining equation in the `equations` array). x_v_max is an `observed` variable (diagnostic quantity derived from b_sg, with its expression inline). The system is purely algebraic — no ODE integration.\n\nPhysics: Rayleigh scattering arises from molecular-scale density fluctuations. The λ^-4 dependence explains why the sky is blue (stronger scattering at short wavelengths). The b_sg formula is a semi-empirical fit valid at sea-level reference conditions, scaled linearly with p/p_ref (ideal gas: number density ∝ p at fixed T) and inversely with T (number density ∝ 1/T). The reference coefficient b_sg_ref = 11.4×10^-6 m^-1 is the Rayleigh scattering coefficient at T=293 K, p=1 atm, λ=550 nm.\n\nTopological substitution order: b_sg depends only on parameters, so it resolves first; x_v_max then depends on b_sg (now known) and is computed second. The dependency graph is acyclic — no SimulationError.\n\nTolerance rationale (model-level rel=1e-9): purely algebraic system, no ODE integration. All expressions are finite compositions of *, /, ^ in float64; round-off is ~1e-15 relative. rel=1e-9 leaves six orders of magnitude of headroom."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {
+    "T": {
+      "type": "parameter",
+      "units": "K",
+      "default": 293.0,
+      "description": "Atmospheric temperature. Default is the reference temperature 293 K (approximately 20°C)."
+    },
+    "p": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 101325.0,
+      "description": "Atmospheric pressure. Default is 1 atm (101325 Pa) at sea level."
+    },
+    "λ": {
+      "type": "parameter",
+      "units": "m",
+      "default": 5.5e-07,
+      "description": "Wavelength of light. Default is 550 nm (green light, near the peak of the solar spectrum)."
+    },
+    "b_sg": {
+      "type": "unknown",
+      "units": "m^-1",
+      "description": "Rayleigh (gas-phase) scattering coefficient at temperature T, pressure p, and wavelength λ. Scales as λ^-4, giving the characteristic blue colour of the sky. Reference value 11.4×10^-6 m^-1 at T=293 K, p=1 atm, λ=550 nm (Seinfeld & Pandis 2006, Problem 15.1A)."
+    },
+    "x_v_max": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Maximum visual range in a clean Rayleigh atmosphere. Equal to 3.912/b_sg (Seinfeld & Pandis 2006, Eq. 15.36). Represents the upper bound on visibility in the absence of aerosol scattering and absorption."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "b_sg",
+      "rhs": {
+        "op": "*",
+        "args": [
+          1.14e-05,
+          {
+            "op": "/",
+            "args": [
+              293.0,
+              "T"
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              "p",
+              101325.0
+            ]
+          },
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  5.5e-07,
+                  "λ"
+                ]
+              },
+              4
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "x_v_max",
+      "rhs": {
+        "op": "/",
+        "args": [
+          3.912,
+          "b_sg"
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "default_conditions",
+      "description": "All parameters at reference values (T=293 K, p=1 atm, λ=550 nm). All scaling ratios are exactly 1, so b_sg = b_sg_ref = 11.4×10^-6 m^-1 exactly. x_v_max = 3.912/11.4e-6 = 343157.89... m ≈ 343 km.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "b_sg",
+          "time": 0.0,
+          "expected": 1.14e-05,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "x_v_max",
+          "time": 0.0,
+          "expected": 343157.8947368421,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "b_sg",
+          "time": 1.0,
+          "expected": 1.14e-05,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "x_v_max",
+          "time": 1.0,
+          "expected": 343157.8947368421,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "warm_atmosphere",
+      "description": "Warm atmosphere: T=310 K, p=1 atm, λ=550 nm. b_sg scales as T_ref/T = 293/310, so b_sg = 11.4e-6*293/310 ≈ 1.0775e-5 m^-1. Higher temperature → lower number density → weaker scattering → longer visual range.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 310.0
+      },
+      "assertions": [
+        {
+          "variable": "b_sg",
+          "time": 0.0,
+          "expected": 1.0774838709677418e-05,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "x_v_max",
+          "time": 0.0,
+          "expected": 363068.08,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        }
+      ]
+    },
+    {
+      "id": "half_pressure",
+      "description": "Half sea-level pressure: T=293 K, p=50662.5 Pa (= p_ref/2), λ=550 nm. b_sg scales linearly with p, so b_sg = 11.4e-6*0.5 = 5.7e-6 m^-1 exactly. Visual range doubles to 686315.79... m ≈ 686 km.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "p": 50662.5
+      },
+      "assertions": [
+        {
+          "variable": "b_sg",
+          "time": 0.0,
+          "expected": 5.7e-06,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "x_v_max",
+          "time": 0.0,
+          "expected": 686315.7894736842,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "blue_light",
+      "description": "Blue light: T=293 K, p=1 atm, λ=400 nm. Rayleigh scattering scales as λ^-4; (550/400)^4 = (11/8)^4 = 14641/4096 ≈ 3.5745. b_sg ≈ 4.0749e-5 m^-1, nearly 3.6× stronger than at 550 nm. Visual range drops to ≈ 96 km — the λ^-4 dependence is the physical reason the sky is blue and the Sun appears yellow/red.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "λ": 4e-07
+      },
+      "assertions": [
+        {
+          "variable": "b_sg",
+          "time": 0.0,
+          "expected": 4.074887695312499e-05,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "x_v_max",
+          "time": 0.0,
+          "expected": 96002.646,
+          "tolerance": {
+            "rel": 1e-05
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "rayleigh_wavelength_dependence",
+      "description": "Sweep wavelength λ from 300 nm (near-UV) to 800 nm (near-IR) at reference temperature and pressure. b_sg scales as λ^-4 (Rayleigh scattering), so it drops by a factor of (8/3)^4 ≈ 20 across the visible range. x_v_max correspondingly increases from ≈ 70 km at 300 nm to ≈ 1400 km at 800 nm. The plot illustrates the physical origin of the blue sky: blue light is scattered far more strongly than red.",
+      "initial_state": {},
+      "parameters": {
+        "T": 293.0,
+        "p": 101325.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "λ",
+            "range": {
+              "start": 3e-07,
+              "stop": 8e-07,
+              "count": 51,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "scattering_coefficient_vs_wavelength",
+          "type": "line",
+          "description": "Rayleigh scattering coefficient b_sg vs. wavelength λ. Demonstrates the λ^-4 power law: short (blue) wavelengths are scattered much more strongly than long (red) wavelengths.",
+          "x": {
+            "variable": "λ",
+            "label": "wavelength λ (m)"
+          },
+          "y": {
+            "variable": "b_sg",
+            "label": "scattering coefficient b_sg (m^-1)"
+          }
+        },
+        {
+          "id": "visual_range_vs_wavelength",
+          "type": "line",
+          "description": "Maximum visual range x_v_max vs. wavelength λ. Inversely proportional to b_sg; grows steeply toward the red end of the spectrum.",
+          "x": {
+            "variable": "λ",
+            "label": "wavelength λ (m)"
+          },
+          "y": {
+            "variable": "x_v_max",
+            "label": "maximum visual range x_v_max (m)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

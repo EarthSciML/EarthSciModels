@@ -1,0 +1,320 @@
+---
+title: "CEDS"
+slug: "ceds"
+domains: ["earthsci_data"]
+component_types: ["model"]
+domain: "earthsci_data"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/earthsci_data/ceds.esm"
+reference: "https://doi.org/10.5194/gmd-11-369-2018"
+description: "CEDS (Community Emissions Data System) global gridded anthropogenic emissions data loader. Provides monthly surface emission fluxes (kg m⁻² s⁻¹) at 0.5° × 0.5° global resolution for 10 species: BC, CH4, CO, CO2, N2O, NH3, NMVOC, NOx, OC, SO2."
+tags: ["earthsci_data", "model", "emissions", "anthropogenic", "ceds", "monthly", "data_loader", "surface_flux", "global", "multi_species", "regridding_model"]
+---
+
+## Description
+
+CEDS (Community Emissions Data System) global gridded anthropogenic emissions data loader. Provides monthly surface emission fluxes (kg m⁻² s⁻¹) at 0.5° × 0.5° global resolution for 10 species: BC, CH4, CO, CO2, N2O, NH3, NMVOC, NOx, OC, SO2.
+
+Data source: CEDS-CMIP release v20250421 (CEDS-CMIP-2025-04-18), available from the ORNL ESGF THREDDS server. Files are NetCDF with dimensions (time, sector, lat, lon) and variable name {species}_em_anthro. The sector dimension has 8 entries (Agriculture, Energy, Industrial, Transportation, Residential/Commercial/Other, Solvents, Waste, International Shipping); the data_loaders emit sector-summed total anthropogenic flux.
+
+Temporal coverage: 1750–2023, monthly. Data is organized in 50-year file chunks: 1750-1799, 1800-1849, 1850-1899, 1900-1949, 1950-1999, and 2000-2023. This ESM documents the modern-era chunk (2000-2023) as the primary temporal range. For simulations outside 2000-2023, different chunk file URLs are required (see reference.notes).
+
+The gt-p3ep (@register_symbolic interp_unsafe) blocking gap is resolved by the data_loaders §8 mechanism: the runtime handles file download, sector-summing, temporal interpolation, and spatial regridding from the native 0.5°×0.5° lat/lon grid to the model domain. Each species equation is a direct pass-through: {species}_em_anthro(t) ~ CEDS_{species}.{species}_em_anthro. No registered functions remain in the migrated component.
+
+Longitude convention: the raw CEDS NC files use [0, 360) longitude. The upstream loadslice! reorders to [−180, 180) via a permutation vector computed at FileSet construction time. This ESM documents the reordered [−180, 180) coordinate as the effective spatial extent.
+
+Coupling: lon and lat parameters are coupled to the simulation domain via param_to_var when composed into a CoupledSystem. Unlike EDGAR, CEDS has no lev parameter (surface-only flux).
+
+Migrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b src/ceds.jl:313 (CEDS constructor, esm-4ega).
+
+[esm-3nc.3] Split at 0.7.0 into ten pure-I/O species loaders (ceds_<species>_loader.esm) + this regridding model per RFC pure-io-data-loaders §6/§7; at esm 1.0.0 those ten files are merged BACK into this one, which now holds both the CEDS model and the ten `data_sources` entries (CEDS_BC … CEDS_SO2) that model consumes. Each merged file's own metadata is preserved verbatim under its registry entry's metadata.merged_file_metadata. Each loader is referenced as the subsystem CEDS_<species>; every species flux is regridded conservatively (cell-centered emissions).
+
+## Reference
+
+_source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/ceds.jl:313
+
+Upstream constructor CEDS(domaininfo; species=CEDS_SPECIES, sectors=nothing, mirror=..., version=..., data_version=..., name=:CEDS, stream=true, spatial_interp=:linear) creates an MTK System with:
+  - @parameters: lon (rad), lat (rad) from domaininfo pvars (x→lon or y→lat)
+  - @parameters: t_ref (s) — reference epoch, implicitly set from get_tref(domaininfo)
+  - For each species in the species list:
+      fs = CEDSFileSet(sp, starttime, endtime; mirror, version, data_version, sectors)
+      varname = "$(sp)_em_anthro"
+      itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo; stream)
+      eq, discretes, constants, info = create_interp_equation(itp, "", t, t_ref, [x, y]; spatial_interp)
+      → one observed equation per species: {sp}_em_anthro(t) ~ interp_unsafe(...)
+  - discrete_events: build_interp_event fires monthly to reload NC data buffers
+  - metadata: Dict(CoupleType => CEDSCoupler, SysDomainInfo => domaininfo)
+  - No lev parameter (CEDS is surface-only)
+
+CEDSFileSet internals:
+  - Opens all 50-year chunk files as aggregated NCDataset (NCDatasets.jl aggdim="time")
+  - NC variable: {species}_em_anthro, dimensions (time, sector, lat, lon) in that order
+  - Fill value from _FillValue attribute (default 1e20f0); fill values replaced with 0.0 in loadslice!
+  - Longitude reordering: raw NC lons in [0, 360); lon_perm computed at construction time to sort to [-180, 180)
+  - loadslice! sums across sector dimension (or selects specified sectors) then applies lon_perm permutation
+  - DataFrequencyInfo: monthly frequency, tick times from CF-time decoded 'time' variable
+
+gt-p3ep resolution: the @register_symbolic interp_unsafe pattern is replaced by the data_loaders §8 mechanism. CEDS_{species}.{species}_em_anthro is the loader variable that the runtime downloads, sector-sums, and interpolates spatiotemporally to (lon, lat, t). The runtime implicitly handles the build_interp_event discrete callbacks based on data_loaders.temporal.frequency = P1M.
+
+Chunk file structure (historical era):
+  Chunk boundaries: 1750-1799, 1800-1849, 1850-1899, 1900-1949, 1950-1999, 2000-2023.
+  For year Y, the chunk file is:
+    {species}-em-anthro_input4MIPs_emissions_CMIP_CEDS-CMIP-2025-04-18_gn_{y1}01-{y2}12.nc
+  where (y1, y2) = the chunk bounds containing Y.
+  For the 1950-1999 era, y1=1950, y2=1999. URL path subdirectory pattern is the same.
+  This ESM data_loaders document the 2000-2023 chunk (static URL, no date substitution needed).
+
+Quantitative reference values from test/ceds_test.jl (EarthSciData.jl@830435a, simulation date 2016-05-01):
+  SO2 at Beijing area (lon=116°E, lat=39°N): 1e-12 < value < 1e-6 kg/m²/s
+  SO2 at Sahara (lon=10°E, lat=25°N): < 1% of Beijing value
+  CO at Beijing: positive and different from SO2
+
+Sector indices (0-based in upstream, 0 to 7):
+  0: Agriculture
+  1: Energy
+  2: Industrial
+  3: Transportation
+  4: Residential, Commercial, Other
+  5: Solvents production and application
+  6: Waste
+  7: International Shipping
+
+Coupling with GEOS-FP (from test/ceds_test.jl):
+  couple(CEDS(...), GEOSFP(...)) couples CEDS.lat ↔ GEOSFP.lat and CEDS.lon ↔ GEOSFP.lon.
+  No lev coupling (CEDS has no lev parameter).
+
+Note on spatial_interp: :linear (default) uses full bilinear interpolation; :nearest uses nearest-grid + time-only linear interpolation (~8x speedup when queries are always at grid-point centres). (Pure-IO migration note: this upstream :linear/bilinear default is superseded — the regridding model regrids each cell-centered emissions flux conservatively, declared in the model `regrid` block; see the esm-3nc.3 section below.)
+
+--- esm-3nc.3 pure-IO split ---
+This is the regridding-model half of the pure-IO loader migration (RFC pure-io-data-loaders §6/§7, bead esm-3nc.3). The pre-migration ceds.esm carried both this coupler model AND ten co-located data_loaders.CEDS_<species> blocks (each with the now-removed `spatial` and `regridding` sub-blocks). Those loaders became, at 0.7.0, ten pure-I/O files components/earthsci_data/ceds_<species>_loader.esm — one per CEDS species, because each species is a separate NetCDF FileSet and a {"ref"} target had to be a single component. At esm 1.0.0 they are ten `data_sources` entries CEDS_BC … CEDS_SO2 declared in THIS file: a data source is not a component, so it neither needs nor may be a subsystem, and the ten standalone files are gone. Each {species}_em_anthro observed references its regridded loader field directly as CEDS_<species>.<species>_em_anthro.
+Reprojection (RFC §6 step 2): CEDS's native grid.crs.projection is 'longlat' (geographic WGS84), so the reprojection rule selected by convention is ESD reprojection/longlat.esm (esd-47z.1) — the IDENTITY transform.
+Regridding (RFC §6 step 3 / §5.2): every CEDS species flux is a cell-centered scalar → conservative area-weighted overlap join (ESD regridding/conservative_regrid_overlap_join.esm), declared in the model `regrid` block.
+
+Coupler identity: this model was serialized with the model-level field `coupletype: "CEDSCoupler"`, the EarthSciMLBase `CoupleType` metadata tag naming the Julia coupler struct that `EarthSciMLBase.couple2` dispatches on to find this component's pairwise coupling rules. The esm schema defined `coupletype` only before 0.8.0 ("informational label identifying this system's role in coupling"); 0.8.0 removed it in favour of explicit coupling — `coupling` entries naming components directly, or `coupling_roles` + `coupling_import` in a coupling-library file (esm-spec §10.9–§10.11). esm 1.0.0 has no model-level coupler-identity field, so the tag is recorded here to keep it recoverable.
+
+Regridding intent: this model was serialized with the model-level `regrid` map, one entry per variable naming the kernel that carries the loaded native-grid field onto the consuming model's grid. The esm schema defined `regrid` only before 0.8.0. esm 1.0.0 states (esm-spec §8.6) that a data source performs no regridding and that there is NO `Model.regrid` map: the carrier is the `variable_map` entry's `transform` field on the coupling edge that consumes the field (§10.4/§10.5) — an ordinary `aggregate` expression, typically an `apply_expression_template` invocation of an imported overlap-weight library. No such coupling edge exists in this document, so the map is recorded here VERBATIM to keep every field recoverable. This is a demotion from a structured field to prose, not an equivalent: the transform expression still has to be authored on whichever coupling edge consumes these fields.
+
+`regrid` (verbatim):
+{
+  "BC_em_anthro": {
+    "method": "conservative",
+    "description": "BC sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `BC_em_anthro` observed as CEDS_BC.BC_em_anthro."
+  },
+  "CH4_em_anthro": {
+    "method": "conservative",
+    "description": "CH4 sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `CH4_em_anthro` observed as CEDS_CH4.CH4_em_anthro."
+  },
+  "CO_em_anthro": {
+    "method": "conservative",
+    "description": "CO sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `CO_em_anthro` observed as CEDS_CO.CO_em_anthro."
+  },
+  "CO2_em_anthro": {
+    "method": "conservative",
+    "description": "CO2 sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `CO2_em_anthro` observed as CEDS_CO2.CO2_em_anthro."
+  },
+  "N2O_em_anthro": {
+    "method": "conservative",
+    "description": "N2O sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `N2O_em_anthro` observed as CEDS_N2O.N2O_em_anthro."
+  },
+  "NH3_em_anthro": {
+    "method": "conservative",
+    "description": "NH3 sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `NH3_em_anthro` observed as CEDS_NH3.NH3_em_anthro."
+  },
+  "NMVOC_em_anthro": {
+    "method": "conservative",
+    "description": "NMVOC sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `NMVOC_em_anthro` observed as CEDS_NMVOC.NMVOC_em_anthro."
+  },
+  "NOx_em_anthro": {
+    "method": "conservative",
+    "description": "NOx sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `NOx_em_anthro` observed as CEDS_NOx.NOx_em_anthro."
+  },
+  "OC_em_anthro": {
+    "method": "conservative",
+    "description": "OC sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `OC_em_anthro` observed as CEDS_OC.OC_em_anthro."
+  },
+  "SO2_em_anthro": {
+    "method": "conservative",
+    "description": "SO2 sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `SO2_em_anthro` observed as CEDS_SO2.SO2_em_anthro."
+  }
+}_
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `lon` | `rad` | `0.0` | Longitude of the model grid point (radians). Coupled to the simulation domain's longitude coordinate via param_to_var when composed into a CoupledSystem. Used as the x-axis coordinate for CEDS data interpolation. |
+| `lat` | `rad` | `0.0` | Latitude of the model grid point (radians). Coupled to the simulation domain's latitude coordinate via param_to_var when composed into a CoupledSystem. Used as the y-axis coordinate for CEDS data interpolation. |
+| `BC_em_anthro` | `kg/m^2/s` |  | Black carbon (BC) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values. Zero-filled where no emissions data are present. |
+| `CH4_em_anthro` | `kg/m^2/s` |  | Methane (CH4) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values. |
+| `CO_em_anthro` | `kg/m^2/s` |  | Carbon monoxide (CO) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values. |
+| `CO2_em_anthro` | `kg/m^2/s` |  | Carbon dioxide (CO2) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values. |
+| `N2O_em_anthro` | `kg/m^2/s` |  | Nitrous oxide (N2O) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values. |
+| `NH3_em_anthro` | `kg/m^2/s` |  | Ammonia (NH3) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values. |
+| `NMVOC_em_anthro` | `kg/m^2/s` |  | Non-methane volatile organic compounds (NMVOC) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values. |
+| `NOx_em_anthro` | `kg/m^2/s` |  | Nitrogen oxides (NOx) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values. |
+| `OC_em_anthro` | `kg/m^2/s` |  | Organic carbon (OC) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values. |
+| `SO2_em_anthro` | `kg/m^2/s` |  | Sulfur dioxide (SO2) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values. |
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/ceds.jl:313\n\nUpstream constructor CEDS(domaininfo; species=CEDS_SPECIES, sectors=nothing, mirror=..., version=..., data_version=..., name=:CEDS, stream=true, spatial_interp=:linear) creates an MTK System with:\n  - @parameters: lon (rad), lat (rad) from domaininfo pvars (x→lon or y→lat)\n  - @parameters: t_ref (s) — reference epoch, implicitly set from get_tref(domaininfo)\n  - For each species in the species list:\n      fs = CEDSFileSet(sp, starttime, endtime; mirror, version, data_version, sectors)\n      varname = \"$(sp)_em_anthro\"\n      itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo; stream)\n      eq, discretes, constants, info = create_interp_equation(itp, \"\", t, t_ref, [x, y]; spatial_interp)\n      → one observed equation per species: {sp}_em_anthro(t) ~ interp_unsafe(...)\n  - discrete_events: build_interp_event fires monthly to reload NC data buffers\n  - metadata: Dict(CoupleType => CEDSCoupler, SysDomainInfo => domaininfo)\n  - No lev parameter (CEDS is surface-only)\n\nCEDSFileSet internals:\n  - Opens all 50-year chunk files as aggregated NCDataset (NCDatasets.jl aggdim=\"time\")\n  - NC variable: {species}_em_anthro, dimensions (time, sector, lat, lon) in that order\n  - Fill value from _FillValue attribute (default 1e20f0); fill values replaced with 0.0 in loadslice!\n  - Longitude reordering: raw NC lons in [0, 360); lon_perm computed at construction time to sort to [-180, 180)\n  - loadslice! sums across sector dimension (or selects specified sectors) then applies lon_perm permutation\n  - DataFrequencyInfo: monthly frequency, tick times from CF-time decoded 'time' variable\n\ngt-p3ep resolution: the @register_symbolic interp_unsafe pattern is replaced by the data_loaders §8 mechanism. CEDS_{species}.{species}_em_anthro is the loader variable that the runtime downloads, sector-sums, and interpolates spatiotemporally to (lon, lat, t). The runtime implicitly handles the build_interp_event discrete callbacks based on data_loaders.temporal.frequency = P1M.\n\nChunk file structure (historical era):\n  Chunk boundaries: 1750-1799, 1800-1849, 1850-1899, 1900-1949, 1950-1999, 2000-2023.\n  For year Y, the chunk file is:\n    {species}-em-anthro_input4MIPs_emissions_CMIP_CEDS-CMIP-2025-04-18_gn_{y1}01-{y2}12.nc\n  where (y1, y2) = the chunk bounds containing Y.\n  For the 1950-1999 era, y1=1950, y2=1999. URL path subdirectory pattern is the same.\n  This ESM data_loaders document the 2000-2023 chunk (static URL, no date substitution needed).\n\nQuantitative reference values from test/ceds_test.jl (EarthSciData.jl@830435a, simulation date 2016-05-01):\n  SO2 at Beijing area (lon=116°E, lat=39°N): 1e-12 < value < 1e-6 kg/m²/s\n  SO2 at Sahara (lon=10°E, lat=25°N): < 1% of Beijing value\n  CO at Beijing: positive and different from SO2\n\nSector indices (0-based in upstream, 0 to 7):\n  0: Agriculture\n  1: Energy\n  2: Industrial\n  3: Transportation\n  4: Residential, Commercial, Other\n  5: Solvents production and application\n  6: Waste\n  7: International Shipping\n\nCoupling with GEOS-FP (from test/ceds_test.jl):\n  couple(CEDS(...), GEOSFP(...)) couples CEDS.lat ↔ GEOSFP.lat and CEDS.lon ↔ GEOSFP.lon.\n  No lev coupling (CEDS has no lev parameter).\n\nNote on spatial_interp: :linear (default) uses full bilinear interpolation; :nearest uses nearest-grid + time-only linear interpolation (~8x speedup when queries are always at grid-point centres). (Pure-IO migration note: this upstream :linear/bilinear default is superseded — the regridding model regrids each cell-centered emissions flux conservatively, declared in the model `regrid` block; see the esm-3nc.3 section below.)\n\n--- esm-3nc.3 pure-IO split ---\nThis is the regridding-model half of the pure-IO loader migration (RFC pure-io-data-loaders §6/§7, bead esm-3nc.3). The pre-migration ceds.esm carried both this coupler model AND ten co-located data_loaders.CEDS_<species> blocks (each with the now-removed `spatial` and `regridding` sub-blocks). Those loaders became, at 0.7.0, ten pure-I/O files components/earthsci_data/ceds_<species>_loader.esm — one per CEDS species, because each species is a separate NetCDF FileSet and a {\"ref\"} target had to be a single component. At esm 1.0.0 they are ten `data_sources` entries CEDS_BC … CEDS_SO2 declared in THIS file: a data source is not a component, so it neither needs nor may be a subsystem, and the ten standalone files are gone. Each {species}_em_anthro observed references its regridded loader field directly as CEDS_<species>.<species>_em_anthro.\nReprojection (RFC §6 step 2): CEDS's native grid.crs.projection is 'longlat' (geographic WGS84), so the reprojection rule selected by convention is ESD reprojection/longlat.esm (esd-47z.1) — the IDENTITY transform.\nRegridding (RFC §6 step 3 / §5.2): every CEDS species flux is a cell-centered scalar → conservative area-weighted overlap join (ESD regridding/conservative_regrid_overlap_join.esm), declared in the model `regrid` block.\n\nCoupler identity: this model was serialized with the model-level field `coupletype: \"CEDSCoupler\"`, the EarthSciMLBase `CoupleType` metadata tag naming the Julia coupler struct that `EarthSciMLBase.couple2` dispatches on to find this component's pairwise coupling rules. The esm schema defined `coupletype` only before 0.8.0 (\"informational label identifying this system's role in coupling\"); 0.8.0 removed it in favour of explicit coupling — `coupling` entries naming components directly, or `coupling_roles` + `coupling_import` in a coupling-library file (esm-spec §10.9–§10.11). esm 1.0.0 has no model-level coupler-identity field, so the tag is recorded here to keep it recoverable.\n\nRegridding intent: this model was serialized with the model-level `regrid` map, one entry per variable naming the kernel that carries the loaded native-grid field onto the consuming model's grid. The esm schema defined `regrid` only before 0.8.0. esm 1.0.0 states (esm-spec §8.6) that a data source performs no regridding and that there is NO `Model.regrid` map: the carrier is the `variable_map` entry's `transform` field on the coupling edge that consumes the field (§10.4/§10.5) — an ordinary `aggregate` expression, typically an `apply_expression_template` invocation of an imported overlap-weight library. No such coupling edge exists in this document, so the map is recorded here VERBATIM to keep every field recoverable. This is a demotion from a structured field to prose, not an equivalent: the transform expression still has to be authored on whichever coupling edge consumes these fields.\n\n`regrid` (verbatim):\n{\n  \"BC_em_anthro\": {\n    \"method\": \"conservative\",\n    \"description\": \"BC sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `BC_em_anthro` observed as CEDS_BC.BC_em_anthro.\"\n  },\n  \"CH4_em_anthro\": {\n    \"method\": \"conservative\",\n    \"description\": \"CH4 sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `CH4_em_anthro` observed as CEDS_CH4.CH4_em_anthro.\"\n  },\n  \"CO_em_anthro\": {\n    \"method\": \"conservative\",\n    \"description\": \"CO sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `CO_em_anthro` observed as CEDS_CO.CO_em_anthro.\"\n  },\n  \"CO2_em_anthro\": {\n    \"method\": \"conservative\",\n    \"description\": \"CO2 sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `CO2_em_anthro` observed as CEDS_CO2.CO2_em_anthro.\"\n  },\n  \"N2O_em_anthro\": {\n    \"method\": \"conservative\",\n    \"description\": \"N2O sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `N2O_em_anthro` observed as CEDS_N2O.N2O_em_anthro.\"\n  },\n  \"NH3_em_anthro\": {\n    \"method\": \"conservative\",\n    \"description\": \"NH3 sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `NH3_em_anthro` observed as CEDS_NH3.NH3_em_anthro.\"\n  },\n  \"NMVOC_em_anthro\": {\n    \"method\": \"conservative\",\n    \"description\": \"NMVOC sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `NMVOC_em_anthro` observed as CEDS_NMVOC.NMVOC_em_anthro.\"\n  },\n  \"NOx_em_anthro\": {\n    \"method\": \"conservative\",\n    \"description\": \"NOx sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `NOx_em_anthro` observed as CEDS_NOx.NOx_em_anthro.\"\n  },\n  \"OC_em_anthro\": {\n    \"method\": \"conservative\",\n    \"description\": \"OC sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `OC_em_anthro` observed as CEDS_OC.OC_em_anthro.\"\n  },\n  \"SO2_em_anthro\": {\n    \"method\": \"conservative\",\n    \"description\": \"SO2 sector-summed anthropogenic emission flux (kg m⁻² s⁻¹). Cell-centered emissions scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm). Referenced by the `SO2_em_anthro` observed as CEDS_SO2.SO2_em_anthro.\"\n  }\n}"
+  },
+  "tolerance": {
+    "rel": 1e-06
+  },
+  "variables": {
+    "lon": {
+      "type": "parameter",
+      "units": "rad",
+      "default": 0.0,
+      "description": "Longitude of the model grid point (radians). Coupled to the simulation domain's longitude coordinate via param_to_var when composed into a CoupledSystem. Used as the x-axis coordinate for CEDS data interpolation."
+    },
+    "lat": {
+      "type": "parameter",
+      "units": "rad",
+      "default": 0.0,
+      "description": "Latitude of the model grid point (radians). Coupled to the simulation domain's latitude coordinate via param_to_var when composed into a CoupledSystem. Used as the y-axis coordinate for CEDS data interpolation."
+    },
+    "BC_em_anthro": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "description": "Black carbon (BC) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values. Zero-filled where no emissions data are present.",
+      "update": {
+        "kind": "data",
+        "source": "CEDS_BC",
+        "from": {
+          "file_variable": "BC_em_anthro",
+          "description": "Black carbon (BC) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable BC_em_anthro has dimensions (time, sector, lat, lon); the sector dimension (8 entries) is summed to produce the total anthropogenic flux. Longitude reordered from native [0, 360) to [-180, 180) by the upstream loadslice! permutation."
+        }
+      }
+    },
+    "CH4_em_anthro": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "description": "Methane (CH4) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values.",
+      "update": {
+        "kind": "data",
+        "source": "CEDS_CH4",
+        "from": {
+          "file_variable": "CH4_em_anthro",
+          "description": "Methane (CH4) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable CH4_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      }
+    },
+    "CO_em_anthro": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "description": "Carbon monoxide (CO) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values.",
+      "update": {
+        "kind": "data",
+        "source": "CEDS_CO",
+        "from": {
+          "file_variable": "CO_em_anthro",
+          "description": "Carbon monoxide (CO) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable CO_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      }
+    },
+    "CO2_em_anthro": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "description": "Carbon dioxide (CO2) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values.",
+      "update": {
+        "kind": "data",
+        "source": "CEDS_CO2",
+        "from": {
+          "file_variable": "CO2_em_anthro",
+          "description": "Carbon dioxide (CO2) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable CO2_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      }
+    },
+    "N2O_em_anthro": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "description": "Nitrous oxide (N2O) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values.",
+      "update": {
+        "kind": "data",
+        "source": "CEDS_N2O",
+        "from": {
+          "file_variable": "N2O_em_anthro",
+          "description": "Nitrous oxide (N2O) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable N2O_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      }
+    },
+    "NH3_em_anthro": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "description": "Ammonia (NH3) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values.",
+      "update": {
+        "kind": "data",
+        "source": "CEDS_NH3",
+        "from": {
+          "file_variable": "NH3_em_anthro",
+          "description": "Ammonia (NH3) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable NH3_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      }
+    },
+    "NMVOC_em_anthro": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "description": "Non-methane volatile organic compounds (NMVOC) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values.",
+      "update": {
+        "kind": "data",
+        "source": "CEDS_NMVOC",
+        "from": {
+          "file_variable": "NMVOC_em_anthro",
+          "description": "Non-methane volatile organic compounds (NMVOC) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable NMVOC_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      }
+    },
+    "NOx_em_anthro": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "description": "Nitrogen oxides (NOx) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values.",
+      "update": {
+        "kind": "data",
+        "source": "CEDS_NOx",
+        "from": {
+          "file_variable": "NOx_em_anthro",
+          "description": "Nitrogen oxides (NOx) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable NOx_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      }
+    },
+    "OC_em_anthro": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "description": "Organic carbon (OC) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values.",
+      "update": {
+        "kind": "data",
+        "source": "CEDS_OC",
+        "from": {
+          "file_variable": "OC_em_anthro",
+          "description": "Organic carbon (OC) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable OC_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      }
+    },
+    "SO2_em_anthro": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "description": "Sulfur dioxide (SO2) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Regridded from the native 0.5°×0.5° CEDS grid by the conservative (area-weighted, mass-conserving) kernel declared in the model `regrid` block (the pure-IO split replaces the upstream bilinear interpolation with conservative regridding for cell-centered emissions, RFC §5.2); interpolated in time between monthly values.",
+      "update": {
+        "kind": "data",
+        "source": "CEDS_SO2",
+        "from": {
+          "file_variable": "SO2_em_anthro",
+          "description": "Sulfur dioxide (SO2) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable SO2_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180). Reference quantitative values from test/ceds_test.jl: SO2 at Beijing area (116°E, 39°N) is in range (1e-12, 1e-6) kg/m²/s; at Sahara (10°E, 25°N) less than 1% of Beijing value."
+        }
+      }
+    }
+  },
+  "equations": [],
+  "tests": []
+}
+```
+
+</details>

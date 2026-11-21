@@ -1,0 +1,487 @@
+---
+title: "Clark1996WindProfile"
+slug: "clark1996windprofile"
+domains: ["wildland_fire"]
+component_types: ["model"]
+subdomains: ["clark1996"]
+domain: "wildland_fire"
+subdomain: "clark1996"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/wildland_fire/clark1996/wind_profile.esm"
+reference: "Clark, T.L., Jenkins, M.A., Coen, J.L., and Packham, D.R. (1996). A Coupled Atmosphere-Fire Model: Role of the Convective Froude Number and Dynamic Fingering at the Fireline. International Journal of Wildland Fire, 6(4), 177-190. Eq. 11."
+description: "Hyperbolic-tangent vertical wind profile used in the FR7CS1 experiment of Clark et al. (1996), Eq. 11. U(z) = 3 - 3*(1 + tanh((z - 500)/100)) m/s — gives U ≈ +3 m/s near the surface, reverses sign at z = 500 m, and is asymptotic to -3 m/s aloft. Migrated from WildlandFire.jl@126976f2 src/clark1996.jl:299 (`Clark1996WindProfile` @component). Observed-only: z is the input (parameter); U_z is an algebraic output."
+tags: ["wildland_fire", "clark1996", "model", "wind_profile", "observed-only"]
+---
+
+## Description
+
+Hyperbolic-tangent vertical wind profile used in the FR7CS1 experiment of Clark et al. (1996), Eq. 11. U(z) = 3 - 3*(1 + tanh((z - 500)/100)) m/s — gives U ≈ +3 m/s near the surface, reverses sign at z = 500 m, and is asymptotic to -3 m/s aloft. Migrated from WildlandFire.jl@126976f2 src/clark1996.jl:299 (`Clark1996WindProfile` @component). Observed-only: z is the input (parameter); U_z is an algebraic output.
+
+## Reference
+
+_source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/clark1996.jl:299
+Upstream `Clark1996WindProfile` is an MTK `@component` whose single input z is a `@parameter` and whose single output U_z is a time-indexed `@variable` with one algebraic equation. The upstream `@constants` U_base, z_reversal, z_scale, and one_dimless are MTK literals; here they are declared as parameters with their upstream default values, mirroring the terrain_slope.esm pattern (components/wildland_fire/terrain_slope.esm) where upstream `@constants` are preserved as zero-/literal-valued parameters to maintain 1:1 fidelity with the upstream component.
+
+ESS operator note: the equation uses the native `tanh` op, part of the ESS static operator set since origin/main commit 8b8d3056 (bead ess-v9a.1). It was previously hand-rolled via the float64-equivalent identity tanh(x) = (exp(2x) - 1) / (exp(2x) + 1) because the v0.4.0 expression vocabulary lacked `tanh`; bead esm-ji2 substituted the native op. The substitution is exact at every inline-test point — U_z is byte-identical (0 ULP) for z ∈ {0, 100, 250, 400, 450, 500, 550, 600, 750, 900, 1000}, inheriting the prior identity's already-verified 0-ULP agreement with math.tanh.
+
+The `one_dimless` constant (= 1.0) is preserved in the equation as an additive term inside the (1 + tanh) factor — upstream uses it for MTK's unit checker so the (1 + tanh(...)) expression has consistent units; we keep it for 1:1 structural fidelity with the upstream component.
+
+Tolerance rationale (model-level rel=1e-12): observed-only single-equation algebraic system (no ODE integration); the equation is a native tanh plus a small number of arithmetic ops on hardware-supported intrinsics — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above ULP and far below any plausible physical-discrimination scale on m/s wind speeds._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `z` | `m` | `0.0` | Height above ground level |
+| `U_base` | `m/s` | `3.0` | Base wind speed (upstream @constant; FR7CS1 default = 3 m/s) |
+| `z_reversal` | `m` | `500.0` | Height at which the wind speed reverses sign (upstream @constant; FR7CS1 default = 500 m) |
+| `z_scale` | `m` | `100.0` | Vertical scale of the wind transition (upstream @constant; FR7CS1 default = 100 m) |
+| `one_dimless` | `1` | `1.0` | Dimensionless one (MTK unit-balancing literal preserved from upstream; the 1 inside (1 + tanh(...))) |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `U_z` | `m/s` |  | Wind speed at height z |
+
+## Observed expressions
+
+$$
+U_{z} = U_{base} - U_{base} \cdot \left(one_{dimless} + \mathrm{tanh}\left(\frac{z - z_{reversal}}{z_{scale}}\right)\right)
+$$
+_Wind speed at height z_
+
+## Analyses
+
+### wind_profile_curve
+
+Wind speed as a function of height — reproduces the canonical S-shaped Clark et al. (1996) Eq. 11 profile from the surface (U ≈ +3 m/s) through the reversal at 500 m to the upper asymptote (U ≈ -3 m/s) at 1000 m. This is the FR7CS1 vertical wind structure that drives the fire-induced convective flow back into the boundary layer.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `z`
+
+![Wind speed U_z (m/s) vs. height z (m) — Clark et al. (1996) Eq. 11.](/plots/wildland_fire/clark1996/clark1996windprofile/wind_profile_curve-U_z_vs_z.png)
+
+### scale_sensitivity
+
+Sensitivity of the wind profile to z_scale — sharper transitions (small z_scale) approach a step function, while wider z_scale produces a more gradual blend across the reversal height.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `z`, `z_scale`
+
+![Wind speed U_z over the (z, z_scale) plane — surfaces how the transition width controls the smoothness of the reversal.](/plots/wildland_fire/clark1996/clark1996windprofile/scale_sensitivity-U_z_heatmap.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/clark1996.jl:299\nUpstream `Clark1996WindProfile` is an MTK `@component` whose single input z is a `@parameter` and whose single output U_z is a time-indexed `@variable` with one algebraic equation. The upstream `@constants` U_base, z_reversal, z_scale, and one_dimless are MTK literals; here they are declared as parameters with their upstream default values, mirroring the terrain_slope.esm pattern (components/wildland_fire/terrain_slope.esm) where upstream `@constants` are preserved as zero-/literal-valued parameters to maintain 1:1 fidelity with the upstream component.\n\nESS operator note: the equation uses the native `tanh` op, part of the ESS static operator set since origin/main commit 8b8d3056 (bead ess-v9a.1). It was previously hand-rolled via the float64-equivalent identity tanh(x) = (exp(2x) - 1) / (exp(2x) + 1) because the v0.4.0 expression vocabulary lacked `tanh`; bead esm-ji2 substituted the native op. The substitution is exact at every inline-test point — U_z is byte-identical (0 ULP) for z ∈ {0, 100, 250, 400, 450, 500, 550, 600, 750, 900, 1000}, inheriting the prior identity's already-verified 0-ULP agreement with math.tanh.\n\nThe `one_dimless` constant (= 1.0) is preserved in the equation as an additive term inside the (1 + tanh) factor — upstream uses it for MTK's unit checker so the (1 + tanh(...)) expression has consistent units; we keep it for 1:1 structural fidelity with the upstream component.\n\nTolerance rationale (model-level rel=1e-12): observed-only single-equation algebraic system (no ODE integration); the equation is a native tanh plus a small number of arithmetic ops on hardware-supported intrinsics — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above ULP and far below any plausible physical-discrimination scale on m/s wind speeds."
+  },
+  "tolerance": {
+    "rel": 1e-12
+  },
+  "variables": {
+    "z": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0.0,
+      "description": "Height above ground level"
+    },
+    "U_base": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 3.0,
+      "description": "Base wind speed (upstream @constant; FR7CS1 default = 3 m/s)"
+    },
+    "z_reversal": {
+      "type": "parameter",
+      "units": "m",
+      "default": 500.0,
+      "description": "Height at which the wind speed reverses sign (upstream @constant; FR7CS1 default = 500 m)"
+    },
+    "z_scale": {
+      "type": "parameter",
+      "units": "m",
+      "default": 100.0,
+      "description": "Vertical scale of the wind transition (upstream @constant; FR7CS1 default = 100 m)"
+    },
+    "one_dimless": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "Dimensionless one (MTK unit-balancing literal preserved from upstream; the 1 inside (1 + tanh(...)))"
+    },
+    "U_z": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Wind speed at height z"
+    }
+  },
+  "equations": [
+    {
+      "lhs": "U_z",
+      "rhs": {
+        "op": "-",
+        "args": [
+          "U_base",
+          {
+            "op": "*",
+            "args": [
+              "U_base",
+              {
+                "op": "+",
+                "args": [
+                  "one_dimless",
+                  {
+                    "op": "tanh",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          {
+                            "op": "-",
+                            "args": [
+                              "z",
+                              "z_reversal"
+                            ]
+                          },
+                          "z_scale"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "surface",
+      "description": "Ground level (z = 0). tanh(-5) ≈ -0.99991 → U_z ≈ +3 m/s — verifies the near-surface positive-wind regime that ventilates the fire upstream.",
+      "parameter_overrides": {
+        "z": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "U_z",
+          "time": 0.0,
+          "expected": 2.9997276127877854
+        }
+      ]
+    },
+    {
+      "id": "near_surface_100m",
+      "description": "Low altitude (z = 100 m). tanh(-4) → U_z ≈ +2.998 m/s — still in the asymptotic regime below the transition.",
+      "parameter_overrides": {
+        "z": 100.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "U_z",
+          "time": 0.0,
+          "expected": 2.9979878992172013
+        }
+      ]
+    },
+    {
+      "id": "below_reversal_250m",
+      "description": "Approaching the transition zone from below (z = 250 m). tanh(-2.5) ≈ -0.9866 → U_z ≈ +2.96 m/s.",
+      "parameter_overrides": {
+        "z": 250.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "U_z",
+          "time": 0.0,
+          "expected": 2.959842894454291
+        }
+      ]
+    },
+    {
+      "id": "below_reversal_400m",
+      "description": "Inside the transition zone, one z_scale below reversal (z = 400 m). tanh(-1) → U_z ≈ +2.285 m/s — exercises the steepest part of the gradient.",
+      "parameter_overrides": {
+        "z": 400.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "U_z",
+          "time": 0.0,
+          "expected": 2.2847824678672946
+        }
+      ]
+    },
+    {
+      "id": "near_reversal_450m",
+      "description": "Half a z_scale below reversal (z = 450 m). tanh(-0.5) → U_z ≈ +1.386 m/s.",
+      "parameter_overrides": {
+        "z": 450.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "U_z",
+          "time": 0.0,
+          "expected": 1.3863514717800294
+        }
+      ]
+    },
+    {
+      "id": "reversal_height",
+      "description": "Exactly at the wind-reversal height (z = z_reversal = 500 m). tanh(0) = 0 → U_z = U_base - U_base * 1 = 0 m/s — the defining point of the profile.",
+      "parameter_overrides": {
+        "z": 500.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "U_z",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        }
+      ]
+    },
+    {
+      "id": "near_reversal_550m",
+      "description": "Half a z_scale above reversal (z = 550 m). tanh(0.5) → U_z ≈ -1.386 m/s — verifies the antisymmetry of the profile about z_reversal.",
+      "parameter_overrides": {
+        "z": 550.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "U_z",
+          "time": 0.0,
+          "expected": -1.3863514717800296
+        }
+      ]
+    },
+    {
+      "id": "above_reversal_600m",
+      "description": "One z_scale above reversal (z = 600 m). tanh(1) → U_z ≈ -2.285 m/s — exercises the antisymmetric steep-gradient point.",
+      "parameter_overrides": {
+        "z": 600.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "U_z",
+          "time": 0.0,
+          "expected": -2.284782467867295
+        }
+      ]
+    },
+    {
+      "id": "above_reversal_750m",
+      "description": "Approaching the upper asymptote (z = 750 m). tanh(2.5) → U_z ≈ -2.96 m/s.",
+      "parameter_overrides": {
+        "z": 750.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "U_z",
+          "time": 0.0,
+          "expected": -2.959842894454291
+        }
+      ]
+    },
+    {
+      "id": "high_altitude_900m",
+      "description": "High altitude (z = 900 m). tanh(4) → U_z ≈ -2.998 m/s.",
+      "parameter_overrides": {
+        "z": 900.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "U_z",
+          "time": 0.0,
+          "expected": -2.9979878992172013
+        }
+      ]
+    },
+    {
+      "id": "aloft",
+      "description": "Far aloft (z = 1000 m). tanh(5) ≈ +0.99991 → U_z ≈ -3 m/s — verifies the upper asymptote where ambient flow opposes the surface flow.",
+      "parameter_overrides": {
+        "z": 1000.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "U_z",
+          "time": 0.0,
+          "expected": -2.999727612787785
+        }
+      ]
+    },
+    {
+      "id": "scaled_profile",
+      "description": "Override the @constants U_base, z_reversal, z_scale to verify the parameterization (U_base=5 m/s, z_reversal=300 m, z_scale=50 m) is wired correctly. Below reversal at z=200 m: 2*z_scale below the new reversal → tanh(-2) ≈ -0.9640 → U_z ≈ +4.82 m/s.",
+      "parameter_overrides": {
+        "z": 200.0,
+        "U_base": 5.0,
+        "z_reversal": 300.0,
+        "z_scale": 50.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "U_z",
+          "time": 0.0,
+          "expected": 4.820137900379084
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "wind_profile_curve",
+      "description": "Wind speed as a function of height — reproduces the canonical S-shaped Clark et al. (1996) Eq. 11 profile from the surface (U ≈ +3 m/s) through the reversal at 500 m to the upper asymptote (U ≈ -3 m/s) at 1000 m. This is the FR7CS1 vertical wind structure that drives the fire-induced convective flow back into the boundary layer.",
+      "initial_state": {},
+      "parameters": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "z",
+            "range": {
+              "start": 0.0,
+              "stop": 1000.0,
+              "count": 41,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "U_z_vs_z",
+          "type": "line",
+          "description": "Wind speed U_z (m/s) vs. height z (m) — Clark et al. (1996) Eq. 11.",
+          "x": {
+            "variable": "z",
+            "label": "Height z (m)"
+          },
+          "y": {
+            "variable": "U_z",
+            "label": "Wind speed U_z (m/s)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "scale_sensitivity",
+      "description": "Sensitivity of the wind profile to z_scale — sharper transitions (small z_scale) approach a step function, while wider z_scale produces a more gradual blend across the reversal height.",
+      "initial_state": {},
+      "parameters": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "z",
+            "range": {
+              "start": 0.0,
+              "stop": 1000.0,
+              "count": 21,
+              "scale": "linear"
+            }
+          },
+          {
+            "parameter": "z_scale",
+            "range": {
+              "start": 25.0,
+              "stop": 200.0,
+              "count": 8,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "U_z_heatmap",
+          "type": "heatmap",
+          "description": "Wind speed U_z over the (z, z_scale) plane — surfaces how the transition width controls the smoothness of the reversal.",
+          "x": {
+            "variable": "z",
+            "label": "Height z (m)"
+          },
+          "y": {
+            "variable": "z_scale",
+            "label": "Transition scale z_scale (m)"
+          },
+          "value": {
+            "variable": "U_z",
+            "reduce": "final"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

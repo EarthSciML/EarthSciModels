@@ -1,0 +1,358 @@
+---
+title: "WaterProperties"
+slug: "waterproperties"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["nucleation"]
+domain: "aerosol"
+subdomain: "nucleation"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/nucleation/water_properties.esm"
+reference: "Seinfeld, J.H. and Pandis, S.N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, Chapter 11, pp. 489-536."
+description: "Temperature-dependent physical properties of water for nucleation calculations following Seinfeld & Pandis (2006), Chapter 11, Tables 11.1 and 11.4. Provides surface tension, molecular volume, molecular mass, and saturation vapor pressure as functions of temperature."
+tags: ["aerosol", "nucleation", "model", "water-properties", "seinfeld-pandis"]
+---
+
+## Description
+
+Temperature-dependent physical properties of water for nucleation calculations following Seinfeld & Pandis (2006), Chapter 11, Tables 11.1 and 11.4. Provides surface tension, molecular volume, molecular mass, and saturation vapor pressure as functions of temperature.
+
+## Reference
+
+_Coupler identity: this model was serialized with the model-level field `coupletype: "WaterProperties"`, the EarthSciMLBase `CoupleType` metadata tag naming the Julia coupler struct that `EarthSciMLBase.couple2` dispatches on to find this component's pairwise coupling rules. The esm schema defined `coupletype` only before 0.8.0 ("informational label identifying this system's role in coupling"); 0.8.0 removed it in favour of explicit coupling — `coupling` entries naming components directly, or `coupling_roles` + `coupling_import` in a coupling-library file (esm-spec §10.9–§10.11). esm 1.0.0 has no model-level coupler-identity field, so the tag is recorded here to keep it recoverable._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `T` | `K` | `293.0` | Temperature |
+| `T_unit` | `K` | `1.0` | Unit temperature for conversion (dimensionless) |
+| `Pa_unit` | `Pa` | `1.0` | Unit pressure for conversion (dimensionless) |
+| `M_H2O` | `kg/mol` | `0.018015` | Molar mass of water |
+| `N_A` | `mol^-1` | `6.02214076e+23` | Avogadro number |
+| `R` | `J/(mol*K)` | `8.314` | Gas constant |
+| `sigma_ref` | `N/m` | `0.0756` | Surface tension at 273 K |
+| `sigma_slope` | `N/(m*K)` | `-0.0001454` | Surface tension temperature slope |
+| `T_ref` | `K` | `273.0` | Reference temperature |
+| `v_1_const` | `m^3` | `2.99e-29` | Molecular volume of water |
+| `A_antoine` | `1` | `23.1964` | Antoine A coefficient (dimensionless) |
+| `B_antoine` | `1` | `3816.44` | Antoine B coefficient (dimensionless) |
+| `C_antoine` | `1` | `-46.13` | Antoine C coefficient (dimensionless) |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `sigma` | `N/m` |  | Surface tension (temperature-dependent linear approximation) |
+| `v_1` | `m^3` |  | Molecular volume (approximately constant) |
+| `m_1` | `kg` |  | Molecular mass of water |
+| `p_sat` | `Pa` |  | Saturation vapor pressure from Antoine equation: ln(p/Pa) = A - B/(C + T/K) |
+
+## Observed expressions
+
+$$
+sigma = sigma_{ref} + sigma_{slope} \cdot \left(T - T_{ref}\right)
+$$
+_Surface tension (temperature-dependent linear approximation)_
+
+$$
+v_{1} = v_{1\,const}
+$$
+_Molecular volume (approximately constant)_
+
+$$
+m_{1} = \frac{M_{H2O}}{N_{A}}
+$$
+_Molecular mass of water_
+
+$$
+p_{sat} = Pa_{unit} \cdot e^{A_{antoine} - \frac{B_{antoine}}{C_{antoine} + \frac{T}{T_{unit}}}}
+$$
+_Saturation vapor pressure from Antoine equation: ln(p/Pa) = A - B/(C + T/K)_
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "Coupler identity: this model was serialized with the model-level field `coupletype: \"WaterProperties\"`, the EarthSciMLBase `CoupleType` metadata tag naming the Julia coupler struct that `EarthSciMLBase.couple2` dispatches on to find this component's pairwise coupling rules. The esm schema defined `coupletype` only before 0.8.0 (\"informational label identifying this system's role in coupling\"); 0.8.0 removed it in favour of explicit coupling — `coupling` entries naming components directly, or `coupling_roles` + `coupling_import` in a coupling-library file (esm-spec §10.9–§10.11). esm 1.0.0 has no model-level coupler-identity field, so the tag is recorded here to keep it recoverable."
+  },
+  "variables": {
+    "T": {
+      "type": "parameter",
+      "units": "K",
+      "default": 293.0,
+      "description": "Temperature"
+    },
+    "T_unit": {
+      "type": "parameter",
+      "units": "K",
+      "default": 1.0,
+      "description": "Unit temperature for conversion (dimensionless)"
+    },
+    "Pa_unit": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 1.0,
+      "description": "Unit pressure for conversion (dimensionless)"
+    },
+    "M_H2O": {
+      "type": "parameter",
+      "units": "kg/mol",
+      "default": 0.018015,
+      "description": "Molar mass of water"
+    },
+    "N_A": {
+      "type": "parameter",
+      "units": "mol^-1",
+      "default": 6.02214076e+23,
+      "description": "Avogadro number"
+    },
+    "R": {
+      "type": "parameter",
+      "units": "J/(mol*K)",
+      "default": 8.314,
+      "description": "Gas constant"
+    },
+    "sigma_ref": {
+      "type": "parameter",
+      "units": "N/m",
+      "default": 0.0756,
+      "description": "Surface tension at 273 K"
+    },
+    "sigma_slope": {
+      "type": "parameter",
+      "units": "N/(m*K)",
+      "default": -0.0001454,
+      "description": "Surface tension temperature slope"
+    },
+    "T_ref": {
+      "type": "parameter",
+      "units": "K",
+      "default": 273.0,
+      "description": "Reference temperature"
+    },
+    "v_1_const": {
+      "type": "parameter",
+      "units": "m^3",
+      "default": 2.99e-29,
+      "description": "Molecular volume of water"
+    },
+    "A_antoine": {
+      "type": "parameter",
+      "units": "1",
+      "default": 23.1964,
+      "description": "Antoine A coefficient (dimensionless)"
+    },
+    "B_antoine": {
+      "type": "parameter",
+      "units": "1",
+      "default": 3816.44,
+      "description": "Antoine B coefficient (dimensionless)"
+    },
+    "C_antoine": {
+      "type": "parameter",
+      "units": "1",
+      "default": -46.13,
+      "description": "Antoine C coefficient (dimensionless)"
+    },
+    "sigma": {
+      "type": "unknown",
+      "units": "N/m",
+      "description": "Surface tension (temperature-dependent linear approximation)"
+    },
+    "v_1": {
+      "type": "unknown",
+      "units": "m^3",
+      "description": "Molecular volume (approximately constant)"
+    },
+    "m_1": {
+      "type": "unknown",
+      "units": "kg",
+      "description": "Molecular mass of water"
+    },
+    "p_sat": {
+      "type": "unknown",
+      "units": "Pa",
+      "description": "Saturation vapor pressure from Antoine equation: ln(p/Pa) = A - B/(C + T/K)"
+    }
+  },
+  "equations": [
+    {
+      "lhs": "sigma",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "sigma_ref",
+          {
+            "op": "*",
+            "args": [
+              "sigma_slope",
+              {
+                "op": "-",
+                "args": [
+                  "T",
+                  "T_ref"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "v_1",
+      "rhs": "v_1_const"
+    },
+    {
+      "lhs": "m_1",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "M_H2O",
+          "N_A"
+        ]
+      }
+    },
+    {
+      "lhs": "p_sat",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "Pa_unit",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "-",
+                "args": [
+                  "A_antoine",
+                  {
+                    "op": "/",
+                    "args": [
+                      "B_antoine",
+                      {
+                        "op": "+",
+                        "args": [
+                          "C_antoine",
+                          {
+                            "op": "/",
+                            "args": [
+                              "T",
+                              "T_unit"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "sigma_273k",
+      "description": "Surface tension at 273K should be approximately 0.0756 N/m",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "T": 273.0
+      },
+      "assertions": [
+        {
+          "variable": "sigma",
+          "time": 0,
+          "expected": 0.0756,
+          "tolerance": {
+            "abs": 0.001
+          }
+        }
+      ]
+    },
+    {
+      "id": "sigma_293k",
+      "description": "Surface tension at 293K should be approximately 0.0727 N/m",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "sigma",
+          "time": 0,
+          "expected": 0.072722,
+          "tolerance": {
+            "abs": 0.001
+          }
+        }
+      ]
+    },
+    {
+      "id": "m_1",
+      "description": "Molecular mass of water should be approximately 2.99e-26 kg",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "m_1",
+          "time": 0,
+          "expected": 2.9915e-26,
+          "tolerance": {
+            "abs": 1e-28
+          }
+        }
+      ]
+    },
+    {
+      "id": "v_1",
+      "description": "Molecular volume should be approximately 2.99e-29 m^3",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "v_1",
+          "time": 0,
+          "expected": 2.99e-29,
+          "tolerance": {
+            "abs": 1e-31
+          }
+        }
+      ]
+    },
+    {
+      "id": "p_sat_293k",
+      "description": "Saturation vapor pressure at 293K should be approximately 2300 Pa",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "p_sat",
+          "time": 0,
+          "expected": 2300,
+          "tolerance": {
+            "abs": 100
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

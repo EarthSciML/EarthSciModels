@@ -1,0 +1,2241 @@
+---
+title: "Control"
+slug: "control"
+domains: ["environmental_transport"]
+component_types: ["model"]
+subdomains: ["mosart"]
+domain: "environmental_transport"
+subdomain: "mosart"
+component_type: "model"
+esm_version: "2.0.0"
+esm_path: "components/environmental_transport/mosart/mosart_routing.esm"
+reference: "10.1175/JHM-D-12-015.1"
+description: "MOSART river-routing top-level component (stage 2 of the EqESM project): the cesm3.0-alphabranch mosart1.1.13 rof component as an esm 2.0.0 assembly, per the stage1/boundaries.md 1.5 boundary table and 2.6 subassembly mapping. Five systems: RofCap (mounted from ./mosart_coupling.esm, the med<->rof cap unit conversions), Hillslope (./mosart_hillslope.esm), Subnetwork (./mosart_subnetwork.esm), Channel (./mosart_channel.esm) - the Euler cascade of mosart_physics.F90 (hillslope -> subnetwork -> main channel, with the shared pointwise laws in ./mosart_templates.esm) - and the inline Control model, which is mosart_run (mosart_driver.F90:375-873) steps 2-8 written as algebraic rate rules over one coupling period: the irrigation withdrawal qirrig_actual = -min(-qirrig*coupling_period, wr)/coupling_period, removed from the channel storage through Channel.qirrig (the Fortran's wr -= irrig_volume, F90:497), with the overage returned to qsub (F90:476-500), the flood rule flood = (volr - fthresh)/delt_coupling for mask==1 cells with volr = wt + wr + wh*area (F90:509-531, 854), the direct-transfer rules (frozen runoff, glc runoff, the qgwl_runoff_option all/negative/threshold branches, negative qsur/qsub, mask==0 cells; F90:533-772), the subcycling nsub = ceil(coupling_period/delt_mosart) with delt = delt_coupling/nsub (F90:786-800), the CFL sub-timesteps phi_r/phi_t and the integer numDT_r/numDT_t of set_subtimesteps with its mask/rlen/tlen guards and integer truncation (mosart_tspatialunit_type.F90:624-684; Control is also the single source of the cell geometry - area, frac, rlen, rwidth, rdepth, areaTotal2, rslpsqrt, tlen, twidth, tslpsqrt - which the coupling library wires into the routing systems, so the CFL and the routing see the same cell), the flow/runoff aggregation runofftot = direct + runoffocn + direct_glc with the mask==1/mask>=2 split (F90:844-867), and the ice_runoff branch of the rof_import_export export_fields (F90:362-382). The data flow is wired by the 43 variable_map param_to_var coupling edges of the mosart_routing_coupling.esm coupling library (esm-spec 10.9-10.10), imported by reference below and expanded at flatten in the Euler order; the one network operation not yet wired is the rh_eroutUp upstream gather (erout of each cell mapped to the downstream cell's eroutUp, F90:158) and the rh_direct outlet gather - they are per-cell parameters (Channel.eroutUp, Control.direct_*) until the frivinp network data source lands (boundaries.md 2.4). The routing steps are written as continuous storage ODEs. They are NOT the continuous limit of the Fortran scheme: the Fortran advances storage with forward Euler at fixed 3600-s substeps (subcycled by DLevelH2R*numDT in the subnetwork and channel) and applies its dry-cell clamps per Euler step, so the .esm's ifelse clamps evaluated continuously, and the hillslope outflow reaching the subnetwork as a smooth ramp, give a structurally different intra-step trajectory and wt/wr split, while conserving the same total water (see README.md). The once-per-coupling-period irrigation storage jump (wr -= irrig_volume, F90:497) is a rate rule here, as is the flood subtraction from qsur. All fields use the standard CESM/CMEPS names; units are SI except the CMEPS surface fluxes (kg/m^2/s = mm/s). The Control tests block holds: the one-coupling-period assembly trace from the cold start of cell 100312 of the EqESM instrumented-CESM dry window (stage1/dumps/mosart/, mosart_run_imports.csv / mosart_run_exports.csv / mosart_run_imports_wide.csv), pinning the mass-conserved volr, the hillslope fill wh, the CFL/subcycling diagnostics with the cell's real geometry (areaTotal2 from the frivinp dnID network) and the zero branches, with the wt/wr split documented rather than asserted; two wet-window coupling tests (stage1/dumps/mosart_wet/: the positive-qgwl import path with numDT_r = 7, and the negative-qgwl direct transfer); and two hand-derived irrigation tests (the dumps carry no irrigation demand) that check the withdrawal leaves the channel storage and the overage goes to the subsurface stream, plus the set_subtimesteps rlen = tlen = 0 guards (see README.md Testing). Reference: stage1/cesm/components/mosart/src/riverroute/mosart_driver.F90 and mosart_physics.F90 (mosart1.1.13)."
+tags: ["environmental_transport", "mosart", "model", "river-routing", "hydrology", "cesm", "assembly", "coupling"]
+---
+
+## Description
+
+MOSART river-routing top-level component (stage 2 of the EqESM project): the cesm3.0-alphabranch mosart1.1.13 rof component as an esm 2.0.0 assembly, per the stage1/boundaries.md 1.5 boundary table and 2.6 subassembly mapping. Five systems: RofCap (mounted from ./mosart_coupling.esm, the med<->rof cap unit conversions), Hillslope (./mosart_hillslope.esm), Subnetwork (./mosart_subnetwork.esm), Channel (./mosart_channel.esm) - the Euler cascade of mosart_physics.F90 (hillslope -> subnetwork -> main channel, with the shared pointwise laws in ./mosart_templates.esm) - and the inline Control model, which is mosart_run (mosart_driver.F90:375-873) steps 2-8 written as algebraic rate rules over one coupling period: the irrigation withdrawal qirrig_actual = -min(-qirrig*coupling_period, wr)/coupling_period, removed from the channel storage through Channel.qirrig (the Fortran's wr -= irrig_volume, F90:497), with the overage returned to qsub (F90:476-500), the flood rule flood = (volr - fthresh)/delt_coupling for mask==1 cells with volr = wt + wr + wh*area (F90:509-531, 854), the direct-transfer rules (frozen runoff, glc runoff, the qgwl_runoff_option all/negative/threshold branches, negative qsur/qsub, mask==0 cells; F90:533-772), the subcycling nsub = ceil(coupling_period/delt_mosart) with delt = delt_coupling/nsub (F90:786-800), the CFL sub-timesteps phi_r/phi_t and the integer numDT_r/numDT_t of set_subtimesteps with its mask/rlen/tlen guards and integer truncation (mosart_tspatialunit_type.F90:624-684; Control is also the single source of the cell geometry - area, frac, rlen, rwidth, rdepth, areaTotal2, rslpsqrt, tlen, twidth, tslpsqrt - which the coupling library wires into the routing systems, so the CFL and the routing see the same cell), the flow/runoff aggregation runofftot = direct + runoffocn + direct_glc with the mask==1/mask>=2 split (F90:844-867), and the ice_runoff branch of the rof_import_export export_fields (F90:362-382). The data flow is wired by the 43 variable_map param_to_var coupling edges of the mosart_routing_coupling.esm coupling library (esm-spec 10.9-10.10), imported by reference below and expanded at flatten in the Euler order; the one network operation not yet wired is the rh_eroutUp upstream gather (erout of each cell mapped to the downstream cell's eroutUp, F90:158) and the rh_direct outlet gather - they are per-cell parameters (Channel.eroutUp, Control.direct_*) until the frivinp network data source lands (boundaries.md 2.4). The routing steps are written as continuous storage ODEs. They are NOT the continuous limit of the Fortran scheme: the Fortran advances storage with forward Euler at fixed 3600-s substeps (subcycled by DLevelH2R*numDT in the subnetwork and channel) and applies its dry-cell clamps per Euler step, so the .esm's ifelse clamps evaluated continuously, and the hillslope outflow reaching the subnetwork as a smooth ramp, give a structurally different intra-step trajectory and wt/wr split, while conserving the same total water (see README.md). The once-per-coupling-period irrigation storage jump (wr -= irrig_volume, F90:497) is a rate rule here, as is the flood subtraction from qsur. All fields use the standard CESM/CMEPS names; units are SI except the CMEPS surface fluxes (kg/m^2/s = mm/s). The Control tests block holds: the one-coupling-period assembly trace from the cold start of cell 100312 of the EqESM instrumented-CESM dry window (stage1/dumps/mosart/, mosart_run_imports.csv / mosart_run_exports.csv / mosart_run_imports_wide.csv), pinning the mass-conserved volr, the hillslope fill wh, the CFL/subcycling diagnostics with the cell's real geometry (areaTotal2 from the frivinp dnID network) and the zero branches, with the wt/wr split documented rather than asserted; two wet-window coupling tests (stage1/dumps/mosart_wet/: the positive-qgwl import path with numDT_r = 7, and the negative-qgwl direct transfer); and two hand-derived irrigation tests (the dumps carry no irrigation demand) that check the withdrawal leaves the channel storage and the overage goes to the subsurface stream, plus the set_subtimesteps rlen = tlen = 0 guards (see README.md Testing). Reference: stage1/cesm/components/mosart/src/riverroute/mosart_driver.F90 and mosart_physics.F90 (mosart1.1.13).
+
+## Reference
+
+- Li, H., Wigmosta, M. S., Wu, H., Huang, M., Ke, Y., Coleman, A. M., and Leung, L. R. (2013). A physically based runoff routing model for land surface and earth system models. Journal of Hydrometeorology, 14(3), 808-828. The MOSART (Model for Scale Adaptive River Transport) routing scheme these components transcribe.
+- CESM (Community Earth System Model), ESCOMP/CESM, cesm3.0-alphabranch: MOSART river-routing source (mosart1.1.13) - mosart_physics.F90, mosart_driver.F90, mosart_tstatusflux_type.F90, mosart_tspatialunit_type.F90, rof_comp_nuopc/rof_import_export.F90 - the reference implementation these components are transcribed from.
+- EarthSciModels - the authoritative .esm corpus this component lives in.
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `qsur_m3s` | `m^3/s` | `0.0` | liquid surface runoff stream from the cap, [m3/s] |
+| `qsub_m3s` | `m^3/s` | `0.0` | liquid subsurface runoff stream from the cap, [m3/s] |
+| `qgwl_m3s` | `m^3/s` | `0.0` | gwl runoff stream from the cap, [m3/s] |
+| `qirrig_m3s` | `m^3/s` | `-0.001` | irrigation demand stream from the cap (negative), [m3/s] |
+| `qsur_ice_m3s` | `m^3/s` | `0.0` | frozen runoff stream from the cap, [m3/s] |
+| `qglc_liq_m3s` | `m^3/s` | `0.0` | liquid glc runoff stream from the cap, [m3/s] |
+| `qglc_ice_m3s` | `m^3/s` | `0.0` | frozen glc runoff stream from the cap, [m3/s] |
+| `wr` | `m^3` | `0.0` | main-channel storage from the Channel system (TRunoff%wr), [m3] |
+| `wt` | `m^3` | `0.0` | subnetwork storage from the Subnetwork system (TRunoff%wt), [m3] |
+| `wh` | `m` | `0.0` | hillslope storage from the Hillslope system (TRunoff%wh), [m] |
+| `erout` | `m^3/s` | `0.0` | main-channel outflow from the Channel system (TRunoff%erout), [m3/s] |
+| `yt` | `m` | `0.0` | subnetwork depth from the Subnetwork system (TRunoff%yt) for Sr_tdepth, [m] |
+| `area` | `m^2` | `10000000.0` | area of the local cell (ctl%area = TUnit%area, frivinp area; dumped as the area column of mosart_run_imports_wide.csv); wired to RofCap.area, Hillslope.area and Channel.area by the coupling library, [m2] |
+| `frac` | `1` | `1.0` | fraction of the cell included in the study area (TUnit%frac, frivinp frac); wired to Hillslope.frac and Channel.frac by the coupling library, [-] |
+| `mask` | `1` | `1.0` | cell mask from fdir: 1 land, 2 outlet, 0 ocean (mosart_driver.F90:704-705), [-] |
+| `coupling_period` | `s` | `10800.0` | rof coupling period in seconds (ROF_NCPL=8 over a daily base gives 3 h; boundaries.md 0.2), [s] |
+| `delt_mosart` | `s` | `3600.0` | nominal MOSART routing timestep (namelist delt_mosart, default 3600 s), [s] |
+| `delt_coupling` | `s` | `10800.0` | coupling period as a real (delt_coupling = coupling_period*1.0, F90:426), [s] |
+| `fthresh` | `m^3` | `1e+36` | water flood threshold (ctl%fthresh); the Fortran initializes it to abs(spval) = 1e36 (mosart_control_type.F90:388, spval = 1.e36 at mosart_vars.F90:24) and never lowers it in this configuration, so the flood rule is inactive by default, [m3] |
+| `river_depth_minimum` | `m` | `0.0001` | gridcell-average minimum river depth protecting the qgwl threshold option (F90:401), [m] |
+| `DLevelH2R` | `1` | `5.0` | base number of channel-routing sub-time-steps within one hillslope routing step (Tctl%DLevelH2R, default 5), [-] |
+| `DLevelR` | `1` | `3.0` | number of channel-routing sub-time-steps at a higher level within one at a lower level (Tctl%DLevelR, default 3), [-] |
+| `rslpsqrt` | `1` | `0.01` | sqrt of the main-reach slope (TUnit%rslpsqrt = sqrt(rslp), mosart_tspatialunit_type.F90:390, with the frivinp rslp floored to 1e-4 when <= 0 at F90:380-382); the single source of the cell's main-reach slope: it enters the CFL phi_r here and is wired to Channel.rslpsqrt by the coupling library, [-] |
+| `tslpsqrt` | `1` | `0.01` | sqrt of the mean tributary slope (TUnit%tslpsqrt = sqrt(tslp), F90:391, tslp floored to 1e-4 when <= 0 at F90:383-385); the single source of the cell's tributary slope: it enters the CFL phi_t here and is wired to Subnetwork.tslpsqrt by the coupling library, [-] |
+| `rlen` | `m` | `10000.0` | length of the main river reach (TUnit%rlen, frivinp rlen floored to sqrt(area) at mosart_tspatialunit_type.F90:331-336); wired to Channel.rlen by the coupling library, [m] |
+| `rwidth` | `m` | `50.0` | bankfull width of the main reach (TUnit%rwidth, frivinp rwid); wired to Channel.rwidth by the coupling library, [m] |
+| `tlen` | `m` | `1000.0` | length of all sub-network reaches within the cell (TUnit%tlen = area/rlen/2 - hlen, mosart_tspatialunit_type.F90:361; 0 when rlen <= 0); wired to Subnetwork.tlen by the coupling library, [m] |
+| `twidth` | `m` | `10.0` | bankfull width of the sub-reach (TUnit%twidth, frivinp twid after the c_twid rlenTotal adjustment of F90:363-373); wired to Subnetwork.twidth by the coupling library, [m] |
+| `twidth0` | `m` | `10.0` | unadjusted tributary width (TUnit%twidth0) for the Sr_tdepth_max ratio (F90:401), [m] |
+| `rdepth` | `m` | `2.0` | bankfull depth of the river cross section (TUnit%rdepth, frivinp rdep) for Sr_tdepth_max; wired to Channel.rdepth by the coupling library, [m] |
+| `areaTotal2` | `m^2` | `100000000.0` | computed total upstream drainage area including the local cell (TUnit%areaTotal2, the dnID-network accumulation of set_areatotal2, mosart_tspatialunit_type.F90:533-620; equals area for a headwater cell, so it is never smaller than area) for the CFL phi_r and the Channel small-catchment branch; wired to Channel.areaTotal2 by the coupling library, [m2] |
+| `bypass_routing_option` | `1` | `1` | namelist bypass_routing_option: 1 direct_in_place (default), 2 direct_to_outlet, 3 none (enum bypass_routing_option), [-] |
+| `qgwl_runoff_option` | `1` | `3` | namelist qgwl_runoff_option: 1 all, 2 negative, 3 threshold (default; enum qgwl_runoff_option), [-] |
+| `rof_from_glc` | `1` | `0.0` | 1 when glc runoff is routed through rof, [-] |
+| `ice_runoff` | `1` | `0.0` | namelist ice_runoff: 1 separates liquid and frozen river runoff to the ocean, 0 adds frozen into the liquid stream (rof_import_export.F90:362-382), [-] |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `nsub` | `1` |  | number of Euler subcycles per coupling period = ceil(coupling_period/delt_mosart) (mosart_driver.F90:786-789), [-] |
+| `delt` | `s` |  | Euler substep = delt_coupling/nsub (Tctl%DeltaT, F90:790-800), [s] |
+| `phi_r` | `1` |  | CFL indicator of the main channel = areaTotal2*rslpsqrt/(rlen*rwidth) when mask > 0 and rlen > 0, else 0 (set_subtimesteps, mosart_tspatialunit_type.F90:645-646), [-] |
+| `phi_t` | `1` |  | CFL indicator of the subnetwork = area*tslpsqrt/(tlen*twidth) when tlen > 0, else 0 (set_subtimesteps, F90:655-656), [-] |
+| `numDT_r` | `1` |  | per-cell main-channel sub-timestep count, an INTEGER in the Fortran (TUnit%numDT_r, mosart_tspatialunit_type.F90:64): when mask > 0 and rlen > 0, floor(DLevelR*log10(phi_r) + 1) for phi_r >= 10, else DLevelR + 1; 1 otherwise; floored at 1 (set_subtimesteps F90:645-653 - the real-valued right-hand side is truncated on assignment to the integer array, transcribed as floor since the value is >= 1), [-] |
+| `numDT_t` | `1` |  | per-cell subnetwork sub-timestep count, an INTEGER in the Fortran (TUnit%numDT_t, F90:65): when tlen > 0, floor(DLevelR*log10(phi_t) + 1) for phi_t >= 10, else DLevelR + 1; 1 otherwise; floored at 1 (set_subtimesteps F90:655-663, integer truncation on assignment), [-] |
+| `localdelt_t` | `s` |  | subnetwork local substep = delt/DLevelH2R/numDT_t (Euler F90:120), [s] |
+| `localdelt_r` | `s` |  | main-channel local substep = delt/DLevelH2R/numDT_r (Euler F90:184), [s] |
+| `irrig_volume` | `m^3` |  | volume of the irrigation demand over the coupling period = -qirrig_m3s*coupling_period (F90:481), [m3] |
+| `qirrig_actual` | `m^3/s` |  | actual irrigation rate removed from the main channel = -min(irrig_volume, wr)/coupling_period (F90:485-494); wired to Channel.qirrig by the coupling library so the withdrawal leaves d(wr)/dt (the Fortran's wr -= irrig_volume, F90:497), [m3/s] |
+| `qsub_i` | `m^3/s` |  | subsurface stream after the irrigation overage return: qsub_m3s + (wr - irrig_volume)/coupling_period when the demand exceeds the channel storage (F90:486-487), [m3/s] |
+| `volr` | `m^3` |  | total water storage volr = wt + wr + wh*area (F90:854), [m3] |
+| `flood` | `m^3/s` |  | flood flux sent back to the land: (volr - fthresh)/delt_coupling for mask==1 cells when volr > fthresh, else 0 (F90:513-517), [m3/s] |
+| `qsur_f` | `m^3/s` |  | surface stream after the flood subtraction: qsur_m3s - flood (F90:527), [m3/s] |
+| `direct_neg_sur` | `m^3/s` |  | negative surface runoff routed directly: qsur_f when qsur_f < 0, else 0 (F90:700-703, 736-739), [m3/s] |
+| `direct_neg_sub` | `m^3/s` |  | negative subsurface runoff routed directly: qsub_i when qsub_i < 0, else 0 (F90:696-699, 730-733), [m3/s] |
+| `qsur_routed` | `m^3/s` |  | surface stream entering the hillslope routing: max(qsur_f, 0) (the Fortran zeroes the negative part), [m3/s] |
+| `qsub_routed` | `m^3/s` |  | subsurface stream entering the hillslope routing: max(qsub_i, 0), [m3/s] |
+| `qgwl_eligible` | `1` |  | 1 when the bypass routing option is direct_in_place or direct_to_outlet (the qgwl options act only then, F90:628-687), [-] |
+| `direct_qgwl` | `m^3/s` |  | qgwl routed directly under the qgwl_runoff_option: 'all' routes everything, 'negative' routes only qgwl < 0, 'threshold' routes qgwl < 0 when qgwl_m3s*coupling_period + wr < river_depth_minimum*area (F90:637-684), [m3/s] |
+| `qgwl_out` | `m^3/s` |  | qgwl stream after the direct-transfer removal: qgwl_m3s - direct_qgwl (F90:639-684), [m3/s] |
+| `qgwl_routed` | `m^3/s` |  | qgwl entering the channel routing: qgwl_out, zeroed outside the basin mask (F90:706-713, 746-756), [m3/s] |
+| `direct_mask0` | `m^3/s` |  | water outside the basin (mask==0, ocean) routed directly: qsur_routed + qsub_routed + qgwl_out (F90:706-713), [m3/s] |
+| `qsur_ms` | `m/s` |  | surface runoff in m/s feeding the hillslope step: qsur_routed/area (the F90:806-813 m3/s -> m/s conversion), [m/s] |
+| `qsub_ms` | `m/s` |  | subsurface runoff in m/s feeding the hillslope step: qsub_routed/area, [m/s] |
+| `qgwl_ms` | `m/s` |  | gwl runoff in m/s feeding the channel step: qgwl_routed/area, [m/s] |
+| `direct_liq` | `m^3/s` |  | liquid water routed directly to the outlet: direct_qgwl + direct_neg_sur + direct_neg_sub + direct_mask0 (ctl%direct(:,nt_liq)), [m3/s] |
+| `direct_ice` | `m^3/s` |  | frozen runoff routed directly to the outlet: qsur_ice_m3s (the Flrl_rofi stream, F90:595-612), [m3/s] |
+| `direct_glc_liq` | `m^3/s` |  | liquid glc runoff routed directly (ctl%direct_glc(:,nt_liq), F90:565-589), [m3/s] |
+| `direct_glc_ice` | `m^3/s` |  | frozen glc runoff routed directly (ctl%direct_glc(:,nt_ice)), [m3/s] |
+| `runoffocn_liq` | `m^3/s` |  | routed runoff at outlet cells (mask >= 2): the reach streamflow -erout (ctl%flow; Channel.flow), else 0 (F90:861-863), [m3/s] |
+| `runofftot_liq` | `m^3/s` |  | total liquid runoff = direct_liq + runoffocn_liq + direct_glc_liq (F90:856-864, 871), [m3/s] |
+| `runofftot_ice` | `m^3/s` |  | total frozen runoff = direct_ice + direct_glc_ice, [m3/s] |
+| `rofl_m3s` | `m^3/s` |  | liquid river runoff to the ocean in m3/s, ice_runoff branch of export_fields (F90:362-382): runofftot_liq - direct_glc_liq when ice_runoff, plus direct_ice otherwise, [m3/s] |
+| `rofi_m3s` | `m^3/s` |  | frozen river runoff to the ocean in m3/s: direct_ice when ice_runoff, 0 otherwise, [m3/s] |
+| `rofl_glc_m3s` | `m^3/s` |  | liquid glc runoff to the ocean in m3/s = direct_glc_liq, [m3/s] |
+| `rofi_glc_m3s` | `m^3/s` |  | frozen glc runoff to the ocean in m3/s = direct_glc_ice, [m3/s] |
+| `flood_m3s` | `m^3/s` |  | flood flux in m3/s = flood (ctl%flood, F90:516), [m3/s] |
+| `volr_m3` | `m^3` |  | total water storage in m3 = volr, [m3] |
+| `volrmch_m3` | `m^3` |  | main-channel storage in m3 = wr, [m3] |
+| `tdepth` | `m` |  | stream depth (tributary depth yt) for Sr_tdepth (F90:399), [m] |
+| `tdepth_max` | `m` |  | maximum stream depth = max(twidth0, 0)*(rdepth/rwidth) for Sr_tdepth_max (F90:401), [m] |
+
+## Observed expressions
+
+$$
+nsub = \mathrm{ceil}\left(\frac{coupling_{period}}{delt_{mosart}}\right)
+$$
+_number of Euler subcycles per coupling period = ceil(coupling_period/delt_mosart) (mosart_driver.F90:786-789), [-]_
+
+$$
+delt = \frac{delt_{coupling}}{nsub}
+$$
+_Euler substep = delt_coupling/nsub (Tctl%DeltaT, F90:790-800), [s]_
+
+$$
+phi_{r} = \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>}\left(mask, 0.0\right), \mathrm{>}\left(rlen, 0.0\right)\right), \frac{areaTotal2 \cdot rslpsqrt}{rlen \cdot rwidth}, 0.0\right)
+$$
+_CFL indicator of the main channel = areaTotal2*rslpsqrt/(rlen*rwidth) when mask > 0 and rlen > 0, else 0 (set_subtimesteps, mosart_tspatialunit_type.F90:645-646), [-]_
+
+$$
+phi_{t} = \mathrm{ifelse}\left(\mathrm{>}\left(tlen, 0.0\right), \frac{area \cdot tslpsqrt}{tlen \cdot twidth}, 0.0\right)
+$$
+_CFL indicator of the subnetwork = area*tslpsqrt/(tlen*twidth) when tlen > 0, else 0 (set_subtimesteps, F90:655-656), [-]_
+
+$$
+numDT_{r} = \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>}\left(mask, 0.0\right), \mathrm{>}\left(rlen, 0.0\right)\right), \mathrm{max}\left(\mathrm{floor}\left(\mathrm{ifelse}\left(\mathrm{>=}\left(phi_{r}, 10.0\right), DLevelR \cdot \log_{10}\left(phi_{r}\right) + 1.0, DLevelR + 1.0\right)\right), 1.0\right), 1.0\right)
+$$
+_per-cell main-channel sub-timestep count, an INTEGER in the Fortran (TUnit%numDT_r, mosart_tspatialunit_type.F90:64): when mask > 0 and rlen > 0, floor(DLevelR*log10(phi_r) + 1) for phi_r >= 10, else DLevelR + 1; 1 otherwise; floored at 1 (set_subtimesteps F90:645-653 - the real-valued right-hand side is truncated on assignment to the integer array, transcribed as floor since the value is >= 1), [-]_
+
+$$
+numDT_{t} = \mathrm{ifelse}\left(\mathrm{>}\left(tlen, 0.0\right), \mathrm{max}\left(\mathrm{floor}\left(\mathrm{ifelse}\left(\mathrm{>=}\left(phi_{t}, 10.0\right), DLevelR \cdot \log_{10}\left(phi_{t}\right) + 1.0, DLevelR + 1.0\right)\right), 1.0\right), 1.0\right)
+$$
+_per-cell subnetwork sub-timestep count, an INTEGER in the Fortran (TUnit%numDT_t, F90:65): when tlen > 0, floor(DLevelR*log10(phi_t) + 1) for phi_t >= 10, else DLevelR + 1; 1 otherwise; floored at 1 (set_subtimesteps F90:655-663, integer truncation on assignment), [-]_
+
+$$
+localdelt_{t} = \frac{delt}{DLevelH2R \cdot numDT_{t}}
+$$
+_subnetwork local substep = delt/DLevelH2R/numDT_t (Euler F90:120), [s]_
+
+$$
+localdelt_{r} = \frac{delt}{DLevelH2R \cdot numDT_{r}}
+$$
+_main-channel local substep = delt/DLevelH2R/numDT_r (Euler F90:184), [s]_
+
+$$
+irrig_{volume} = \left(-qirrig_{m3s}\right) \cdot coupling_{period}
+$$
+_volume of the irrigation demand over the coupling period = -qirrig_m3s*coupling_period (F90:481), [m3]_
+
+$$
+qirrig_{actual} = \frac{-\mathrm{min}\left(irrig_{volume}, wr\right)}{coupling_{period}}
+$$
+_actual irrigation rate removed from the main channel = -min(irrig_volume, wr)/coupling_period (F90:485-494); wired to Channel.qirrig by the coupling library so the withdrawal leaves d(wr)/dt (the Fortran's wr -= irrig_volume, F90:497), [m3/s]_
+
+$$
+qsub_{i} = qsub_{m3s} + \mathrm{ifelse}\left(\mathrm{>}\left(irrig_{volume}, wr\right), \frac{wr - irrig_{volume}}{coupling_{period}}, 0.0\right)
+$$
+_subsurface stream after the irrigation overage return: qsub_m3s + (wr - irrig_volume)/coupling_period when the demand exceeds the channel storage (F90:486-487), [m3/s]_
+
+$$
+volr = wt + wr + wh \cdot area
+$$
+_total water storage volr = wt + wr + wh*area (F90:854), [m3]_
+
+$$
+flood = \mathrm{ifelse}\left(mask = 1.0, \mathrm{ifelse}\left(\mathrm{>}\left(volr, fthresh\right), \frac{volr - fthresh}{delt_{coupling}}, 0.0\right), 0.0\right)
+$$
+_flood flux sent back to the land: (volr - fthresh)/delt_coupling for mask==1 cells when volr > fthresh, else 0 (F90:513-517), [m3/s]_
+
+$$
+qsur_{f} = qsur_{m3s} - flood
+$$
+_surface stream after the flood subtraction: qsur_m3s - flood (F90:527), [m3/s]_
+
+$$
+direct_{neg\,sur} = \mathrm{ifelse}\left(\mathrm{<}\left(qsur_{f}, 0.0\right), qsur_{f}, 0.0\right)
+$$
+_negative surface runoff routed directly: qsur_f when qsur_f < 0, else 0 (F90:700-703, 736-739), [m3/s]_
+
+$$
+direct_{neg\,sub} = \mathrm{ifelse}\left(\mathrm{<}\left(qsub_{i}, 0.0\right), qsub_{i}, 0.0\right)
+$$
+_negative subsurface runoff routed directly: qsub_i when qsub_i < 0, else 0 (F90:696-699, 730-733), [m3/s]_
+
+$$
+qsur_{routed} = \mathrm{max}\left(qsur_{f}, 0.0\right)
+$$
+_surface stream entering the hillslope routing: max(qsur_f, 0) (the Fortran zeroes the negative part), [m3/s]_
+
+$$
+qsub_{routed} = \mathrm{max}\left(qsub_{i}, 0.0\right)
+$$
+_subsurface stream entering the hillslope routing: max(qsub_i, 0), [m3/s]_
+
+$$
+qgwl_{eligible} = \mathrm{ifelse}\left(\mathrm{or}\left(bypass_{routing\,option} = \mathrm{enum}\left(bypass_{routing\,option}, direct_{in\,place}\right), bypass_{routing\,option} = \mathrm{enum}\left(bypass_{routing\,option}, direct_{to\,outlet}\right)\right), 1.0, 0.0\right)
+$$
+_1 when the bypass routing option is direct_in_place or direct_to_outlet (the qgwl options act only then, F90:628-687), [-]_
+
+$$
+direct_{qgwl} = \mathrm{ifelse}\left(\mathrm{and}\left(qgwl_{eligible}, qgwl_{runoff\,option} = \mathrm{enum}\left(qgwl_{runoff\,option}, all\right)\right), qgwl_{m3s}, \mathrm{ifelse}\left(\mathrm{and}\left(qgwl_{eligible}, qgwl_{runoff\,option} = \mathrm{enum}\left(qgwl_{runoff\,option}, negative\right)\right), \mathrm{ifelse}\left(\mathrm{<}\left(qgwl_{m3s}, 0.0\right), qgwl_{m3s}, 0.0\right), \mathrm{ifelse}\left(\mathrm{and}\left(qgwl_{eligible}, qgwl_{runoff\,option} = \mathrm{enum}\left(qgwl_{runoff\,option}, threshold\right)\right), \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{<}\left(qgwl_{m3s} \cdot coupling_{period} + wr, river_{depth\,minimum} \cdot area\right), \mathrm{<}\left(qgwl_{m3s}, 0.0\right)\right), qgwl_{m3s}, 0.0\right), 0.0\right)\right)\right)
+$$
+_qgwl routed directly under the qgwl_runoff_option: 'all' routes everything, 'negative' routes only qgwl < 0, 'threshold' routes qgwl < 0 when qgwl_m3s*coupling_period + wr < river_depth_minimum*area (F90:637-684), [m3/s]_
+
+$$
+qgwl_{out} = qgwl_{m3s} - direct_{qgwl}
+$$
+_qgwl stream after the direct-transfer removal: qgwl_m3s - direct_qgwl (F90:639-684), [m3/s]_
+
+$$
+qgwl_{routed} = \mathrm{ifelse}\left(mask = 0.0, 0.0, qgwl_{out}\right)
+$$
+_qgwl entering the channel routing: qgwl_out, zeroed outside the basin mask (F90:706-713, 746-756), [m3/s]_
+
+$$
+direct_{mask0} = \mathrm{ifelse}\left(mask = 0.0, qsur_{routed} + qsub_{routed} + qgwl_{out}, 0.0\right)
+$$
+_water outside the basin (mask==0, ocean) routed directly: qsur_routed + qsub_routed + qgwl_out (F90:706-713), [m3/s]_
+
+$$
+qsur_{ms} = \frac{qsur_{routed}}{area}
+$$
+_surface runoff in m/s feeding the hillslope step: qsur_routed/area (the F90:806-813 m3/s -> m/s conversion), [m/s]_
+
+$$
+qsub_{ms} = \frac{qsub_{routed}}{area}
+$$
+_subsurface runoff in m/s feeding the hillslope step: qsub_routed/area, [m/s]_
+
+$$
+qgwl_{ms} = \frac{qgwl_{routed}}{area}
+$$
+_gwl runoff in m/s feeding the channel step: qgwl_routed/area, [m/s]_
+
+$$
+direct_{liq} = direct_{qgwl} + direct_{neg\,sur} + direct_{neg\,sub} + direct_{mask0}
+$$
+_liquid water routed directly to the outlet: direct_qgwl + direct_neg_sur + direct_neg_sub + direct_mask0 (ctl%direct(:,nt_liq)), [m3/s]_
+
+$$
+direct_{ice} = qsur_{ice\,m3s}
+$$
+_frozen runoff routed directly to the outlet: qsur_ice_m3s (the Flrl_rofi stream, F90:595-612), [m3/s]_
+
+$$
+direct_{glc\,liq} = \mathrm{ifelse}\left(rof_{from\,glc} = 1.0, qglc_{liq\,m3s}, 0.0\right)
+$$
+_liquid glc runoff routed directly (ctl%direct_glc(:,nt_liq), F90:565-589), [m3/s]_
+
+$$
+direct_{glc\,ice} = \mathrm{ifelse}\left(rof_{from\,glc} = 1.0, qglc_{ice\,m3s}, 0.0\right)
+$$
+_frozen glc runoff routed directly (ctl%direct_glc(:,nt_ice)), [m3/s]_
+
+$$
+runoffocn_{liq} = \mathrm{ifelse}\left(\mathrm{>=}\left(mask, 2.0\right), -erout, 0.0\right)
+$$
+_routed runoff at outlet cells (mask >= 2): the reach streamflow -erout (ctl%flow; Channel.flow), else 0 (F90:861-863), [m3/s]_
+
+$$
+runofftot_{liq} = direct_{liq} + runoffocn_{liq} + direct_{glc\,liq}
+$$
+_total liquid runoff = direct_liq + runoffocn_liq + direct_glc_liq (F90:856-864, 871), [m3/s]_
+
+$$
+runofftot_{ice} = direct_{ice} + direct_{glc\,ice}
+$$
+_total frozen runoff = direct_ice + direct_glc_ice, [m3/s]_
+
+$$
+rofl_{m3s} = \mathrm{ifelse}\left(ice_{runoff} = 1.0, runofftot_{liq} - direct_{glc\,liq}, runofftot_{liq} + direct_{ice} - direct_{glc\,liq}\right)
+$$
+_liquid river runoff to the ocean in m3/s, ice_runoff branch of export_fields (F90:362-382): runofftot_liq - direct_glc_liq when ice_runoff, plus direct_ice otherwise, [m3/s]_
+
+$$
+rofi_{m3s} = \mathrm{ifelse}\left(ice_{runoff} = 1.0, direct_{ice}, 0.0\right)
+$$
+_frozen river runoff to the ocean in m3/s: direct_ice when ice_runoff, 0 otherwise, [m3/s]_
+
+$$
+rofl_{glc\,m3s} = direct_{glc\,liq}
+$$
+_liquid glc runoff to the ocean in m3/s = direct_glc_liq, [m3/s]_
+
+$$
+rofi_{glc\,m3s} = direct_{glc\,ice}
+$$
+_frozen glc runoff to the ocean in m3/s = direct_glc_ice, [m3/s]_
+
+$$
+flood_{m3s} = flood
+$$
+_flood flux in m3/s = flood (ctl%flood, F90:516), [m3/s]_
+
+$$
+volr_{m3} = volr
+$$
+_total water storage in m3 = volr, [m3]_
+
+$$
+volrmch_{m3} = wr
+$$
+_main-channel storage in m3 = wr, [m3]_
+
+$$
+tdepth = yt
+$$
+_stream depth (tributary depth yt) for Sr_tdepth (F90:399), [m]_
+
+$$
+tdepth_{max} = \mathrm{max}\left(twidth0, 0.0\right) \cdot \frac{rdepth}{rwidth}
+$$
+_maximum stream depth = max(twidth0, 0)*(rdepth/rwidth) for Sr_tdepth_max (F90:401), [m]_
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "variables": {
+    "nsub": {
+      "type": "unknown",
+      "units": "1",
+      "description": "number of Euler subcycles per coupling period = ceil(coupling_period/delt_mosart) (mosart_driver.F90:786-789), [-]"
+    },
+    "delt": {
+      "type": "unknown",
+      "units": "s",
+      "description": "Euler substep = delt_coupling/nsub (Tctl%DeltaT, F90:790-800), [s]"
+    },
+    "phi_r": {
+      "type": "unknown",
+      "units": "1",
+      "description": "CFL indicator of the main channel = areaTotal2*rslpsqrt/(rlen*rwidth) when mask > 0 and rlen > 0, else 0 (set_subtimesteps, mosart_tspatialunit_type.F90:645-646), [-]"
+    },
+    "phi_t": {
+      "type": "unknown",
+      "units": "1",
+      "description": "CFL indicator of the subnetwork = area*tslpsqrt/(tlen*twidth) when tlen > 0, else 0 (set_subtimesteps, F90:655-656), [-]"
+    },
+    "numDT_r": {
+      "type": "unknown",
+      "units": "1",
+      "description": "per-cell main-channel sub-timestep count, an INTEGER in the Fortran (TUnit%numDT_r, mosart_tspatialunit_type.F90:64): when mask > 0 and rlen > 0, floor(DLevelR*log10(phi_r) + 1) for phi_r >= 10, else DLevelR + 1; 1 otherwise; floored at 1 (set_subtimesteps F90:645-653 - the real-valued right-hand side is truncated on assignment to the integer array, transcribed as floor since the value is >= 1), [-]"
+    },
+    "numDT_t": {
+      "type": "unknown",
+      "units": "1",
+      "description": "per-cell subnetwork sub-timestep count, an INTEGER in the Fortran (TUnit%numDT_t, F90:65): when tlen > 0, floor(DLevelR*log10(phi_t) + 1) for phi_t >= 10, else DLevelR + 1; 1 otherwise; floored at 1 (set_subtimesteps F90:655-663, integer truncation on assignment), [-]"
+    },
+    "localdelt_t": {
+      "type": "unknown",
+      "units": "s",
+      "description": "subnetwork local substep = delt/DLevelH2R/numDT_t (Euler F90:120), [s]"
+    },
+    "localdelt_r": {
+      "type": "unknown",
+      "units": "s",
+      "description": "main-channel local substep = delt/DLevelH2R/numDT_r (Euler F90:184), [s]"
+    },
+    "irrig_volume": {
+      "type": "unknown",
+      "units": "m^3",
+      "description": "volume of the irrigation demand over the coupling period = -qirrig_m3s*coupling_period (F90:481), [m3]"
+    },
+    "qirrig_actual": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "actual irrigation rate removed from the main channel = -min(irrig_volume, wr)/coupling_period (F90:485-494); wired to Channel.qirrig by the coupling library so the withdrawal leaves d(wr)/dt (the Fortran's wr -= irrig_volume, F90:497), [m3/s]"
+    },
+    "qsub_i": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "subsurface stream after the irrigation overage return: qsub_m3s + (wr - irrig_volume)/coupling_period when the demand exceeds the channel storage (F90:486-487), [m3/s]"
+    },
+    "volr": {
+      "type": "unknown",
+      "units": "m^3",
+      "description": "total water storage volr = wt + wr + wh*area (F90:854), [m3]"
+    },
+    "flood": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "flood flux sent back to the land: (volr - fthresh)/delt_coupling for mask==1 cells when volr > fthresh, else 0 (F90:513-517), [m3/s]"
+    },
+    "qsur_f": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "surface stream after the flood subtraction: qsur_m3s - flood (F90:527), [m3/s]"
+    },
+    "direct_neg_sur": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "negative surface runoff routed directly: qsur_f when qsur_f < 0, else 0 (F90:700-703, 736-739), [m3/s]"
+    },
+    "direct_neg_sub": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "negative subsurface runoff routed directly: qsub_i when qsub_i < 0, else 0 (F90:696-699, 730-733), [m3/s]"
+    },
+    "qsur_routed": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "surface stream entering the hillslope routing: max(qsur_f, 0) (the Fortran zeroes the negative part), [m3/s]"
+    },
+    "qsub_routed": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "subsurface stream entering the hillslope routing: max(qsub_i, 0), [m3/s]"
+    },
+    "qgwl_eligible": {
+      "type": "unknown",
+      "units": "1",
+      "description": "1 when the bypass routing option is direct_in_place or direct_to_outlet (the qgwl options act only then, F90:628-687), [-]"
+    },
+    "direct_qgwl": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "qgwl routed directly under the qgwl_runoff_option: 'all' routes everything, 'negative' routes only qgwl < 0, 'threshold' routes qgwl < 0 when qgwl_m3s*coupling_period + wr < river_depth_minimum*area (F90:637-684), [m3/s]"
+    },
+    "qgwl_out": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "qgwl stream after the direct-transfer removal: qgwl_m3s - direct_qgwl (F90:639-684), [m3/s]"
+    },
+    "qgwl_routed": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "qgwl entering the channel routing: qgwl_out, zeroed outside the basin mask (F90:706-713, 746-756), [m3/s]"
+    },
+    "direct_mask0": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "water outside the basin (mask==0, ocean) routed directly: qsur_routed + qsub_routed + qgwl_out (F90:706-713), [m3/s]"
+    },
+    "qsur_ms": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "surface runoff in m/s feeding the hillslope step: qsur_routed/area (the F90:806-813 m3/s -> m/s conversion), [m/s]"
+    },
+    "qsub_ms": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "subsurface runoff in m/s feeding the hillslope step: qsub_routed/area, [m/s]"
+    },
+    "qgwl_ms": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "gwl runoff in m/s feeding the channel step: qgwl_routed/area, [m/s]"
+    },
+    "direct_liq": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "liquid water routed directly to the outlet: direct_qgwl + direct_neg_sur + direct_neg_sub + direct_mask0 (ctl%direct(:,nt_liq)), [m3/s]"
+    },
+    "direct_ice": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "frozen runoff routed directly to the outlet: qsur_ice_m3s (the Flrl_rofi stream, F90:595-612), [m3/s]"
+    },
+    "direct_glc_liq": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "liquid glc runoff routed directly (ctl%direct_glc(:,nt_liq), F90:565-589), [m3/s]"
+    },
+    "direct_glc_ice": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "frozen glc runoff routed directly (ctl%direct_glc(:,nt_ice)), [m3/s]"
+    },
+    "runoffocn_liq": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "routed runoff at outlet cells (mask >= 2): the reach streamflow -erout (ctl%flow; Channel.flow), else 0 (F90:861-863), [m3/s]"
+    },
+    "runofftot_liq": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "total liquid runoff = direct_liq + runoffocn_liq + direct_glc_liq (F90:856-864, 871), [m3/s]"
+    },
+    "runofftot_ice": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "total frozen runoff = direct_ice + direct_glc_ice, [m3/s]"
+    },
+    "rofl_m3s": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "liquid river runoff to the ocean in m3/s, ice_runoff branch of export_fields (F90:362-382): runofftot_liq - direct_glc_liq when ice_runoff, plus direct_ice otherwise, [m3/s]"
+    },
+    "rofi_m3s": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "frozen river runoff to the ocean in m3/s: direct_ice when ice_runoff, 0 otherwise, [m3/s]"
+    },
+    "rofl_glc_m3s": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "liquid glc runoff to the ocean in m3/s = direct_glc_liq, [m3/s]"
+    },
+    "rofi_glc_m3s": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "frozen glc runoff to the ocean in m3/s = direct_glc_ice, [m3/s]"
+    },
+    "flood_m3s": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "flood flux in m3/s = flood (ctl%flood, F90:516), [m3/s]"
+    },
+    "volr_m3": {
+      "type": "unknown",
+      "units": "m^3",
+      "description": "total water storage in m3 = volr, [m3]"
+    },
+    "volrmch_m3": {
+      "type": "unknown",
+      "units": "m^3",
+      "description": "main-channel storage in m3 = wr, [m3]"
+    },
+    "tdepth": {
+      "type": "unknown",
+      "units": "m",
+      "description": "stream depth (tributary depth yt) for Sr_tdepth (F90:399), [m]"
+    },
+    "tdepth_max": {
+      "type": "unknown",
+      "units": "m",
+      "description": "maximum stream depth = max(twidth0, 0)*(rdepth/rwidth) for Sr_tdepth_max (F90:401), [m]"
+    },
+    "qsur_m3s": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 0.0,
+      "description": "liquid surface runoff stream from the cap, [m3/s]"
+    },
+    "qsub_m3s": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 0.0,
+      "description": "liquid subsurface runoff stream from the cap, [m3/s]"
+    },
+    "qgwl_m3s": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 0.0,
+      "description": "gwl runoff stream from the cap, [m3/s]"
+    },
+    "qirrig_m3s": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": -0.001,
+      "description": "irrigation demand stream from the cap (negative), [m3/s]"
+    },
+    "qsur_ice_m3s": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 0.0,
+      "description": "frozen runoff stream from the cap, [m3/s]"
+    },
+    "qglc_liq_m3s": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 0.0,
+      "description": "liquid glc runoff stream from the cap, [m3/s]"
+    },
+    "qglc_ice_m3s": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 0.0,
+      "description": "frozen glc runoff stream from the cap, [m3/s]"
+    },
+    "wr": {
+      "type": "parameter",
+      "units": "m^3",
+      "default": 0.0,
+      "description": "main-channel storage from the Channel system (TRunoff%wr), [m3]"
+    },
+    "wt": {
+      "type": "parameter",
+      "units": "m^3",
+      "default": 0.0,
+      "description": "subnetwork storage from the Subnetwork system (TRunoff%wt), [m3]"
+    },
+    "wh": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0.0,
+      "description": "hillslope storage from the Hillslope system (TRunoff%wh), [m]"
+    },
+    "erout": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 0.0,
+      "description": "main-channel outflow from the Channel system (TRunoff%erout), [m3/s]"
+    },
+    "yt": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0.0,
+      "description": "subnetwork depth from the Subnetwork system (TRunoff%yt) for Sr_tdepth, [m]"
+    },
+    "area": {
+      "type": "parameter",
+      "units": "m^2",
+      "default": 10000000.0,
+      "description": "area of the local cell (ctl%area = TUnit%area, frivinp area; dumped as the area column of mosart_run_imports_wide.csv); wired to RofCap.area, Hillslope.area and Channel.area by the coupling library, [m2]"
+    },
+    "frac": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "fraction of the cell included in the study area (TUnit%frac, frivinp frac); wired to Hillslope.frac and Channel.frac by the coupling library, [-]"
+    },
+    "mask": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "cell mask from fdir: 1 land, 2 outlet, 0 ocean (mosart_driver.F90:704-705), [-]"
+    },
+    "coupling_period": {
+      "type": "parameter",
+      "units": "s",
+      "default": 10800.0,
+      "description": "rof coupling period in seconds (ROF_NCPL=8 over a daily base gives 3 h; boundaries.md 0.2), [s]"
+    },
+    "delt_mosart": {
+      "type": "parameter",
+      "units": "s",
+      "default": 3600.0,
+      "description": "nominal MOSART routing timestep (namelist delt_mosart, default 3600 s), [s]"
+    },
+    "delt_coupling": {
+      "type": "parameter",
+      "units": "s",
+      "default": 10800.0,
+      "description": "coupling period as a real (delt_coupling = coupling_period*1.0, F90:426), [s]"
+    },
+    "fthresh": {
+      "type": "parameter",
+      "units": "m^3",
+      "default": 1e+36,
+      "description": "water flood threshold (ctl%fthresh); the Fortran initializes it to abs(spval) = 1e36 (mosart_control_type.F90:388, spval = 1.e36 at mosart_vars.F90:24) and never lowers it in this configuration, so the flood rule is inactive by default, [m3]"
+    },
+    "river_depth_minimum": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0.0001,
+      "description": "gridcell-average minimum river depth protecting the qgwl threshold option (F90:401), [m]"
+    },
+    "DLevelH2R": {
+      "type": "parameter",
+      "units": "1",
+      "default": 5.0,
+      "description": "base number of channel-routing sub-time-steps within one hillslope routing step (Tctl%DLevelH2R, default 5), [-]"
+    },
+    "DLevelR": {
+      "type": "parameter",
+      "units": "1",
+      "default": 3.0,
+      "description": "number of channel-routing sub-time-steps at a higher level within one at a lower level (Tctl%DLevelR, default 3), [-]"
+    },
+    "rslpsqrt": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.01,
+      "description": "sqrt of the main-reach slope (TUnit%rslpsqrt = sqrt(rslp), mosart_tspatialunit_type.F90:390, with the frivinp rslp floored to 1e-4 when <= 0 at F90:380-382); the single source of the cell's main-reach slope: it enters the CFL phi_r here and is wired to Channel.rslpsqrt by the coupling library, [-]"
+    },
+    "tslpsqrt": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.01,
+      "description": "sqrt of the mean tributary slope (TUnit%tslpsqrt = sqrt(tslp), F90:391, tslp floored to 1e-4 when <= 0 at F90:383-385); the single source of the cell's tributary slope: it enters the CFL phi_t here and is wired to Subnetwork.tslpsqrt by the coupling library, [-]"
+    },
+    "rlen": {
+      "type": "parameter",
+      "units": "m",
+      "default": 10000.0,
+      "description": "length of the main river reach (TUnit%rlen, frivinp rlen floored to sqrt(area) at mosart_tspatialunit_type.F90:331-336); wired to Channel.rlen by the coupling library, [m]"
+    },
+    "rwidth": {
+      "type": "parameter",
+      "units": "m",
+      "default": 50.0,
+      "description": "bankfull width of the main reach (TUnit%rwidth, frivinp rwid); wired to Channel.rwidth by the coupling library, [m]"
+    },
+    "tlen": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1000.0,
+      "description": "length of all sub-network reaches within the cell (TUnit%tlen = area/rlen/2 - hlen, mosart_tspatialunit_type.F90:361; 0 when rlen <= 0); wired to Subnetwork.tlen by the coupling library, [m]"
+    },
+    "twidth": {
+      "type": "parameter",
+      "units": "m",
+      "default": 10.0,
+      "description": "bankfull width of the sub-reach (TUnit%twidth, frivinp twid after the c_twid rlenTotal adjustment of F90:363-373); wired to Subnetwork.twidth by the coupling library, [m]"
+    },
+    "twidth0": {
+      "type": "parameter",
+      "units": "m",
+      "default": 10.0,
+      "description": "unadjusted tributary width (TUnit%twidth0) for the Sr_tdepth_max ratio (F90:401), [m]"
+    },
+    "rdepth": {
+      "type": "parameter",
+      "units": "m",
+      "default": 2.0,
+      "description": "bankfull depth of the river cross section (TUnit%rdepth, frivinp rdep) for Sr_tdepth_max; wired to Channel.rdepth by the coupling library, [m]"
+    },
+    "areaTotal2": {
+      "type": "parameter",
+      "units": "m^2",
+      "default": 100000000.0,
+      "description": "computed total upstream drainage area including the local cell (TUnit%areaTotal2, the dnID-network accumulation of set_areatotal2, mosart_tspatialunit_type.F90:533-620; equals area for a headwater cell, so it is never smaller than area) for the CFL phi_r and the Channel small-catchment branch; wired to Channel.areaTotal2 by the coupling library, [m2]"
+    },
+    "bypass_routing_option": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1,
+      "description": "namelist bypass_routing_option: 1 direct_in_place (default), 2 direct_to_outlet, 3 none (enum bypass_routing_option), [-]"
+    },
+    "qgwl_runoff_option": {
+      "type": "parameter",
+      "units": "1",
+      "default": 3,
+      "description": "namelist qgwl_runoff_option: 1 all, 2 negative, 3 threshold (default; enum qgwl_runoff_option), [-]"
+    },
+    "rof_from_glc": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "1 when glc runoff is routed through rof, [-]"
+    },
+    "ice_runoff": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "namelist ice_runoff: 1 separates liquid and frozen river runoff to the ocean, 0 adds frozen into the liquid stream (rof_import_export.F90:362-382), [-]"
+    }
+  },
+  "equations": [
+    {
+      "lhs": "nsub",
+      "rhs": {
+        "op": "ceil",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              "coupling_period",
+              "delt_mosart"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "delt",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "delt_coupling",
+          "nsub"
+        ]
+      }
+    },
+    {
+      "lhs": "phi_r",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "mask",
+                  0.0
+                ]
+              },
+              {
+                "op": ">",
+                "args": [
+                  "rlen",
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "areaTotal2",
+                  "rslpsqrt"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "rlen",
+                  "rwidth"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "phi_t",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "tlen",
+              0.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "area",
+                  "tslpsqrt"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "tlen",
+                  "twidth"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "numDT_r",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "mask",
+                  0.0
+                ]
+              },
+              {
+                "op": ">",
+                "args": [
+                  "rlen",
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "op": "max",
+            "args": [
+              {
+                "op": "floor",
+                "args": [
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": ">=",
+                        "args": [
+                          "phi_r",
+                          10.0
+                        ]
+                      },
+                      {
+                        "op": "+",
+                        "args": [
+                          {
+                            "op": "*",
+                            "args": [
+                              "DLevelR",
+                              {
+                                "op": "log10",
+                                "args": [
+                                  "phi_r"
+                                ]
+                              }
+                            ]
+                          },
+                          1.0
+                        ]
+                      },
+                      {
+                        "op": "+",
+                        "args": [
+                          "DLevelR",
+                          1.0
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              1.0
+            ]
+          },
+          1.0
+        ]
+      }
+    },
+    {
+      "lhs": "numDT_t",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "tlen",
+              0.0
+            ]
+          },
+          {
+            "op": "max",
+            "args": [
+              {
+                "op": "floor",
+                "args": [
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": ">=",
+                        "args": [
+                          "phi_t",
+                          10.0
+                        ]
+                      },
+                      {
+                        "op": "+",
+                        "args": [
+                          {
+                            "op": "*",
+                            "args": [
+                              "DLevelR",
+                              {
+                                "op": "log10",
+                                "args": [
+                                  "phi_t"
+                                ]
+                              }
+                            ]
+                          },
+                          1.0
+                        ]
+                      },
+                      {
+                        "op": "+",
+                        "args": [
+                          "DLevelR",
+                          1.0
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              1.0
+            ]
+          },
+          1.0
+        ]
+      }
+    },
+    {
+      "lhs": "localdelt_t",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "delt",
+          {
+            "op": "*",
+            "args": [
+              "DLevelH2R",
+              "numDT_t"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "localdelt_r",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "delt",
+          {
+            "op": "*",
+            "args": [
+              "DLevelH2R",
+              "numDT_r"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "irrig_volume",
+      "rhs": {
+        "op": "*",
+        "args": [
+          {
+            "op": "-",
+            "args": [
+              "qirrig_m3s"
+            ]
+          },
+          "coupling_period"
+        ]
+      }
+    },
+    {
+      "lhs": "qirrig_actual",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "-",
+            "args": [
+              {
+                "op": "min",
+                "args": [
+                  "irrig_volume",
+                  "wr"
+                ]
+              }
+            ]
+          },
+          "coupling_period"
+        ]
+      }
+    },
+    {
+      "lhs": "qsub_i",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "qsub_m3s",
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "irrig_volume",
+                  "wr"
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "-",
+                    "args": [
+                      "wr",
+                      "irrig_volume"
+                    ]
+                  },
+                  "coupling_period"
+                ]
+              },
+              0.0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "volr",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "wt",
+          "wr",
+          {
+            "op": "*",
+            "args": [
+              "wh",
+              "area"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "flood",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "==",
+            "args": [
+              "mask",
+              1.0
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "volr",
+                  "fthresh"
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "-",
+                    "args": [
+                      "volr",
+                      "fthresh"
+                    ]
+                  },
+                  "delt_coupling"
+                ]
+              },
+              0.0
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "qsur_f",
+      "rhs": {
+        "op": "-",
+        "args": [
+          "qsur_m3s",
+          "flood"
+        ]
+      }
+    },
+    {
+      "lhs": "direct_neg_sur",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "qsur_f",
+              0.0
+            ]
+          },
+          "qsur_f",
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "direct_neg_sub",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "qsub_i",
+              0.0
+            ]
+          },
+          "qsub_i",
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "qsur_routed",
+      "rhs": {
+        "op": "max",
+        "args": [
+          "qsur_f",
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "qsub_routed",
+      "rhs": {
+        "op": "max",
+        "args": [
+          "qsub_i",
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "qgwl_eligible",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "or",
+            "args": [
+              {
+                "op": "==",
+                "args": [
+                  "bypass_routing_option",
+                  {
+                    "op": "enum",
+                    "args": [
+                      "bypass_routing_option",
+                      "direct_in_place"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "==",
+                "args": [
+                  "bypass_routing_option",
+                  {
+                    "op": "enum",
+                    "args": [
+                      "bypass_routing_option",
+                      "direct_to_outlet"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          1.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "direct_qgwl",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              "qgwl_eligible",
+              {
+                "op": "==",
+                "args": [
+                  "qgwl_runoff_option",
+                  {
+                    "op": "enum",
+                    "args": [
+                      "qgwl_runoff_option",
+                      "all"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "qgwl_m3s",
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "and",
+                "args": [
+                  "qgwl_eligible",
+                  {
+                    "op": "==",
+                    "args": [
+                      "qgwl_runoff_option",
+                      {
+                        "op": "enum",
+                        "args": [
+                          "qgwl_runoff_option",
+                          "negative"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": "<",
+                    "args": [
+                      "qgwl_m3s",
+                      0.0
+                    ]
+                  },
+                  "qgwl_m3s",
+                  0.0
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": "and",
+                    "args": [
+                      "qgwl_eligible",
+                      {
+                        "op": "==",
+                        "args": [
+                          "qgwl_runoff_option",
+                          {
+                            "op": "enum",
+                            "args": [
+                              "qgwl_runoff_option",
+                              "threshold"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "and",
+                        "args": [
+                          {
+                            "op": "<",
+                            "args": [
+                              {
+                                "op": "+",
+                                "args": [
+                                  {
+                                    "op": "*",
+                                    "args": [
+                                      "qgwl_m3s",
+                                      "coupling_period"
+                                    ]
+                                  },
+                                  "wr"
+                                ]
+                              },
+                              {
+                                "op": "*",
+                                "args": [
+                                  "river_depth_minimum",
+                                  "area"
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "op": "<",
+                            "args": [
+                              "qgwl_m3s",
+                              0.0
+                            ]
+                          }
+                        ]
+                      },
+                      "qgwl_m3s",
+                      0.0
+                    ]
+                  },
+                  0.0
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "qgwl_out",
+      "rhs": {
+        "op": "-",
+        "args": [
+          "qgwl_m3s",
+          "direct_qgwl"
+        ]
+      }
+    },
+    {
+      "lhs": "qgwl_routed",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "==",
+            "args": [
+              "mask",
+              0.0
+            ]
+          },
+          0.0,
+          "qgwl_out"
+        ]
+      }
+    },
+    {
+      "lhs": "direct_mask0",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "==",
+            "args": [
+              "mask",
+              0.0
+            ]
+          },
+          {
+            "op": "+",
+            "args": [
+              "qsur_routed",
+              "qsub_routed",
+              "qgwl_out"
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "qsur_ms",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "qsur_routed",
+          "area"
+        ]
+      }
+    },
+    {
+      "lhs": "qsub_ms",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "qsub_routed",
+          "area"
+        ]
+      }
+    },
+    {
+      "lhs": "qgwl_ms",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "qgwl_routed",
+          "area"
+        ]
+      }
+    },
+    {
+      "lhs": "direct_liq",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "direct_qgwl",
+          "direct_neg_sur",
+          "direct_neg_sub",
+          "direct_mask0"
+        ]
+      }
+    },
+    {
+      "lhs": "direct_ice",
+      "rhs": "qsur_ice_m3s"
+    },
+    {
+      "lhs": "direct_glc_liq",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "==",
+            "args": [
+              "rof_from_glc",
+              1.0
+            ]
+          },
+          "qglc_liq_m3s",
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "direct_glc_ice",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "==",
+            "args": [
+              "rof_from_glc",
+              1.0
+            ]
+          },
+          "qglc_ice_m3s",
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "runoffocn_liq",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">=",
+            "args": [
+              "mask",
+              2.0
+            ]
+          },
+          {
+            "op": "-",
+            "args": [
+              "erout"
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "runofftot_liq",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "direct_liq",
+          "runoffocn_liq",
+          "direct_glc_liq"
+        ]
+      }
+    },
+    {
+      "lhs": "runofftot_ice",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "direct_ice",
+          "direct_glc_ice"
+        ]
+      }
+    },
+    {
+      "lhs": "rofl_m3s",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "==",
+            "args": [
+              "ice_runoff",
+              1.0
+            ]
+          },
+          {
+            "op": "-",
+            "args": [
+              "runofftot_liq",
+              "direct_glc_liq"
+            ]
+          },
+          {
+            "op": "-",
+            "args": [
+              {
+                "op": "+",
+                "args": [
+                  "runofftot_liq",
+                  "direct_ice"
+                ]
+              },
+              "direct_glc_liq"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rofi_m3s",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "==",
+            "args": [
+              "ice_runoff",
+              1.0
+            ]
+          },
+          "direct_ice",
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "rofl_glc_m3s",
+      "rhs": "direct_glc_liq"
+    },
+    {
+      "lhs": "rofi_glc_m3s",
+      "rhs": "direct_glc_ice"
+    },
+    {
+      "lhs": "flood_m3s",
+      "rhs": "flood"
+    },
+    {
+      "lhs": "volr_m3",
+      "rhs": "volr"
+    },
+    {
+      "lhs": "volrmch_m3",
+      "rhs": "wr"
+    },
+    {
+      "lhs": "tdepth",
+      "rhs": "yt"
+    },
+    {
+      "lhs": "tdepth_max",
+      "rhs": {
+        "op": "*",
+        "args": [
+          {
+            "op": "max",
+            "args": [
+              "twidth0",
+              0.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              "rdepth",
+              "rwidth"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "coupling_step1_cell100312",
+      "description": "One-coupling-period trace of the full assembly over [0, 10800] (one ROF_NCPL=8 coupling period) from the cold start of cell 100312 in the EqESM instrumented-CESM dry window (stage1/dumps/mosart/, the lane run I2000Clm60Sp_mosart_inst): mosart_run_imports.csv row (step 1, nt 1, gindex 100312) gives qsur = 7.51365591037279353e-05 m3/s, qsub = qgwl = qirrig = qglc = 0, all storages zero, mask = 1. The cap input Flrl_rofsur = qsur/(med2mod_areacor*area*0.001) = 2.590714464830452e-11 mm/s uses the dumped area = 2.90021364474052906e9 m2 and med2mod_areacor = 1.00000405527865333 (area and areacor columns of mosart_run_imports_wide.csv, same row); the Flrl field itself is not dumped, so the cap leg is the inverse of state_getimport with the run's own areacor. Cell geometry is the single source in Control (wired to Hillslope/Subnetwork/Channel/RofCap by the coupling library): rlen, rwidth, rwidth0, rdepth from the gr_chan.csv columns, tlen, twidth from gr_subnet.csv, slopes rslpsqrt = tslpsqrt = sqrt(0.0099) and hslpsqrt, nh, nr, nt, Gxr from the frivinp network file MOSART_routing_Global_0.5x0.5_c170601.nc (rslp, tslp, hslp, nh, nr, nt, gxr at this gindex; rslpsqrt matches the crvrman_chan.csv rslpsqrt column), hlen = 1/(2*Gxr) (mosart_tspatialunit_type.F90:340-359, consistent with the dumped tlen = area/rlen/2 - hlen), and areaTotal2 = area: 100312 is a headwater cell (no frivinp dnID points to it), so the set_areatotal2 accumulation returns its own area. The CFL then gives phi_r = 21.197312 and phi_t = 4.235200, so numDT_r = floor(3*log10(phi_r) + 1) = floor(4.9788) = 4 and numDT_t = DLevelR + 1 = 4, matching the 20 = DLevelH2R*numDT rows per (step, ns) key of crvrman_chan.csv/crvrman_trib.csv for this cell - the Fortran's integer truncation is load-bearing here (without it numDT_r would be 4.98 and localdelt_r 144.6 s); localdelt = 3600/5/4 = 180 s, nsub = ceil(10800/3600) = 3 and delt = 3600 s match the three ns levels per coupling step of mosart_euler.csv. End-of-period states of mosart_run_exports.csv row (1,1,100312): volr = 8.11474838320261793e-01 m3 (asserted: with a dry channel the assembly conserves water exactly, d(volr)/dt = qsur; the continuous end state differs from the Fortran by 2.4e-16 rel) and wh = 2.79797873884816915e-10 m (asserted with rel 1e-5: the continuous end state trails the Fortran by 1.0e-6 rel, the effect of the Fortran evaluating ehout at each substep's entry state). The wt/wr split is NOT asserted, and cannot be at a meaningful tolerance: the .esm integrates d(wt)/dt and d(wr)/dt as continuous ODEs, so the hillslope outflow etin reaches the subnetwork as a smooth ramp, while the Fortran holds etin fixed over each 3600-s substep and applies its dry-cell clamps per Euler step; the continuous end states (solver at reltol 1e-14) wt = 2.0628127835562434e-06 m3 and wr = 8.523256587208812e-16 m3 differ from the Fortran's wt = 1.22671012572302206e-06 m3 (x1.68) and wr = 2.61999638886733984e-16 m3 (x3.3). This is a structural difference of the continuous formulation, not a convergence error (see README, 'Continuous ODEs vs the Fortran 3600-s Euler stepping'); wr is asserted only below the dry-channel threshold (|wr| < 1e-14 m3, far below the TINYVALUE wetted-area cutoff, so the channel stays dry in both). The zero branches of the period are pinned: Channel.flow, runofftot_liq, flood, qirrig_actual, direct_liq, rofl_m3s all stay 0 (dry channel, volr < fthresh = 1e36 default, no direct transfers).",
+      "time_span": {
+        "start": 0.0,
+        "end": 10800.0
+      },
+      "parameter_overrides": {
+        "RofCap.Flrl_rofsur": 2.590714464830452e-11,
+        "RofCap.Flrl_irrig": 0.0,
+        "RofCap.med2mod_areacor": 1.0000040552786533,
+        "RofCap.mod2med_areacor": 0.9999959447377919,
+        "Control.area": 2900213644.740529,
+        "Control.mask": 1.0,
+        "Control.areaTotal2": 2900213644.740529,
+        "Control.rlen": 144889.1719,
+        "Control.rwidth": 93.9573745727539,
+        "Control.rdepth": 2.0,
+        "Control.tlen": 8341.719766593531,
+        "Control.twidth": 8168.043717446656,
+        "Control.rslpsqrt": 0.099498743710662,
+        "Control.tslpsqrt": 0.099498743710662,
+        "Hillslope.hslpsqrt": 0.3788139384975162,
+        "Hillslope.nh": 0.07745444774627686,
+        "Hillslope.Gxr": 0.0003,
+        "Subnetwork.nt": 0.05000000074505806,
+        "Subnetwork.hlen": 1666.6666666666667,
+        "Channel.nr": 0.05000000074505806,
+        "Channel.rwidth0": 469.78687286376953
+      },
+      "initial_conditions": {
+        "Hillslope.wh": 0.0,
+        "Subnetwork.wt": 0.0,
+        "Channel.wr": 0.0
+      },
+      "tolerance": {
+        "rel": 1e-05,
+        "abs": 1e-16
+      },
+      "assertions": [
+        {
+          "variable": "Control.volr",
+          "time": 10800.0,
+          "expected": 0.8114748383202617
+        },
+        {
+          "variable": "Hillslope.wh",
+          "time": 10800.0,
+          "expected": 2.797978738848169e-10
+        },
+        {
+          "variable": "Channel.wr",
+          "time": 10800.0,
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-14
+          }
+        },
+        {
+          "variable": "Control.nsub",
+          "time": 0.0,
+          "expected": 3.0
+        },
+        {
+          "variable": "Control.delt",
+          "time": 0.0,
+          "expected": 3600.0
+        },
+        {
+          "variable": "Control.phi_r",
+          "time": 0.0,
+          "expected": 21.19731167901311
+        },
+        {
+          "variable": "Control.phi_t",
+          "time": 0.0,
+          "expected": 4.235200148995447
+        },
+        {
+          "variable": "RofCap.qsur_m3s",
+          "time": 0.0,
+          "expected": 7.513655910372794e-05
+        },
+        {
+          "variable": "Control.numDT_r",
+          "time": 0.0,
+          "expected": 4.0
+        },
+        {
+          "variable": "Control.numDT_t",
+          "time": 0.0,
+          "expected": 4.0
+        },
+        {
+          "variable": "Control.localdelt_r",
+          "time": 0.0,
+          "expected": 180.0
+        },
+        {
+          "variable": "Control.localdelt_t",
+          "time": 0.0,
+          "expected": 180.0
+        },
+        {
+          "variable": "Control.qsur_ms",
+          "time": 0.0,
+          "expected": 2.5907249708995185e-14
+        },
+        {
+          "variable": "Channel.flow",
+          "time": 10800.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.runofftot_liq",
+          "time": 10800.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.flood",
+          "time": 10800.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.qirrig_actual",
+          "time": 10800.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.direct_liq",
+          "time": 10800.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.rofl_m3s",
+          "time": 10800.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "coupling_step1_qgwl_cell99771",
+      "description": "The wet-window positive-qgwl import path of the coupled assembly on cell 99771 (mosart_driver.F90:501-509, 639-756, 806-813), from the EqESM instrumented-CESM wet window (stage1/dumps/mosart_wet/: the same compset and grid as the dry lane run, 1-day cold start 2000-01-01 whose runoff pulse drives reaches above bankfull; dump files mosart_run_imports.csv, mosart_euler.csv, crvrman_chan.csv, gr_chan.csv, gr_subnet.csv). Import row (step 1, nt 1, gindex 99771): qsur = 3.86971270640179821 m3/s, qgwl = 1.96740012269598014e3 m3/s, qsub = qirrig = 0; the cap inputs are Flrl = q/(med2mod_areacor*area*0.001) with area = 2.89076629799111700e9 m2 and med2mod_areacor = 1.00000394622875621 from the area/areacor columns of the dry-lane mosart_run_imports_wide.csv (static mesh properties, identical grid; the wet dump has no wide file). With bypass_routing_option = direct_to_outlet and qgwl_runoff_option = negative (the wet run's namelist) the positive qgwl is routed into the channel: qgwl_ms = qgwl/area = 6.80580828710777225e-07 m/s and qsur_ms = 1.33864598777527649e-09 m/s, both equal to the mosart_euler.csv entry row (1,1,99771), and direct_liq = 0. Geometry: rlen, rwidth, rwidth0, rdepth from gr_chan.csv, tlen, twidth from gr_subnet.csv; rslp = tslp = 1e-4 (rslpsqrt = tslpsqrt = 0.01), hslp, nh, nr, nt, Gxr from the frivinp network file; hlen = 1/(2*Gxr); areaTotal2 = 5.880559348879098e11 m2, the sum of the frivinp area over every cell whose dnID chain reaches 99771 (the set_areatotal2 accumulation, recomputed from the network file - not tuned). The CFL gives phi_r = 115.517454, numDT_r = floor(3*log10(phi_r) + 1) = floor(7.1879) = 7 and phi_t = 1.345314 < 10, numDT_t = 4, matching the 35 and 20 rows per (step, ns) key of crvrman_chan.csv/crvrman_trib.csv for this cell (DLevelH2R = 5); localdelt_r = 3600/5/7 s. The t = 10800 end states are not asserted: the isolated-cell assembly has eroutUp = 0, while the run's upstream inflow erin grows to 34.8 m3/s within step 1 (run step-1 exit: volr = 2.36699830940145031e7 m3, wr = 2.36281901968237795e7 m3).",
+      "time_span": {
+        "start": 0.0,
+        "end": 10800.0
+      },
+      "parameter_overrides": {
+        "RofCap.Flrl_rofsur": 1.3386407051928314e-06,
+        "RofCap.Flrl_rofgwl": 0.0006805781429937385,
+        "RofCap.Flrl_irrig": 0.0,
+        "RofCap.Flrl_rofsub": 0.0,
+        "RofCap.med2mod_areacor": 1.0000039462287562,
+        "RofCap.mod2med_areacor": 0.9999960537868164,
+        "Control.area": 2890766297.991117,
+        "Control.mask": 1.0,
+        "Control.bypass_routing_option": 2.0,
+        "Control.qgwl_runoff_option": 2.0,
+        "Control.areaTotal2": 588055934887.9098,
+        "Control.rlen": 150974.3125,
+        "Control.rwidth": 337.1847839355469,
+        "Control.rdepth": 2.0,
+        "Control.tlen": 7907.035806696532,
+        "Control.twidth": 2717.537625,
+        "Control.rslpsqrt": 0.01,
+        "Control.tslpsqrt": 0.01,
+        "Hillslope.hslpsqrt": 0.0282842712474619,
+        "Hillslope.nh": 0.04093056172132492,
+        "Hillslope.Gxr": 0.0003,
+        "Subnetwork.nt": 0.05000000074505806,
+        "Subnetwork.hlen": 1666.6666666666667,
+        "Channel.nr": 0.05000000074505806,
+        "Channel.rwidth0": 1685.9239196777344
+      },
+      "initial_conditions": {
+        "Hillslope.wh": 0.0,
+        "Subnetwork.wt": 0.0,
+        "Channel.wr": 0.0
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-16
+      },
+      "assertions": [
+        {
+          "variable": "Control.nsub",
+          "time": 0.0,
+          "expected": 3.0
+        },
+        {
+          "variable": "Control.delt",
+          "time": 0.0,
+          "expected": 3600.0
+        },
+        {
+          "variable": "Control.phi_r",
+          "time": 0.0,
+          "expected": 115.5174540543094
+        },
+        {
+          "variable": "Control.phi_t",
+          "time": 0.0,
+          "expected": 1.345314154719881
+        },
+        {
+          "variable": "Control.numDT_r",
+          "time": 0.0,
+          "expected": 7.0
+        },
+        {
+          "variable": "Control.numDT_t",
+          "time": 0.0,
+          "expected": 4.0
+        },
+        {
+          "variable": "Control.localdelt_r",
+          "time": 0.0,
+          "expected": 102.85714285714286
+        },
+        {
+          "variable": "Control.localdelt_t",
+          "time": 0.0,
+          "expected": 180.0
+        },
+        {
+          "variable": "RofCap.qsur_m3s",
+          "time": 0.0,
+          "expected": 3.869712706401798
+        },
+        {
+          "variable": "RofCap.qgwl_m3s",
+          "time": 0.0,
+          "expected": 1967.4001226959801
+        },
+        {
+          "variable": "Control.qsur_ms",
+          "time": 0.0,
+          "expected": 1.3386459877752765e-09
+        },
+        {
+          "variable": "Control.qsub_ms",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.qgwl_ms",
+          "time": 0.0,
+          "expected": 6.805808287107772e-07
+        },
+        {
+          "variable": "Control.volr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.direct_liq",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.flood",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.qirrig_actual",
+          "time": 0.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "coupling_step1_negqgwl_cell222599",
+      "description": "The negative-qgwl direct transfer of the coupled assembly on cell 222599 (mosart_driver.F90:672-690: with bypass_routing_option = direct_to_outlet and qgwl_runoff_option = negative a negative gwl runoff is removed from the routing and sent to the outlet), from the EqESM instrumented-CESM wet window (stage1/dumps/mosart_wet/mosart_run_imports.csv row step 1, nt 1, gindex 222599): qgwl = -1.44096584047145909e5 m3/s, qsur = 6.07149412613702546e-07 m3/s; cap inputs Flrl = q/(med2mod_areacor*area*0.001) with area = 1.31864413390599704e9 m2 and med2mod_areacor = 9.99990744505179663e-01 from the dry-lane mosart_run_imports_wide.csv area/areacor columns (static mesh properties). So direct_qgwl = qgwl, qgwl_out = qgwl_ms = 0 (the run's mosart_euler.csv entry rows show qgwl = 0 and the channel stays empty) and direct_liq = runofftot_liq = rofl_m3s = qgwl. The .esm keeps the direct flux on the source cell, while the Fortran FieldSMM-redistributes it to the basin outlet (F90:684-686), so the run's own export row for 222599 shows direct = 0 - the flux appears on the untraced outlet cell; the test pins the removal decision. Geometry: rlen, rwidth, rwidth0, rdepth from gr_chan.csv, tlen, twidth from gr_subnet.csv, the frivinp rslp = tslp = 0 floored to 1e-4 by mosart_tspatialunit_type.F90:380-385 (rslpsqrt = tslpsqrt = 0.01), hslp, nh, nr, nt, Gxr from the frivinp file, hlen = 1/(2*Gxr), areaTotal2 = 3.9802809352904286e9 m2 from the dnID accumulation; phi_r = 7.059415 and phi_t = 0.247340 are both < 10, so numDT_r = numDT_t = 4 (20 rows per (step, ns) key in crvrman_chan.csv/crvrman_trib.csv). End states asserted where the isolated cell still matches the run: volr(10800) = 6.55721365622798699e-03 m3 (mosart_run_exports.csv step 1) and wh(10800) = 4.97269364941832802e-12 m (mosart_euler.csv exit row, step 1, ns 3); wt and wr are not asserted (the continuous-ODE wt/wr split, see coupling_step1_cell100312 and the README).",
+      "time_span": {
+        "start": 0.0,
+        "end": 10800.0
+      },
+      "parameter_overrides": {
+        "RofCap.Flrl_rofsur": 4.604388830331991e-13,
+        "RofCap.Flrl_rofgwl": -0.10927733574170632,
+        "RofCap.Flrl_irrig": 0.0,
+        "RofCap.Flrl_rofsub": 0.0,
+        "RofCap.med2mod_areacor": 0.9999907445051797,
+        "RofCap.mod2med_areacor": 1.0000092555804854,
+        "Control.area": 1318644133.905997,
+        "Control.mask": 1.0,
+        "Control.bypass_routing_option": 2.0,
+        "Control.qgwl_runoff_option": 2.0,
+        "Control.areaTotal2": 3980280935.2904286,
+        "Control.rlen": 60530.3867,
+        "Control.rwidth": 93.14757537841797,
+        "Control.rdepth": 2.0,
+        "Control.tlen": 10267.414585433311,
+        "Control.twidth": 5192.445015397095,
+        "Control.rslpsqrt": 0.01,
+        "Control.tslpsqrt": 0.01,
+        "Hillslope.hslpsqrt": 0.06928203230275509,
+        "Hillslope.nh": 0.07376454025506973,
+        "Hillslope.Gxr": 0.0008,
+        "Subnetwork.nt": 0.05000000074505806,
+        "Subnetwork.hlen": 625.0,
+        "Channel.nr": 0.05000000074505806,
+        "Channel.rwidth0": 465.73787689208984
+      },
+      "initial_conditions": {
+        "Hillslope.wh": 0.0,
+        "Subnetwork.wt": 0.0,
+        "Channel.wr": 0.0
+      },
+      "tolerance": {
+        "rel": 1e-05,
+        "abs": 1e-16
+      },
+      "assertions": [
+        {
+          "variable": "Control.nsub",
+          "time": 0.0,
+          "expected": 3.0
+        },
+        {
+          "variable": "Control.delt",
+          "time": 0.0,
+          "expected": 3600.0
+        },
+        {
+          "variable": "Control.numDT_r",
+          "time": 0.0,
+          "expected": 4.0
+        },
+        {
+          "variable": "Control.numDT_t",
+          "time": 0.0,
+          "expected": 4.0
+        },
+        {
+          "variable": "Control.localdelt_r",
+          "time": 0.0,
+          "expected": 180.0
+        },
+        {
+          "variable": "Control.localdelt_t",
+          "time": 0.0,
+          "expected": 180.0
+        },
+        {
+          "variable": "Control.qsur_ms",
+          "time": 0.0,
+          "expected": 4.604346214435022e-16
+        },
+        {
+          "variable": "Control.qsub_ms",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.qgwl_ms",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.qgwl_out",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.direct_qgwl",
+          "time": 0.0,
+          "expected": -144096.5840471459
+        },
+        {
+          "variable": "Control.direct_liq",
+          "time": 0.0,
+          "expected": -144096.5840471459
+        },
+        {
+          "variable": "Control.runofftot_liq",
+          "time": 0.0,
+          "expected": -144096.5840471459
+        },
+        {
+          "variable": "Control.rofl_m3s",
+          "time": 0.0,
+          "expected": -144096.5840471459
+        },
+        {
+          "variable": "Control.volr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.volr",
+          "time": 10800.0,
+          "expected": 0.006557213656227987
+        },
+        {
+          "variable": "Hillslope.wh",
+          "time": 10800.0,
+          "expected": 4.972693649418328e-12
+        }
+      ]
+    },
+    {
+      "id": "irrigation_withdrawal_within_storage",
+      "description": "Mass-conservation test of the irrigation withdrawal (mosart_run step 2, mosart_driver.F90:476-497). Not a dump pin: the dumped windows carry no irrigation demand (qirrig = 0 in every mosart_run_imports.csv row), so the expected values are derived by hand from the Fortran algorithm. A demand qirrig = -V/coupling_period with V = 300 m3 (Flrl_irrig = qirrig/(area*0.001) = -2.7777...e-6 mm/s over area = 1e7 m2, areacor = 1) is drawn from a channel holding wr = 1000 m3. Since wr > V for the whole period, the Fortran removes irrig_volume = V from wr in one jump (wr -= irrig_volume, F90:497) and reports qirrig_actual = -V/coupling_period; the .esm withdraws the same water as the rate qirrig_actual (Control.qirrig_actual wired to Channel.qirrig in d(wr)/dt), so after one period wr = volr = 1000 - 300 = 700 m3 exactly, and qsub is untouched (no overage). The cell has no river (rlen = 0, hence tlen = 0, as mosart_tspatialunit_type.F90:375-378 sets for rlen <= 0; hlen = 0), which isolates the withdrawal: Routing_KW takes the rlen <= 0 branch, erout = -(erin + erlateral) = 0, so d(wr)/dt = qirrig_actual only. The same cell pins the set_subtimesteps guards (F90:645, 655): with rlen = 0 and tlen = 0 the CFL indicators are not computed (phi_r = phi_t = 0) and numDT_r = numDT_t = 1, so localdelt = 3600/5/1 = 720 s (before the guards, phi_t divided by tlen = 0). Before qirrig_actual was wired into the channel this test failed: wr stayed at 1000 m3 although 300 m3 had been withdrawn.",
+      "time_span": {
+        "start": 0.0,
+        "end": 10800.0
+      },
+      "parameter_overrides": {
+        "RofCap.Flrl_rofsur": 0.0,
+        "RofCap.Flrl_irrig": -2.7777777777777775e-06,
+        "Control.area": 10000000.0,
+        "Control.mask": 1.0,
+        "Control.rlen": 0.0,
+        "Control.tlen": 0.0,
+        "Subnetwork.hlen": 0.0
+      },
+      "initial_conditions": {
+        "Hillslope.wh": 0.0,
+        "Subnetwork.wt": 0.0,
+        "Channel.wr": 1000.0
+      },
+      "tolerance": {
+        "rel": 1e-09,
+        "abs": 1e-12
+      },
+      "assertions": [
+        {
+          "variable": "Control.phi_r",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.phi_t",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.numDT_r",
+          "time": 0.0,
+          "expected": 1.0
+        },
+        {
+          "variable": "Control.numDT_t",
+          "time": 0.0,
+          "expected": 1.0
+        },
+        {
+          "variable": "Control.localdelt_r",
+          "time": 0.0,
+          "expected": 720.0
+        },
+        {
+          "variable": "Control.localdelt_t",
+          "time": 0.0,
+          "expected": 720.0
+        },
+        {
+          "variable": "Control.irrig_volume",
+          "time": 0.0,
+          "expected": 300.0
+        },
+        {
+          "variable": "Control.qirrig_actual",
+          "time": 0.0,
+          "expected": -0.027777777777777776
+        },
+        {
+          "variable": "Channel.dwr",
+          "time": 0.0,
+          "expected": -0.027777777777777776
+        },
+        {
+          "variable": "Control.qsub_i",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.qirrig_actual",
+          "time": 10800.0,
+          "expected": -0.027777777777777776
+        },
+        {
+          "variable": "Channel.wr",
+          "time": 10800.0,
+          "expected": 700.0
+        },
+        {
+          "variable": "Control.volr",
+          "time": 10800.0,
+          "expected": 700.0
+        },
+        {
+          "variable": "Control.direct_liq",
+          "time": 10800.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "irrigation_overage_to_subsurface",
+      "description": "Pointwise pin of the irrigation overage branch (mosart_driver.F90:484-488): the demand V = 300 m3 per coupling period (same cap input as irrigation_withdrawal_within_storage) exceeds the channel storage wr = 100 m3, so the Fortran takes only wr from the channel, qirrig_actual = -wr/coupling_period = -9.259259...e-3 m3/s, and charges the overage to the subsurface stream, qsub += (wr - irrig_volume)/coupling_period = -1.851851...e-2 m3/s; the negative qsub is then sent directly to the outlet (direct_neg_sub, F90:696-699), so direct_liq = -1.851851...e-2 m3/s and qsub_routed = 0. The two parts sum to the full demand -V/coupling_period. Hand-derived from the Fortran (no irrigation in the dumps). time_span {0,0}: only the instantaneous split is pinned - over a period the Fortran empties the channel in one jump (wr = 0) whereas the .esm rate -min(V, wr)/coupling_period decays wr exponentially (wr(T) = wr0/e); see README divergence 4.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "RofCap.Flrl_rofsur": 0.0,
+        "RofCap.Flrl_irrig": -2.7777777777777775e-06,
+        "Control.area": 10000000.0,
+        "Control.mask": 1.0,
+        "Control.rlen": 0.0,
+        "Control.tlen": 0.0,
+        "Subnetwork.hlen": 0.0
+      },
+      "initial_conditions": {
+        "Hillslope.wh": 0.0,
+        "Subnetwork.wt": 0.0,
+        "Channel.wr": 100.0
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-18
+      },
+      "assertions": [
+        {
+          "variable": "Control.qirrig_actual",
+          "time": 0.0,
+          "expected": -0.009259259259259259
+        },
+        {
+          "variable": "Channel.dwr",
+          "time": 0.0,
+          "expected": -0.009259259259259259
+        },
+        {
+          "variable": "Control.qsub_i",
+          "time": 0.0,
+          "expected": -0.018518518518518517
+        },
+        {
+          "variable": "Control.qsub_routed",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "Control.direct_neg_sub",
+          "time": 0.0,
+          "expected": -0.018518518518518517
+        },
+        {
+          "variable": "Control.direct_liq",
+          "time": 0.0,
+          "expected": -0.018518518518518517
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

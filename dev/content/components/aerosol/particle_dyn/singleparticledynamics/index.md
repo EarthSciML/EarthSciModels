@@ -1,0 +1,910 @@
+---
+title: "SingleParticleDynamics"
+slug: "singleparticledynamics"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["particle_dyn"]
+domain: "aerosol"
+subdomain: "particle_dyn"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/particle_dyn/single_particle.esm"
+reference: "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 9: Dynamics of Single Aerosol Particles."
+description: "Comprehensive composed model combining all single-particle aerosol dynamics equations. Migrated from Aerosol.jl@c8c640bb src/single_particle_dynamics.jl:440 (`SingleParticleDynamics` @component). Composes MeanFreePath, SlipCorrection, and SettlingVelocity as coupled subsystems, then adds the Brownian diffusion and related properties inline. Covers Seinfeld & Pandis (2006), Chapter 9, Eqs. 9.6, 9.1, 9.34, 9.38, 9.42, 9.73, 9.78, 9.87, 9.88, 9.112."
+tags: ["aerosol", "particle_dyn", "model", "particle-dynamics", "single-particle", "composed-model"]
+---
+
+## Description
+
+Comprehensive composed model combining all single-particle aerosol dynamics equations. Migrated from Aerosol.jl@c8c640bb src/single_particle_dynamics.jl:440 (`SingleParticleDynamics` @component). Composes MeanFreePath, SlipCorrection, and SettlingVelocity as coupled subsystems, then adds the Brownian diffusion and related properties inline. Covers Seinfeld & Pandis (2006), Chapter 9, Eqs. 9.6, 9.1, 9.34, 9.38, 9.42, 9.73, 9.78, 9.87, 9.88, 9.112.
+
+## Reference
+
+_source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/single_particle_dynamics.jl:440
+Upstream `SingleParticleDynamics` is a flat MTK `@component` with all 11 equations inlined. The ESM migration restructures it as a composed model (ESS spec section 4.7, `coupling.couple`) with three named subsystems — `mfp` (MeanFreePath), `slip` (SlipCorrection), `settling` (SettlingVelocity) — plus six BrownianDiffusion equations at the top level. This decomposition matches the `depends_on: MeanFreePath, SlipCorrection, SettlingVelocity` field in the migration tracker.
+
+Subsystem wiring. The three subsystems are inlined with their standalone variable sets. Each subsystem input that is driven by a coupling equation is re-typed from `parameter` to `state` (a parameter cannot appear on an equation LHS). The coupling chain is:
+  mfp.T ~ T, mfp.P ~ P, mfp.μ ~ μ                         (air-state inputs)
+  slip.D_p ~ D_p, slip.λ ~ SingleParticleDynamics.mfp.λ    (slip inputs)
+  settling.D_p ~ D_p, settling.ρ_p ~ ρ_p, settling.μ ~ μ  (settling inputs)
+  settling.C_c ~ SingleParticleDynamics.slip.C_c            (slip→settling coupling)
+
+Top-level equations. The six BrownianDiffusion equations (Eqs. 9.73, 9.78, 9.87, 9.88 and the aerodynamic diameter Eq. 9.112 plus particle mass) are carried at the top level. They reference SingleParticleDynamics.slip.C_c via the dotted path in the D_B and B equations, matching the coupling convention used in sulfate/total.esm and atmospheric_deposition/sp_ch19/dry_dep_gas.esm.
+
+Top-level inputs (type: parameter): D_p, ρ_p, T, P, μ — the five physical state variables that drive the entire chain. Constants k_B, π_val, ρ_p0 are fixed-value type: parameter entries (upstream MTK @constants convention). Top-level outputs (type: state): m_p, D_B, B, c_p, λ_p, D_ca — the BrownianDiffusion diagnostics not covered by the three subsystems.
+
+Observability. All 15 equations are algebraic (no time derivatives); the system is triangular: mfp.λ → slip.Kn/C_c → settling.τ/v_t → top-level D_B/B/c_p/λ_p, with m_p and D_ca computed directly from parameters. Test scenarios use `time_span: [0, 1]` and sample at t=0.
+
+Tolerance rationale (model-level rel=1e-9): observed-only algebraic system, same reasoning as the three standalone component files. The longest chain involves a sqrt (mfp), an exp (slip), and three additional arithmetic operations, all float64; round-off is ~1e-14. 1e-9 leaves comfortable headroom._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `k_B` | `J/K` | `1.381e-23` | Boltzmann constant |
+| `π_val` | `1` | `3.141592653589793` | Pi (dimensionless) |
+| `ρ_p0` | `kg/m^3` | `1000.0` | Reference density for aerodynamic diameter (1 g/cm³) |
+| `D_p` | `m` | `1e-06` | Particle diameter |
+| `ρ_p` | `kg/m^3` | `1000.0` | Particle density |
+| `T` | `K` | `298.15` | Temperature |
+| `P` | `Pa` | `101325.0` | Pressure |
+| `μ` | `kg/(m*s)` | `1.8e-05` | Dynamic viscosity of air |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `m_p` | `kg` |  | Particle mass |
+| `D_B` | `m^2/s` |  | Brownian diffusion coefficient |
+| `B` | `s/kg` |  | Particle mobility |
+| `c_p` | `m/s` |  | Mean thermal speed of particle |
+| `λ_p` | `m` |  | Particle mean free path |
+| `D_ca` | `m` |  | Aerodynamic diameter (continuum limit) |
+
+## Observed expressions
+
+$$
+m_{p} = ρ_{p} \cdot \frac{π_{val}}{6} \cdot D_{p}^{3}
+$$
+_Particle mass_
+
+$$
+D_{B} = \frac{k_{B} \cdot T \cdot SingleParticleDynamics.slip.C_{c}}{3 \cdot π_{val} \cdot μ \cdot D_{p}}
+$$
+_Brownian diffusion coefficient_
+
+$$
+B = \frac{SingleParticleDynamics.slip.C_{c}}{3 \cdot π_{val} \cdot μ \cdot D_{p}}
+$$
+_Particle mobility_
+
+$$
+c_{p} = \sqrt{\frac{8 \cdot k_{B} \cdot T}{π_{val} \cdot m_{p}}}
+$$
+_Mean thermal speed of particle_
+
+$$
+λ_{p} = \frac{2 \cdot D_{B}}{c_{p}}
+$$
+_Particle mean free path_
+
+$$
+D_{ca} = D_{p} \cdot \sqrt{\frac{ρ_{p}}{ρ_{p0}}}
+$$
+_Aerodynamic diameter (continuum limit)_
+
+## Equations
+
+$$
+SingleParticleDynamics.mfp.T = T
+$$
+
+$$
+SingleParticleDynamics.mfp.P = P
+$$
+
+$$
+SingleParticleDynamics.mfp.μ = μ
+$$
+
+$$
+SingleParticleDynamics.slip.D_{p} = D_{p}
+$$
+
+$$
+SingleParticleDynamics.slip.λ = SingleParticleDynamics.mfp.λ
+$$
+
+$$
+SingleParticleDynamics.settling.D_{p} = D_{p}
+$$
+
+$$
+SingleParticleDynamics.settling.ρ_{p} = ρ_{p}
+$$
+
+$$
+SingleParticleDynamics.settling.μ = μ
+$$
+
+$$
+SingleParticleDynamics.settling.C_{c} = SingleParticleDynamics.slip.C_{c}
+$$
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/single_particle_dynamics.jl:440\nUpstream `SingleParticleDynamics` is a flat MTK `@component` with all 11 equations inlined. The ESM migration restructures it as a composed model (ESS spec section 4.7, `coupling.couple`) with three named subsystems — `mfp` (MeanFreePath), `slip` (SlipCorrection), `settling` (SettlingVelocity) — plus six BrownianDiffusion equations at the top level. This decomposition matches the `depends_on: MeanFreePath, SlipCorrection, SettlingVelocity` field in the migration tracker.\n\nSubsystem wiring. The three subsystems are inlined with their standalone variable sets. Each subsystem input that is driven by a coupling equation is re-typed from `parameter` to `state` (a parameter cannot appear on an equation LHS). The coupling chain is:\n  mfp.T ~ T, mfp.P ~ P, mfp.μ ~ μ                         (air-state inputs)\n  slip.D_p ~ D_p, slip.λ ~ SingleParticleDynamics.mfp.λ    (slip inputs)\n  settling.D_p ~ D_p, settling.ρ_p ~ ρ_p, settling.μ ~ μ  (settling inputs)\n  settling.C_c ~ SingleParticleDynamics.slip.C_c            (slip→settling coupling)\n\nTop-level equations. The six BrownianDiffusion equations (Eqs. 9.73, 9.78, 9.87, 9.88 and the aerodynamic diameter Eq. 9.112 plus particle mass) are carried at the top level. They reference SingleParticleDynamics.slip.C_c via the dotted path in the D_B and B equations, matching the coupling convention used in sulfate/total.esm and atmospheric_deposition/sp_ch19/dry_dep_gas.esm.\n\nTop-level inputs (type: parameter): D_p, ρ_p, T, P, μ — the five physical state variables that drive the entire chain. Constants k_B, π_val, ρ_p0 are fixed-value type: parameter entries (upstream MTK @constants convention). Top-level outputs (type: state): m_p, D_B, B, c_p, λ_p, D_ca — the BrownianDiffusion diagnostics not covered by the three subsystems.\n\nObservability. All 15 equations are algebraic (no time derivatives); the system is triangular: mfp.λ → slip.Kn/C_c → settling.τ/v_t → top-level D_B/B/c_p/λ_p, with m_p and D_ca computed directly from parameters. Test scenarios use `time_span: [0, 1]` and sample at t=0.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system, same reasoning as the three standalone component files. The longest chain involves a sqrt (mfp), an exp (slip), and three additional arithmetic operations, all float64; round-off is ~1e-14. 1e-9 leaves comfortable headroom."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {
+    "k_B": {
+      "type": "parameter",
+      "units": "J/K",
+      "default": 1.381e-23,
+      "description": "Boltzmann constant"
+    },
+    "π_val": {
+      "type": "parameter",
+      "units": "1",
+      "default": 3.141592653589793,
+      "description": "Pi (dimensionless)"
+    },
+    "ρ_p0": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 1000.0,
+      "description": "Reference density for aerodynamic diameter (1 g/cm³)"
+    },
+    "D_p": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1e-06,
+      "description": "Particle diameter"
+    },
+    "ρ_p": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 1000.0,
+      "description": "Particle density"
+    },
+    "T": {
+      "type": "parameter",
+      "units": "K",
+      "default": 298.15,
+      "description": "Temperature"
+    },
+    "P": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 101325.0,
+      "description": "Pressure"
+    },
+    "μ": {
+      "type": "parameter",
+      "units": "kg/(m*s)",
+      "default": 1.8e-05,
+      "description": "Dynamic viscosity of air"
+    },
+    "m_p": {
+      "type": "unknown",
+      "units": "kg",
+      "description": "Particle mass"
+    },
+    "D_B": {
+      "type": "unknown",
+      "units": "m^2/s",
+      "description": "Brownian diffusion coefficient"
+    },
+    "B": {
+      "type": "unknown",
+      "units": "s/kg",
+      "description": "Particle mobility"
+    },
+    "c_p": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Mean thermal speed of particle"
+    },
+    "λ_p": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Particle mean free path"
+    },
+    "D_ca": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Aerodynamic diameter (continuum limit)"
+    }
+  },
+  "subsystems": {
+    "mfp": {
+      "variables": {
+        "R": {
+          "type": "parameter",
+          "units": "J/(mol*K)",
+          "default": 8.314,
+          "description": "Molar gas constant"
+        },
+        "M_air": {
+          "type": "parameter",
+          "units": "kg/mol",
+          "default": 0.02897,
+          "description": "Molecular weight of air"
+        },
+        "π_val": {
+          "type": "parameter",
+          "units": "1",
+          "default": 3.141592653589793,
+          "description": "Pi (dimensionless)"
+        },
+        "T": {
+          "type": "unknown",
+          "units": "K",
+          "default": 298.15,
+          "description": "Temperature — coupled input, driven by SingleParticleDynamics.mfp.T ~ T (re-typed parameter → state)."
+        },
+        "P": {
+          "type": "unknown",
+          "units": "Pa",
+          "default": 101325.0,
+          "description": "Pressure — coupled input, driven by SingleParticleDynamics.mfp.P ~ P (re-typed parameter → state)."
+        },
+        "μ": {
+          "type": "unknown",
+          "units": "kg/(m*s)",
+          "default": 1.8e-05,
+          "description": "Dynamic viscosity of air — coupled input, driven by SingleParticleDynamics.mfp.μ ~ μ (re-typed parameter → state)."
+        },
+        "λ": {
+          "type": "unknown",
+          "units": "m",
+          "description": "Mean free path of air"
+        }
+      },
+      "equations": [
+        {
+          "lhs": "λ",
+          "rhs": {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  2,
+                  "μ"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "P",
+                  {
+                    "op": "sqrt",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          {
+                            "op": "*",
+                            "args": [
+                              8,
+                              "M_air"
+                            ]
+                          },
+                          {
+                            "op": "*",
+                            "args": [
+                              "π_val",
+                              {
+                                "op": "*",
+                                "args": [
+                                  "R",
+                                  "T"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "slip": {
+      "variables": {
+        "A1": {
+          "type": "parameter",
+          "units": "1",
+          "default": 1.257,
+          "description": "Slip correction constant A1 (dimensionless)"
+        },
+        "A2": {
+          "type": "parameter",
+          "units": "1",
+          "default": 0.4,
+          "description": "Slip correction constant A2 (dimensionless)"
+        },
+        "A3": {
+          "type": "parameter",
+          "units": "1",
+          "default": 1.1,
+          "description": "Slip correction constant A3 (dimensionless)"
+        },
+        "D_p": {
+          "type": "unknown",
+          "units": "m",
+          "default": 1e-06,
+          "description": "Particle diameter — coupled input, driven by SingleParticleDynamics.slip.D_p ~ D_p (re-typed parameter → state)."
+        },
+        "λ": {
+          "type": "unknown",
+          "units": "m",
+          "default": 6.51e-08,
+          "description": "Mean free path of air — coupled input, driven by SingleParticleDynamics.slip.λ ~ SingleParticleDynamics.mfp.λ (re-typed parameter → state)."
+        },
+        "Kn": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Knudsen number (dimensionless)"
+        },
+        "C_c": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Cunningham slip correction factor (dimensionless)"
+        }
+      },
+      "equations": [
+        {
+          "lhs": "Kn",
+          "rhs": {
+            "op": "*",
+            "args": [
+              2,
+              {
+                "op": "/",
+                "args": [
+                  "λ",
+                  "D_p"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "lhs": "C_c",
+          "rhs": {
+            "op": "+",
+            "args": [
+              1,
+              {
+                "op": "*",
+                "args": [
+                  "Kn",
+                  {
+                    "op": "+",
+                    "args": [
+                      "A1",
+                      {
+                        "op": "*",
+                        "args": [
+                          "A2",
+                          {
+                            "op": "exp",
+                            "args": [
+                              {
+                                "op": "/",
+                                "args": [
+                                  {
+                                    "op": "*",
+                                    "args": [
+                                      -1,
+                                      "A3"
+                                    ]
+                                  },
+                                  "Kn"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "settling": {
+      "variables": {
+        "g": {
+          "type": "parameter",
+          "units": "m/s^2",
+          "default": 9.807,
+          "description": "Gravitational acceleration"
+        },
+        "D_p": {
+          "type": "unknown",
+          "units": "m",
+          "default": 1e-06,
+          "description": "Particle diameter — coupled input, driven by SingleParticleDynamics.settling.D_p ~ D_p (re-typed parameter → state)."
+        },
+        "ρ_p": {
+          "type": "unknown",
+          "units": "kg/m^3",
+          "default": 1000.0,
+          "description": "Particle density — coupled input, driven by SingleParticleDynamics.settling.ρ_p ~ ρ_p (re-typed parameter → state)."
+        },
+        "μ": {
+          "type": "unknown",
+          "units": "kg/(m*s)",
+          "default": 1.8e-05,
+          "description": "Dynamic viscosity of air — coupled input, driven by SingleParticleDynamics.settling.μ ~ μ (re-typed parameter → state)."
+        },
+        "C_c": {
+          "type": "unknown",
+          "units": "1",
+          "default": 1.0,
+          "description": "Slip correction factor — coupled input, driven by SingleParticleDynamics.settling.C_c ~ SingleParticleDynamics.slip.C_c (re-typed parameter → state)."
+        },
+        "v_t": {
+          "type": "unknown",
+          "units": "m/s",
+          "description": "Terminal settling velocity"
+        },
+        "τ": {
+          "type": "unknown",
+          "units": "s",
+          "description": "Relaxation time"
+        }
+      },
+      "equations": [
+        {
+          "lhs": "v_t",
+          "rhs": {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          {
+                            "op": "^",
+                            "args": [
+                              "D_p",
+                              2
+                            ]
+                          },
+                          "ρ_p"
+                        ]
+                      },
+                      "g"
+                    ]
+                  },
+                  "C_c"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  18,
+                  "μ"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "lhs": "τ",
+          "rhs": {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      "ρ_p",
+                      {
+                        "op": "^",
+                        "args": [
+                          "D_p",
+                          2
+                        ]
+                      }
+                    ]
+                  },
+                  "C_c"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  18,
+                  "μ"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "equations": [
+    {
+      "_comment": "Coupling — feed T, P, μ into the mfp (MeanFreePath) subsystem.",
+      "lhs": "SingleParticleDynamics.mfp.T",
+      "rhs": "T"
+    },
+    {
+      "lhs": "SingleParticleDynamics.mfp.P",
+      "rhs": "P"
+    },
+    {
+      "lhs": "SingleParticleDynamics.mfp.μ",
+      "rhs": "μ"
+    },
+    {
+      "_comment": "Coupling — feed D_p into slip subsystem; wire mfp.λ output to slip.λ input.",
+      "lhs": "SingleParticleDynamics.slip.D_p",
+      "rhs": "D_p"
+    },
+    {
+      "lhs": "SingleParticleDynamics.slip.λ",
+      "rhs": "SingleParticleDynamics.mfp.λ"
+    },
+    {
+      "_comment": "Coupling — feed D_p, ρ_p, μ into settling subsystem; wire slip.C_c → settling.C_c.",
+      "lhs": "SingleParticleDynamics.settling.D_p",
+      "rhs": "D_p"
+    },
+    {
+      "lhs": "SingleParticleDynamics.settling.ρ_p",
+      "rhs": "ρ_p"
+    },
+    {
+      "lhs": "SingleParticleDynamics.settling.μ",
+      "rhs": "μ"
+    },
+    {
+      "lhs": "SingleParticleDynamics.settling.C_c",
+      "rhs": "SingleParticleDynamics.slip.C_c"
+    },
+    {
+      "_comment": "Eq. 9.87 analogue — particle mass from density and volume.",
+      "lhs": "m_p",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "ρ_p",
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "π_val",
+                  6
+                ]
+              },
+              {
+                "op": "^",
+                "args": [
+                  "D_p",
+                  3
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "Eq. 9.73 — Brownian diffusion coefficient (Stokes-Einstein relation).",
+      "lhs": "D_B",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "k_B",
+              "T",
+              "SingleParticleDynamics.slip.C_c"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              3,
+              "π_val",
+              "μ",
+              "D_p"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "Eq. 9.78 — particle mechanical mobility.",
+      "lhs": "B",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "SingleParticleDynamics.slip.C_c",
+          {
+            "op": "*",
+            "args": [
+              3,
+              "π_val",
+              "μ",
+              "D_p"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "Eq. 9.87 — mean thermal speed of particle.",
+      "lhs": "c_p",
+      "rhs": {
+        "op": "sqrt",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  8,
+                  "k_B",
+                  "T"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "π_val",
+                  "m_p"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "Eq. 9.88 — particle mean free path (from D = ½ c̄_p λ_p).",
+      "lhs": "λ_p",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              2,
+              "D_B"
+            ]
+          },
+          "c_p"
+        ]
+      }
+    },
+    {
+      "_comment": "Eq. 9.112 — aerodynamic diameter (continuum limit, C_c≈1).",
+      "lhs": "D_ca",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "D_p",
+          {
+            "op": "sqrt",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "ρ_p",
+                  "ρ_p0"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "comprehensive_1um_standard",
+      "description": "Comprehensive validation at standard conditions: D_p = 1 μm, ρ_p = 1000 kg/m³, T = 298.15 K, P = 101325 Pa, μ = 1.8e-5 kg/(m·s). Validates the full coupling chain from mfp.λ through slip.C_c, settling.τ/v_t, and the top-level BrownianDiffusion outputs. Expected values match upstream 'SingleParticleDynamics comprehensive validation' test (Table 9.3 C_c ≈ 1.164, Table 9.4 τ ≈ 3.6e-6 s, Table 9.5 D_B ≈ 2.82e-11 m²/s).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "SingleParticleDynamics.mfp.λ",
+          "time": 0.0,
+          "expected": 6.512743896084663e-08
+        },
+        {
+          "variable": "SingleParticleDynamics.slip.Kn",
+          "time": 0.0,
+          "expected": 0.13025487792169327
+        },
+        {
+          "variable": "SingleParticleDynamics.slip.C_c",
+          "time": 0.0,
+          "expected": 1.1637415822494135
+        },
+        {
+          "variable": "SingleParticleDynamics.settling.τ",
+          "time": 0.0,
+          "expected": 3.5917950069426345e-06
+        },
+        {
+          "variable": "SingleParticleDynamics.settling.v_t",
+          "time": 0.0,
+          "expected": 3.5224733633086416e-05
+        },
+        {
+          "variable": "SingleParticleDynamics.m_p",
+          "time": 0.0,
+          "expected": 5.235987755982988e-16
+        },
+        {
+          "variable": "SingleParticleDynamics.D_B",
+          "time": 0.0,
+          "expected": 2.824498915630487e-11
+        },
+        {
+          "variable": "SingleParticleDynamics.B",
+          "time": 0.0,
+          "expected": 6859823159.132505
+        },
+        {
+          "variable": "SingleParticleDynamics.c_p",
+          "time": 0.0,
+          "expected": 0.004474917078489401
+        },
+        {
+          "variable": "SingleParticleDynamics.λ_p",
+          "time": 0.0,
+          "expected": 1.2623692757158102e-08
+        },
+        {
+          "variable": "SingleParticleDynamics.D_ca",
+          "time": 0.0,
+          "expected": 1e-06
+        }
+      ]
+    },
+    {
+      "id": "small_particle",
+      "description": "Small particle: D_p = 0.1 μm = 1e-7 m, all other parameters at defaults. Kn increases tenfold (Kn ≈ 1.30), raising C_c to ≈ 2.86 (strong free-molecular correction). D_B increases by ≈ 25× (smaller diameter and larger C_c). v_t drops by ≈ 40× (D_p² dominates over C_c). Mirrors the upstream 'SingleParticleDynamics size dependence' test.",
+      "parameter_overrides": {
+        "D_p": 1e-07
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "SingleParticleDynamics.slip.C_c",
+          "time": 0.0,
+          "expected": 2.8612239325093056
+        },
+        {
+          "variable": "SingleParticleDynamics.settling.τ",
+          "time": 0.0,
+          "expected": 8.830938063300323e-08
+        },
+        {
+          "variable": "SingleParticleDynamics.settling.v_t",
+          "time": 0.0,
+          "expected": 8.660500958678627e-07
+        },
+        {
+          "variable": "SingleParticleDynamics.D_B",
+          "time": 0.0,
+          "expected": 6.94443166594394e-10
+        },
+        {
+          "variable": "SingleParticleDynamics.D_ca",
+          "time": 0.0,
+          "expected": 1e-07
+        }
+      ]
+    },
+    {
+      "id": "large_particle",
+      "description": "Large particle: D_p = 10 μm = 1e-5 m, all other parameters at defaults. Kn drops to ≈ 0.013 (near-continuum), C_c ≈ 1.016. τ rises ≈ 87× (D_p² scaling), giving v_t ≈ 3.08e-3 m/s — detectable gravitational settling. D_B drops ≈ 11× (∝ C_c/D_p). Mirrors the upstream 'SingleParticleDynamics size dependence' test.",
+      "parameter_overrides": {
+        "D_p": 1e-05
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "SingleParticleDynamics.slip.C_c",
+          "time": 0.0,
+          "expected": 1.0163730381547569
+        },
+        {
+          "variable": "SingleParticleDynamics.settling.τ",
+          "time": 0.0,
+          "expected": 0.00031369538214653
+        },
+        {
+          "variable": "SingleParticleDynamics.settling.v_t",
+          "time": 0.0,
+          "expected": 0.00307641061271102
+        },
+        {
+          "variable": "SingleParticleDynamics.D_B",
+          "time": 0.0,
+          "expected": 2.4668230369454266e-12
+        },
+        {
+          "variable": "SingleParticleDynamics.D_ca",
+          "time": 0.0,
+          "expected": 1e-05
+        }
+      ]
+    },
+    {
+      "id": "temperature_increase",
+      "description": "Elevated temperature: T = 320 K, all other parameters at defaults (1 μm particle). λ ∝ sqrt(T)/P increases; D_B ∝ T*C_c increases; τ and v_t increase slightly (C_c increases with larger Kn). Mirrors the upstream 'SingleParticleDynamics temperature dependence' test.",
+      "parameter_overrides": {
+        "T": 320.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "SingleParticleDynamics.mfp.λ",
+          "time": 0.0,
+          "expected": 6.747168915281718e-08
+        },
+        {
+          "variable": "SingleParticleDynamics.slip.C_c",
+          "time": 0.0,
+          "expected": 1.1696393872960766
+        },
+        {
+          "variable": "SingleParticleDynamics.D_B",
+          "time": 0.0,
+          "expected": 3.046856560119291e-11
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

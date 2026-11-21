@@ -1,0 +1,483 @@
+---
+title: "O3Equilibria"
+slug: "o3equilibria"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["aq_eq"]
+domain: "aerosol"
+subdomain: "aq_eq"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/aq_eq/o3.esm"
+reference: "Seinfeld, J. H., & Pandis, S. N. (2016). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 3rd ed. Wiley. Chapter 7, Table 7.3 (Henry's law constants and temperature dependence for atmospheric gases). ISBN 978-1-118-94740-1."
+description: "Ozone (O3) aqueous dissolution equilibrium via temperature-dependent Henry's law. Migrated from Aerosol.jl@c8c640bb src/aqueous_equilibria.jl:589 (`O3Equilibria` @component). Implements Seinfeld & Pandis Ch 7 Table 7.3: K_H(O3, 298 K) = 1.1×10⁻² M/atm, ΔH_sol = −5.04 kcal/mol. O3 does not ionize in water; dissolution is purely described by Henry's law with van't Hoff temperature dependence."
+tags: ["aerosol", "aq_eq", "model", "aqueous_equilibria", "observed-only", "seinfeld-pandis", "henrys-law"]
+---
+
+## Description
+
+Ozone (O3) aqueous dissolution equilibrium via temperature-dependent Henry's law. Migrated from Aerosol.jl@c8c640bb src/aqueous_equilibria.jl:589 (`O3Equilibria` @component). Implements Seinfeld & Pandis Ch 7 Table 7.3: K_H(O3, 298 K) = 1.1×10⁻² M/atm, ΔH_sol = −5.04 kcal/mol. O3 does not ionize in water; dissolution is purely described by Henry's law with van't Hoff temperature dependence.
+
+## Reference
+
+_source_ref: Aerosol.jl@c8c640bb:src/aqueous_equilibria.jl:589
+
+Upstream `O3Equilibria` is an MTK `@component` where T and p_O3 are `@variables` driven by a parent `AqueousEquilibria` system. For standalone serialization, T and p_O3 are declared as parameters here — matching the bead's (S, observed-only) classification.
+
+The Henry's law constant H_O3_298 = 1.1×10⁻² M/atm is converted to SI (mol/m³/Pa): divide by 101325 Pa/atm and multiply by 1000 mol/m³ per M → 1.1e-2 / 101325 × 1000 ≈ 1.086×10⁻⁴ mol/(m³·Pa). The heat of dissolution dH_H_O3 = −5.04 kcal/mol × 4184 J/kcal = −21087.36 J/mol (S&P Table 7.3).
+
+Van't Hoff form: H_O3(T) = H_O3_298 × exp((dH_H_O3/R) × (1/T_ref − 1/T)). With dH_H_O3 < 0 (exothermic dissolution), H_O3 increases as T decreases — O3 is more soluble in cold clouds.
+
+Tolerance rationale (rel=1e-6): purely algebraic observed-only system; 1e-6 covers float64 roundoff in the chained exp/multiply expressions across the atmospheric T range (273–318 K) and typical tropospheric p_O3 range._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `T` | `K` | `298.0` | Temperature |
+| `p_O3` | `Pa` | `0.004053` | Partial pressure of O3 (default ≈ 40 ppb at 1 atm) |
+| `R_gas` | `J/mol/K` | `8.314` | Gas constant |
+| `T_ref` | `K` | `298.0` | Reference temperature |
+| `H_O3_298` | `mol/m^3/Pa` | `0.0001085615593387614` | Henry's law constant for O3 at 298 K (1.1e-2 M/atm converted to mol/(m³·Pa)) |
+| `dH_H_O3` | `J/mol` | `-21087.36` | Heat of dissolution for O3 (−5.04 kcal/mol; S&P Table 7.3) |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `H_O3` | `mol/m^3/Pa` |  | Temperature-dependent Henry's law constant for O3 |
+| `O3_aq` | `mol/m^3` |  | Aqueous O3 concentration (Henry's law: O3_aq = H_O3 × p_O3) |
+
+## Observed expressions
+
+$$
+H_{O3} = H_{O3\,298} \cdot e^{\frac{dH_{H\,O3} \cdot \left(\frac{1}{T_{ref}} + \frac{-1}{T}\right)}{R_{gas}}}
+$$
+_Temperature-dependent Henry's law constant for O3_
+
+$$
+O3_{aq} = H_{O3} \cdot p_{O3}
+$$
+_Aqueous O3 concentration (Henry's law: O3_aq = H_O3 × p_O3)_
+
+## Analyses
+
+### H_O3_vs_temperature
+
+Van't Hoff temperature dependence of the O3 Henry's law constant (S&P Table 7.3). H_O3 increases by ~2.2× from 45°C to 0°C, reflecting the exothermic nature of O3 dissolution. Sweep T from 0°C to 45°C holding p_O3 fixed.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `T`
+
+![H_O3 as a function of temperature (van't Hoff).](/plots/aerosol/aq_eq/o3equilibria/H_O3_vs_temperature-H_O3_curve.png)
+
+### O3_aq_vs_p_O3
+
+Henry's law linearity: O3_aq = H_O3 × p_O3 at 298 K. Sweep p_O3 over three decades (0.001 to 1.0 Pa, covering sub-ppb to ~10 ppm O3) and verify the linear relationship.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `p_O3`
+
+![Aqueous O3 concentration as a function of partial pressure at 298 K (linear Henry's law).](/plots/aerosol/aq_eq/o3equilibria/O3_aq_vs_p_O3-O3_aq_vs_p_O3.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: Aerosol.jl@c8c640bb:src/aqueous_equilibria.jl:589\n\nUpstream `O3Equilibria` is an MTK `@component` where T and p_O3 are `@variables` driven by a parent `AqueousEquilibria` system. For standalone serialization, T and p_O3 are declared as parameters here — matching the bead's (S, observed-only) classification.\n\nThe Henry's law constant H_O3_298 = 1.1×10⁻² M/atm is converted to SI (mol/m³/Pa): divide by 101325 Pa/atm and multiply by 1000 mol/m³ per M → 1.1e-2 / 101325 × 1000 ≈ 1.086×10⁻⁴ mol/(m³·Pa). The heat of dissolution dH_H_O3 = −5.04 kcal/mol × 4184 J/kcal = −21087.36 J/mol (S&P Table 7.3).\n\nVan't Hoff form: H_O3(T) = H_O3_298 × exp((dH_H_O3/R) × (1/T_ref − 1/T)). With dH_H_O3 < 0 (exothermic dissolution), H_O3 increases as T decreases — O3 is more soluble in cold clouds.\n\nTolerance rationale (rel=1e-6): purely algebraic observed-only system; 1e-6 covers float64 roundoff in the chained exp/multiply expressions across the atmospheric T range (273–318 K) and typical tropospheric p_O3 range."
+  },
+  "tolerance": {
+    "rel": 1e-06
+  },
+  "variables": {
+    "T": {
+      "type": "parameter",
+      "units": "K",
+      "default": 298.0,
+      "description": "Temperature"
+    },
+    "p_O3": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 0.004053,
+      "description": "Partial pressure of O3 (default ≈ 40 ppb at 1 atm)"
+    },
+    "R_gas": {
+      "type": "parameter",
+      "units": "J/mol/K",
+      "default": 8.314,
+      "description": "Gas constant"
+    },
+    "T_ref": {
+      "type": "parameter",
+      "units": "K",
+      "default": 298.0,
+      "description": "Reference temperature"
+    },
+    "H_O3_298": {
+      "type": "parameter",
+      "units": "mol/m^3/Pa",
+      "default": 0.0001085615593387614,
+      "description": "Henry's law constant for O3 at 298 K (1.1e-2 M/atm converted to mol/(m³·Pa))"
+    },
+    "dH_H_O3": {
+      "type": "parameter",
+      "units": "J/mol",
+      "default": -21087.36,
+      "description": "Heat of dissolution for O3 (−5.04 kcal/mol; S&P Table 7.3)"
+    },
+    "H_O3": {
+      "type": "unknown",
+      "units": "mol/m^3/Pa",
+      "description": "Temperature-dependent Henry's law constant for O3"
+    },
+    "O3_aq": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "Aqueous O3 concentration (Henry's law: O3_aq = H_O3 × p_O3)"
+    }
+  },
+  "equations": [
+    {
+      "lhs": "H_O3",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "H_O3_298",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      "dH_H_O3",
+                      {
+                        "op": "+",
+                        "args": [
+                          {
+                            "op": "/",
+                            "args": [
+                              1,
+                              "T_ref"
+                            ]
+                          },
+                          {
+                            "op": "/",
+                            "args": [
+                              -1,
+                              "T"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "R_gas"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "O3_aq",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "H_O3",
+          "p_O3"
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "reference_298K",
+      "description": "At T_ref = 298 K the van't Hoff exponent is zero, so H_O3 must equal H_O3_298 exactly. With p_O3 = 1 Pa, O3_aq = H_O3_298 × 1 Pa. Validates the reference-condition identity.",
+      "parameter_overrides": {
+        "T": 298.0,
+        "p_O3": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "H_O3",
+          "time": 0.0,
+          "expected": 0.0001085615593387614
+        },
+        {
+          "variable": "O3_aq",
+          "time": 0.0,
+          "expected": 0.0001085615593387614
+        }
+      ]
+    },
+    {
+      "id": "henry_law_linearity_298K",
+      "description": "At 298 K with p_O3 = 101.325 Pa (= 1 mbar), O3_aq = H_O3_298 × 101.325 = 1.1e-2 M/atm × 1e-3 atm × 1000 mol/m³/M = 0.011 mol/m³. Validates Henry's law proportionality and the unit conversion.",
+      "parameter_overrides": {
+        "T": 298.0,
+        "p_O3": 101.325
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "H_O3",
+          "time": 0.0,
+          "expected": 0.0001085615593387614
+        },
+        {
+          "variable": "O3_aq",
+          "time": 0.0,
+          "expected": 0.011
+        }
+      ]
+    },
+    {
+      "id": "cold_cloud_273K",
+      "description": "Cold cloud at 273.15 K (0°C). With dH_H_O3 < 0 (exothermic dissolution), H_O3 increases as T decreases — O3 is ~2.17× more soluble at 0°C than at 25°C. Validates the sign and magnitude of the van't Hoff temperature correction.",
+      "parameter_overrides": {
+        "T": 273.15,
+        "p_O3": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "H_O3",
+          "time": 0.0,
+          "expected": 0.00023548295179912852
+        },
+        {
+          "variable": "O3_aq",
+          "time": 0.0,
+          "expected": 0.00023548295179912852
+        }
+      ]
+    },
+    {
+      "id": "warm_atmosphere_310K",
+      "description": "Warm atmosphere at 310 K (37°C). H_O3 decreases to ~0.72× its 298 K value — less O3 dissolves into warmer droplets. Validates the opposite temperature-dependence direction from the cold-cloud case.",
+      "parameter_overrides": {
+        "T": 310.0,
+        "p_O3": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "H_O3",
+          "time": 0.0,
+          "expected": 7.808888111339828e-05
+        },
+        {
+          "variable": "O3_aq",
+          "time": 0.0,
+          "expected": 7.808888111339828e-05
+        }
+      ]
+    },
+    {
+      "id": "ambient_o3_298K",
+      "description": "Typical tropospheric background O3 at ~40 ppb partial pressure (p_O3 = 40e-9 × 101325 Pa ≈ 4.053e-3 Pa) at 298 K. Validates the model at realistic atmospheric concentrations.",
+      "parameter_overrides": {
+        "T": 298.0,
+        "p_O3": 0.004053
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "H_O3",
+          "time": 0.0,
+          "expected": 0.0001085615593387614
+        },
+        {
+          "variable": "O3_aq",
+          "time": 0.0,
+          "expected": 4.400000000000001e-07
+        }
+      ]
+    },
+    {
+      "id": "cold_ambient_o3_273K",
+      "description": "Cold cloud at 273.15 K with ambient O3 at ~40 ppb (p_O3 ≈ 4.053e-3 Pa). Cross-check combining van't Hoff temperature correction with realistic partial pressure: O3_aq = H_O3(273.15) × p_O3.",
+      "parameter_overrides": {
+        "T": 273.15,
+        "p_O3": 0.004053
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "H_O3",
+          "time": 0.0,
+          "expected": 0.00023548295179912852
+        },
+        {
+          "variable": "O3_aq",
+          "time": 0.0,
+          "expected": 9.54412403641868e-07
+        }
+      ]
+    },
+    {
+      "id": "warm_high_o3_310K",
+      "description": "Warm droplet at 310 K with elevated O3 at p_O3 = 5.0 Pa (~50 ppm; pollution episode or high-altitude scenario). Exercises both temperature reduction in H_O3 and the Henry's law proportionality at an elevated partial pressure.",
+      "parameter_overrides": {
+        "T": 310.0,
+        "p_O3": 5.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "H_O3",
+          "time": 0.0,
+          "expected": 7.808888111339828e-05
+        },
+        {
+          "variable": "O3_aq",
+          "time": 0.0,
+          "expected": 0.0003904444055669914
+        }
+      ]
+    },
+    {
+      "id": "van_t_hoff_ratio_cold",
+      "description": "Explicit ratio check: H_O3(273.15) / H_O3(298) should equal exp(dH/R × (1/298 − 1/273.15)) ≈ 2.169. This is confirmed by the pair of tests cold_cloud_273K and reference_298K, but this test states it explicitly at p_O3 = 10.0 Pa so H_O3 can be derived from O3_aq / p_O3.",
+      "parameter_overrides": {
+        "T": 273.15,
+        "p_O3": 10.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "H_O3",
+          "time": 0.0,
+          "expected": 0.00023548295179912852
+        },
+        {
+          "variable": "O3_aq",
+          "time": 0.0,
+          "expected": 0.0023548295179912854
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "H_O3_vs_temperature",
+      "description": "Van't Hoff temperature dependence of the O3 Henry's law constant (S&P Table 7.3). H_O3 increases by ~2.2× from 45°C to 0°C, reflecting the exothermic nature of O3 dissolution. Sweep T from 0°C to 45°C holding p_O3 fixed.",
+      "initial_state": {},
+      "parameters": {
+        "p_O3": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "T",
+            "range": {
+              "start": 273.15,
+              "stop": 318.0,
+              "count": 20,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "H_O3_curve",
+          "type": "line",
+          "description": "H_O3 as a function of temperature (van't Hoff).",
+          "x": {
+            "variable": "T",
+            "label": "Temperature (K)"
+          },
+          "y": {
+            "variable": "H_O3",
+            "label": "H_O3 (mol/(m³·Pa))"
+          }
+        }
+      ]
+    },
+    {
+      "id": "O3_aq_vs_p_O3",
+      "description": "Henry's law linearity: O3_aq = H_O3 × p_O3 at 298 K. Sweep p_O3 over three decades (0.001 to 1.0 Pa, covering sub-ppb to ~10 ppm O3) and verify the linear relationship.",
+      "initial_state": {},
+      "parameters": {
+        "T": 298.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "p_O3",
+            "range": {
+              "start": 0.001,
+              "stop": 1.0,
+              "count": 20,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "O3_aq_vs_p_O3",
+          "type": "line",
+          "description": "Aqueous O3 concentration as a function of partial pressure at 298 K (linear Henry's law).",
+          "x": {
+            "variable": "p_O3",
+            "label": "p(O3) (Pa, log scale)"
+          },
+          "y": {
+            "variable": "O3_aq",
+            "label": "[O3_aq] (mol/m³, log scale)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

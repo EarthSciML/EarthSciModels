@@ -1,0 +1,926 @@
+---
+title: "Solids"
+slug: "solids"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["isorropia"]
+domain: "aerosol"
+subdomain: "isorropia"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/isorropia/solids.esm"
+reference: "Fountoukis, C. and Nenes, A. (2007) ISORROPIA II, Atmos. Chem. Phys. 7(17), 4639–4659 — solid-phase salt species. Migrated from Aerosol.jl src/isorropia/solid.jl `Solids` (esm-6w1)."
+description: "Aggregate container for the 19 solid-phase salt species in the ISORROPIA II inorganic thermodynamic equilibrium model. Composes 19 named Solid instances — one per solid salt that can form in the K⁺-Ca²⁺-Mg²⁺-NH₄⁺-Na⁺-SO₄²⁻-NO₃⁻-Cl⁻-H₂O system — into a single subsystem bundle. Each Solid carries a single state variable M(t) [mol/m³] representing the molarity of that salt in air; in isolation M is conserved (D(M)/dt = 0). Source/sink terms are injected through the coupling mechanism when Solids is composed into the parent Isorropia system. Reference: Fountoukis and Nenes (2007), ISORROPIA II."
+tags: ["aerosol", "isorropia", "model", "solid-phase", "thermodynamics", "inorganic-aerosol", "composed-model"]
+---
+
+## Description
+
+Aggregate container for the 19 solid-phase salt species in the ISORROPIA II inorganic thermodynamic equilibrium model. Composes 19 named Solid instances — one per solid salt that can form in the K⁺-Ca²⁺-Mg²⁺-NH₄⁺-Na⁺-SO₄²⁻-NO₃⁻-Cl⁻-H₂O system — into a single subsystem bundle. Each Solid carries a single state variable M(t) [mol/m³] representing the molarity of that salt in air; in isolation M is conserved (D(M)/dt = 0). Source/sink terms are injected through the coupling mechanism when Solids is composed into the parent Isorropia system. Reference: Fountoukis and Nenes (2007), ISORROPIA II.
+
+## Reference
+
+Fountoukis, C. and Nenes, A. (2007) ISORROPIA II, Atmos. Chem. Phys. 7(17), 4639–4659 — solid-phase salt species. Migrated from Aerosol.jl src/isorropia/solid.jl `Solids` (esm-6w1).
+
+_source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/isorropia/solid.jl:22
+
+Upstream `Solids` is an MTK @component that composes 19 named `Solid` instances into a single aggregate and returns System(eqs=[], t; systems=[...], name). There are no top-level equations or variables — Solids is a pure aggregator that makes individual solid molarities accessible via dot notation (e.g., Solids.NH4NO3.M, Solids.CaNO32.M).
+
+The 19 solid salt instances correspond to the full K⁺-Ca²⁺-Mg²⁺-NH₄⁺-Na⁺-SO₄²⁻-NO₃⁻-Cl⁻-H₂O thermodynamic case from ISORROPIA II Table 2:
+  NH42SO4 — (NH4)2SO4, ammonium sulfate
+  NH4HSO4 — NH4HSO4, ammonium bisulfate
+  LC      — (NH4)3H(SO4)2, letovicite (standard ISORROPIA abbreviation)
+  NH4NO3  — NH4NO3, ammonium nitrate
+  NH4Cl   — NH4Cl, ammonium chloride
+  Na2SO4  — Na2SO4, sodium sulfate
+  NaHSO4  — NaHSO4, sodium bisulfate
+  NaNO3   — NaNO3, sodium nitrate
+  NaCl    — NaCl, sodium chloride
+  CaSO4   — CaSO4, calcium sulfate
+  CaNO32  — Ca(NO3)2, calcium nitrate
+  CaCl2   — CaCl2, calcium chloride
+  K2SO4   — K2SO4, potassium sulfate
+  KHSO4   — KHSO4, potassium bisulfate
+  KNO3    — KNO3, potassium nitrate
+  KCl     — KCl, potassium chloride
+  MgSO4   — MgSO4, magnesium sulfate
+  MgNO32  — Mg(NO3)2, magnesium nitrate
+  MgCl2   — MgCl2, magnesium chloride
+
+Each subsystem's M(t) [mol/m³] satisfies D(M)/dt = 0 in isolation (the conserved-tracer convention; same as the standalone Solid component and elemental_carbon.esm). The upstream `Solid` carries guess = 1e-20 mol/m³; this is preserved as the default initial condition for each M in this composite model.
+
+In the full Isorropia system, the parent component supplies source/sink equations for each M through coupling, so the trivial D(M)/dt = 0 equations are overridden at coupling time. These equations exist here solely to make the standalone model self-contained and its tests mechanically runnable.
+
+ESM representation: the 19 instances are encoded as inline subsystems (ESS spec §4.7). Each subsystem has one state variable M and one equation D(M)/dt = 0. Top-level variables and equations are empty.
+
+Tolerance rationale (model-level rel=1e-9): each subsystem integrates D(M)/dt = 0, the same trivial ODE as the standalone Solid component. Solver round-off is ~1e-15 relative; rel=1e-9 leaves six orders of margin, matching solid.esm._
+
+## Analyses
+
+### nh4no3_molarity_conserved_over_time
+
+Time evolution of NH4NO3 (ammonium nitrate) molarity from t = 0 to 100 s, starting at the guess value 1e-20 mol/m³. Because D(M)/dt = 0, the trajectory is a flat line at 1e-20 mol/m³. Illustrates the conserved-tracer behaviour of a single solid in the standalone Solids container.
+
+**Time span:** 0.0 → 100.0
+
+![NH4NO3 molarity M (mol/m³) versus time. Flat at 1e-20 mol/m³, confirming D(M)/dt = 0.](/plots/aerosol/isorropia/solids/nh4no3_molarity_conserved_over_time-nh4no3_vs_time.png)
+
+### cano32_molarity_conserved_over_time
+
+Time evolution of CaNO32 (calcium nitrate) molarity from t = 0 to 100 s, starting at 1e-20 mol/m³. Flat trajectory confirms D(M)/dt = 0 and that the Ca²⁺ salt subsystem is independent of the NH₄⁺ salts.
+
+**Time span:** 0.0 → 100.0
+
+![CaNO32 molarity M (mol/m³) versus time. Flat at 1e-20 mol/m³, confirming D(M)/dt = 0.](/plots/aerosol/isorropia/solids/cano32_molarity_conserved_over_time-cano32_vs_time.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Fountoukis, C. and Nenes, A. (2007) ISORROPIA II, Atmos. Chem. Phys. 7(17), 4639–4659 — solid-phase salt species. Migrated from Aerosol.jl src/isorropia/solid.jl `Solids` (esm-6w1).",
+    "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/isorropia/solid.jl:22\n\nUpstream `Solids` is an MTK @component that composes 19 named `Solid` instances into a single aggregate and returns System(eqs=[], t; systems=[...], name). There are no top-level equations or variables — Solids is a pure aggregator that makes individual solid molarities accessible via dot notation (e.g., Solids.NH4NO3.M, Solids.CaNO32.M).\n\nThe 19 solid salt instances correspond to the full K⁺-Ca²⁺-Mg²⁺-NH₄⁺-Na⁺-SO₄²⁻-NO₃⁻-Cl⁻-H₂O thermodynamic case from ISORROPIA II Table 2:\n  NH42SO4 — (NH4)2SO4, ammonium sulfate\n  NH4HSO4 — NH4HSO4, ammonium bisulfate\n  LC      — (NH4)3H(SO4)2, letovicite (standard ISORROPIA abbreviation)\n  NH4NO3  — NH4NO3, ammonium nitrate\n  NH4Cl   — NH4Cl, ammonium chloride\n  Na2SO4  — Na2SO4, sodium sulfate\n  NaHSO4  — NaHSO4, sodium bisulfate\n  NaNO3   — NaNO3, sodium nitrate\n  NaCl    — NaCl, sodium chloride\n  CaSO4   — CaSO4, calcium sulfate\n  CaNO32  — Ca(NO3)2, calcium nitrate\n  CaCl2   — CaCl2, calcium chloride\n  K2SO4   — K2SO4, potassium sulfate\n  KHSO4   — KHSO4, potassium bisulfate\n  KNO3    — KNO3, potassium nitrate\n  KCl     — KCl, potassium chloride\n  MgSO4   — MgSO4, magnesium sulfate\n  MgNO32  — Mg(NO3)2, magnesium nitrate\n  MgCl2   — MgCl2, magnesium chloride\n\nEach subsystem's M(t) [mol/m³] satisfies D(M)/dt = 0 in isolation (the conserved-tracer convention; same as the standalone Solid component and elemental_carbon.esm). The upstream `Solid` carries guess = 1e-20 mol/m³; this is preserved as the default initial condition for each M in this composite model.\n\nIn the full Isorropia system, the parent component supplies source/sink equations for each M through coupling, so the trivial D(M)/dt = 0 equations are overridden at coupling time. These equations exist here solely to make the standalone model self-contained and its tests mechanically runnable.\n\nESM representation: the 19 instances are encoded as inline subsystems (ESS spec §4.7). Each subsystem has one state variable M and one equation D(M)/dt = 0. Top-level variables and equations are empty.\n\nTolerance rationale (model-level rel=1e-9): each subsystem integrates D(M)/dt = 0, the same trivial ODE as the standalone Solid component. Solver round-off is ~1e-15 relative; rel=1e-9 leaves six orders of margin, matching solid.esm."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {},
+  "equations": [],
+  "subsystems": {
+    "NH42SO4": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of (NH4)2SO4 (ammonium sulfate) solid in air. Conserved: D(M)/dt = 0 in standalone use; coupled Isorropia adds source/sink terms."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "NH4HSO4": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of NH4HSO4 (ammonium bisulfate) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "LC": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of (NH4)3H(SO4)2 (letovicite, abbreviated LC) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "NH4NO3": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of NH4NO3 (ammonium nitrate) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "NH4Cl": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of NH4Cl (ammonium chloride) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "Na2SO4": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of Na2SO4 (sodium sulfate) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "NaHSO4": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of NaHSO4 (sodium bisulfate) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "NaNO3": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of NaNO3 (sodium nitrate) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "NaCl": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of NaCl (sodium chloride) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "CaSO4": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of CaSO4 (calcium sulfate) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "CaNO32": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of Ca(NO3)2 (calcium nitrate) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "CaCl2": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of CaCl2 (calcium chloride) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "K2SO4": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of K2SO4 (potassium sulfate) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "KHSO4": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of KHSO4 (potassium bisulfate) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "KNO3": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of KNO3 (potassium nitrate) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "KCl": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of KCl (potassium chloride) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "MgSO4": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of MgSO4 (magnesium sulfate) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "MgNO32": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of Mg(NO3)2 (magnesium nitrate) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    },
+    "MgCl2": {
+      "variables": {
+        "M": {
+          "type": "unknown",
+          "units": "mol/m^3",
+          "default": 1e-20,
+          "description": "Molarity of MgCl2 (magnesium chloride) solid in air. Conserved: D(M)/dt = 0 in standalone use."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ]
+    }
+  },
+  "tests": [
+    {
+      "id": "all_solids_conserved_at_guess_ic",
+      "description": "All 19 solid molarities start at the upstream guess value 1e-20 mol/m³ (no initial_conditions override — defaults apply). D(M)/dt = 0 for every subsystem means each M is conserved at 1e-20 mol/m³ for all t. Checks a representative sample spanning NH4⁺ salts (NH42SO4, NH4NO3), Na⁺ (NaCl), Ca²⁺ (CaNO32), K⁺ (KNO3), and Mg²⁺ (MgCl2) at t = 0 and t = 1 s.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "NH42SO4.M",
+          "time": 0.0,
+          "expected": 1e-20
+        },
+        {
+          "variable": "NH42SO4.M",
+          "time": 1.0,
+          "expected": 1e-20
+        },
+        {
+          "variable": "NH4NO3.M",
+          "time": 0.0,
+          "expected": 1e-20
+        },
+        {
+          "variable": "NH4NO3.M",
+          "time": 1.0,
+          "expected": 1e-20
+        },
+        {
+          "variable": "NaCl.M",
+          "time": 0.0,
+          "expected": 1e-20
+        },
+        {
+          "variable": "NaCl.M",
+          "time": 1.0,
+          "expected": 1e-20
+        },
+        {
+          "variable": "CaNO32.M",
+          "time": 0.0,
+          "expected": 1e-20
+        },
+        {
+          "variable": "CaNO32.M",
+          "time": 1.0,
+          "expected": 1e-20
+        },
+        {
+          "variable": "KNO3.M",
+          "time": 0.0,
+          "expected": 1e-20
+        },
+        {
+          "variable": "KNO3.M",
+          "time": 1.0,
+          "expected": 1e-20
+        },
+        {
+          "variable": "MgCl2.M",
+          "time": 0.0,
+          "expected": 1e-20
+        },
+        {
+          "variable": "MgCl2.M",
+          "time": 1.0,
+          "expected": 1e-20
+        }
+      ]
+    },
+    {
+      "id": "all_solids_at_representative_concentration",
+      "description": "All 19 molarities set to 1e-7 mol/m³ (representative aerosol concentration, similar to NH in Species). D(M)/dt = 0 conserves every M at 1e-7 mol/m³. Checks NH4HSO4, LC (letovicite), NaHSO4, CaSO4, KHSO4, and MgSO4 at t = 0 and t = 1 s.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "initial_conditions": {
+        "Solids.NH42SO4.M": 1e-07,
+        "Solids.NH4HSO4.M": 1e-07,
+        "Solids.LC.M": 1e-07,
+        "Solids.NH4NO3.M": 1e-07,
+        "Solids.NH4Cl.M": 1e-07,
+        "Solids.Na2SO4.M": 1e-07,
+        "Solids.NaHSO4.M": 1e-07,
+        "Solids.NaNO3.M": 1e-07,
+        "Solids.NaCl.M": 1e-07,
+        "Solids.CaSO4.M": 1e-07,
+        "Solids.CaNO32.M": 1e-07,
+        "Solids.CaCl2.M": 1e-07,
+        "Solids.K2SO4.M": 1e-07,
+        "Solids.KHSO4.M": 1e-07,
+        "Solids.KNO3.M": 1e-07,
+        "Solids.KCl.M": 1e-07,
+        "Solids.MgSO4.M": 1e-07,
+        "Solids.MgNO32.M": 1e-07,
+        "Solids.MgCl2.M": 1e-07
+      },
+      "assertions": [
+        {
+          "variable": "NH4HSO4.M",
+          "time": 0.0,
+          "expected": 1e-07
+        },
+        {
+          "variable": "NH4HSO4.M",
+          "time": 1.0,
+          "expected": 1e-07
+        },
+        {
+          "variable": "LC.M",
+          "time": 0.0,
+          "expected": 1e-07
+        },
+        {
+          "variable": "LC.M",
+          "time": 1.0,
+          "expected": 1e-07
+        },
+        {
+          "variable": "NaHSO4.M",
+          "time": 0.0,
+          "expected": 1e-07
+        },
+        {
+          "variable": "NaHSO4.M",
+          "time": 1.0,
+          "expected": 1e-07
+        },
+        {
+          "variable": "CaSO4.M",
+          "time": 0.0,
+          "expected": 1e-07
+        },
+        {
+          "variable": "CaSO4.M",
+          "time": 1.0,
+          "expected": 1e-07
+        },
+        {
+          "variable": "KHSO4.M",
+          "time": 0.0,
+          "expected": 1e-07
+        },
+        {
+          "variable": "KHSO4.M",
+          "time": 1.0,
+          "expected": 1e-07
+        },
+        {
+          "variable": "MgSO4.M",
+          "time": 0.0,
+          "expected": 1e-07
+        },
+        {
+          "variable": "MgSO4.M",
+          "time": 1.0,
+          "expected": 1e-07
+        }
+      ]
+    },
+    {
+      "id": "all_solids_at_zero_concentration",
+      "description": "All 19 molarities set to 0.0 mol/m³ (no solid present). D(M)/dt = 0 keeps every M at zero. Checks NH4Cl, Na2SO4, NaNO3, CaCl2, K2SO4, KCl, and MgNO32 at t = 0 and t = 1 s. Uses absolute tolerance because expected value is exactly zero.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "initial_conditions": {
+        "Solids.NH42SO4.M": 0.0,
+        "Solids.NH4HSO4.M": 0.0,
+        "Solids.LC.M": 0.0,
+        "Solids.NH4NO3.M": 0.0,
+        "Solids.NH4Cl.M": 0.0,
+        "Solids.Na2SO4.M": 0.0,
+        "Solids.NaHSO4.M": 0.0,
+        "Solids.NaNO3.M": 0.0,
+        "Solids.NaCl.M": 0.0,
+        "Solids.CaSO4.M": 0.0,
+        "Solids.CaNO32.M": 0.0,
+        "Solids.CaCl2.M": 0.0,
+        "Solids.K2SO4.M": 0.0,
+        "Solids.KHSO4.M": 0.0,
+        "Solids.KNO3.M": 0.0,
+        "Solids.KCl.M": 0.0,
+        "Solids.MgSO4.M": 0.0,
+        "Solids.MgNO32.M": 0.0,
+        "Solids.MgCl2.M": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "NH4Cl.M",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        },
+        {
+          "variable": "NH4Cl.M",
+          "time": 1.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        },
+        {
+          "variable": "Na2SO4.M",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        },
+        {
+          "variable": "Na2SO4.M",
+          "time": 1.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        },
+        {
+          "variable": "NaNO3.M",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        },
+        {
+          "variable": "NaNO3.M",
+          "time": 1.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        },
+        {
+          "variable": "CaCl2.M",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        },
+        {
+          "variable": "CaCl2.M",
+          "time": 1.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        },
+        {
+          "variable": "K2SO4.M",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        },
+        {
+          "variable": "K2SO4.M",
+          "time": 1.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        },
+        {
+          "variable": "KCl.M",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        },
+        {
+          "variable": "KCl.M",
+          "time": 1.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        },
+        {
+          "variable": "MgNO32.M",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        },
+        {
+          "variable": "MgNO32.M",
+          "time": 1.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        }
+      ]
+    },
+    {
+      "id": "independence_nh4no3_unit_rest_guess",
+      "description": "Verify subsystem independence: NH4NO3.M set to 1.0 mol/m³ while all other solids use the guess default (1e-20 mol/m³). D(M)/dt = 0 is uncoupled across subsystems, so NH4NO3.M must stay at 1.0 and CaNO32.M must stay at 1e-20. Demonstrates that the 19 ODEs evolve independently.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "initial_conditions": {
+        "Solids.NH42SO4.M": 1e-20,
+        "Solids.NH4HSO4.M": 1e-20,
+        "Solids.LC.M": 1e-20,
+        "Solids.NH4NO3.M": 1.0,
+        "Solids.NH4Cl.M": 1e-20,
+        "Solids.Na2SO4.M": 1e-20,
+        "Solids.NaHSO4.M": 1e-20,
+        "Solids.NaNO3.M": 1e-20,
+        "Solids.NaCl.M": 1e-20,
+        "Solids.CaSO4.M": 1e-20,
+        "Solids.CaNO32.M": 1e-20,
+        "Solids.CaCl2.M": 1e-20,
+        "Solids.K2SO4.M": 1e-20,
+        "Solids.KHSO4.M": 1e-20,
+        "Solids.KNO3.M": 1e-20,
+        "Solids.KCl.M": 1e-20,
+        "Solids.MgSO4.M": 1e-20,
+        "Solids.MgNO32.M": 1e-20,
+        "Solids.MgCl2.M": 1e-20
+      },
+      "assertions": [
+        {
+          "variable": "NH4NO3.M",
+          "time": 0.0,
+          "expected": 1.0
+        },
+        {
+          "variable": "NH4NO3.M",
+          "time": 1.0,
+          "expected": 1.0
+        },
+        {
+          "variable": "CaNO32.M",
+          "time": 0.0,
+          "expected": 1e-20
+        },
+        {
+          "variable": "CaNO32.M",
+          "time": 1.0,
+          "expected": 1e-20
+        },
+        {
+          "variable": "MgCl2.M",
+          "time": 1.0,
+          "expected": 1e-20
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "nh4no3_molarity_conserved_over_time",
+      "description": "Time evolution of NH4NO3 (ammonium nitrate) molarity from t = 0 to 100 s, starting at the guess value 1e-20 mol/m³. Because D(M)/dt = 0, the trajectory is a flat line at 1e-20 mol/m³. Illustrates the conserved-tracer behaviour of a single solid in the standalone Solids container.",
+      "initial_state": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 100.0
+      },
+      "plots": [
+        {
+          "id": "nh4no3_vs_time",
+          "type": "line",
+          "description": "NH4NO3 molarity M (mol/m³) versus time. Flat at 1e-20 mol/m³, confirming D(M)/dt = 0.",
+          "x": {
+            "variable": "t",
+            "label": "Time (s)"
+          },
+          "y": {
+            "variable": "NH4NO3.M",
+            "label": "NH4NO3 molarity M (mol/m³)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "cano32_molarity_conserved_over_time",
+      "description": "Time evolution of CaNO32 (calcium nitrate) molarity from t = 0 to 100 s, starting at 1e-20 mol/m³. Flat trajectory confirms D(M)/dt = 0 and that the Ca²⁺ salt subsystem is independent of the NH₄⁺ salts.",
+      "initial_state": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 100.0
+      },
+      "plots": [
+        {
+          "id": "cano32_vs_time",
+          "type": "line",
+          "description": "CaNO32 molarity M (mol/m³) versus time. Flat at 1e-20 mol/m³, confirming D(M)/dt = 0.",
+          "x": {
+            "variable": "t",
+            "label": "Time (s)"
+          },
+          "y": {
+            "variable": "CaNO32.M",
+            "label": "CaNO32 molarity M (mol/m³)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

@@ -1,0 +1,530 @@
+---
+title: "RemoteConditions"
+slug: "remoteconditions"
+domains: ["gaschem"]
+component_types: ["model"]
+subdomains: ["combined"]
+domain: "gaschem"
+subdomain: "combined"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/gaschem/combined/remote.esm"
+reference: "Seinfeld, J. H., & Pandis, S. N. (2016). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 3rd ed. Wiley. Chapter 6 (Tropospheric Chemistry — background regime: clean marine boundary layer / free troposphere). ISBN 978-1-118-94740-1."
+description: "Parameters-preset model representing typical remote/background tropospheric conditions with low NOx. Migrated from GasChem.jl@8c12c048 src/combined_system.jl:261 (`RemoteConditions` @component). Eleven species concentrations are declared as parameters in SI units (m⁻³); the model exposes them as algebraic outputs (`*_out`) so a parent system or test harness can read presets without depending on MTK parameter-introspection APIs. Based on Seinfeld & Pandis Chapter 6 background conditions: ~30 ppb O₃, ~10 ppt NO, ~20 ppt NO₂, ~80 ppb CO."
+tags: ["gaschem", "combined", "model", "tropospheric-chemistry", "parameters-preset", "remote", "background", "seinfeld-pandis"]
+---
+
+## Description
+
+Parameters-preset model representing typical remote/background tropospheric conditions with low NOx. Migrated from GasChem.jl@8c12c048 src/combined_system.jl:261 (`RemoteConditions` @component). Eleven species concentrations are declared as parameters in SI units (m⁻³); the model exposes them as algebraic outputs (`*_out`) so a parent system or test harness can read presets without depending on MTK parameter-introspection APIs. Based on Seinfeld & Pandis Chapter 6 background conditions: ~30 ppb O₃, ~10 ppt NO, ~20 ppt NO₂, ~80 ppb CO.
+
+## Reference
+
+_source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/combined_system.jl:261
+Upstream `RemoteConditions` is an MTK `@component` declaring 11 species-concentration parameters (M, O2, H2O, O3, NO, NO2, CO, CH4, OH, HO2, CH3O2) and 11 corresponding output variables (`*_out`). The 11 equations are pure identity assignments `*_out ~ *`. There are no time derivatives, no kinetics — the model exists so a downstream system can read preset concentrations through a uniform variable interface (e.g., `RemoteConditions().O3_out` rather than reaching into `parameters(sys)` to find the matching @parameter).
+
+Observability classification: observed-only — all 11 `*_out` variables are determined by trivial algebraic equations from the 11 parameters. Equivalent to evaluating `get_conditions_dict(RemoteConditions())` upstream.
+
+Tolerance rationale (model-level rel=1e-12): the equations are exact identity assignments. Floating-point round-off is ~1e-15; 1e-12 is comfortably tight without being fragile across MTK simplification permutations._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `M` | `m^-3` | `2.5e+25` | Total air at STP |
+| `O2` | `m^-3` | `5.25e+24` | O₂, 21% of M |
+| `H2O` | `m^-3` | `4e+23` | Water vapor |
+| `O3` | `m^-3` | `7.5e+17` | Ozone, ~30 ppb |
+| `NO` | `m^-3` | `250000000000000.0` | NO, ~10 ppt |
+| `NO2` | `m^-3` | `500000000000000.0` | NO₂, ~20 ppt |
+| `CO` | `m^-3` | `2e+18` | CO, ~80 ppb |
+| `CH4` | `m^-3` | `4.5e+19` | CH₄, ~1800 ppb |
+| `OH` | `m^-3` | `1000000000000.0` | OH, typical daytime |
+| `HO2` | `m^-3` | `200000000000000.0` | HO₂, higher due to low NOx |
+| `CH3O2` | `m^-3` | `200000000000000.0` | CH₃O₂ |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `M_out` | `m^-3` |  | Total air number density |
+| `O2_out` | `m^-3` |  | O₂ concentration |
+| `H2O_out` | `m^-3` |  | Water vapor concentration |
+| `O3_out` | `m^-3` |  | Ozone concentration |
+| `NO_out` | `m^-3` |  | NO concentration |
+| `NO2_out` | `m^-3` |  | NO₂ concentration |
+| `CO_out` | `m^-3` |  | CO concentration |
+| `CH4_out` | `m^-3` |  | CH₄ concentration |
+| `OH_out` | `m^-3` |  | OH concentration |
+| `HO2_out` | `m^-3` |  | HO₂ concentration |
+| `CH3O2_out` | `m^-3` |  | CH₃O₂ concentration |
+
+## Observed expressions
+
+$$
+M_{out} = M
+$$
+_Total air number density_
+
+$$
+O2_{out} = O2
+$$
+_O₂ concentration_
+
+$$
+H2O_{out} = H2O
+$$
+_Water vapor concentration_
+
+$$
+O3_{out} = O3
+$$
+_Ozone concentration_
+
+$$
+NO_{out} = NO
+$$
+_NO concentration_
+
+$$
+NO2_{out} = NO2
+$$
+_NO₂ concentration_
+
+$$
+CO_{out} = CO
+$$
+_CO concentration_
+
+$$
+CH4_{out} = CH4
+$$
+_CH₄ concentration_
+
+$$
+OH_{out} = OH
+$$
+_OH concentration_
+
+$$
+HO2_{out} = HO2
+$$
+_HO₂ concentration_
+
+$$
+CH3O2_{out} = CH3O2
+$$
+_CH₃O₂ concentration_
+
+## Analyses
+
+### default_remote_snapshot
+
+Snapshot of the 11 default remote-conditions species concentrations. Reproduces the canonical preset used in GasChem.jl regime-comparison tests (RemoteConditions vs TypicalConditions vs UrbanConditions).
+
+**Time span:** 0.0 → 1.0
+
+### no_sweep
+
+Sweep NO from a remote background (1e13 m⁻³, ~0.4 ppt) to mid-urban (1e17 m⁻³, ~4 ppb) to show how the preset interface propagates parameter overrides. Useful for downstream sensitivity tests against RemoteConditions defaults.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `NO`
+
+![NO_out vs NO override — confirms identity passthrough across four decades.](/plots/gaschem/combined/remoteconditions/no_sweep-no_out_vs_no.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/combined_system.jl:261\nUpstream `RemoteConditions` is an MTK `@component` declaring 11 species-concentration parameters (M, O2, H2O, O3, NO, NO2, CO, CH4, OH, HO2, CH3O2) and 11 corresponding output variables (`*_out`). The 11 equations are pure identity assignments `*_out ~ *`. There are no time derivatives, no kinetics — the model exists so a downstream system can read preset concentrations through a uniform variable interface (e.g., `RemoteConditions().O3_out` rather than reaching into `parameters(sys)` to find the matching @parameter).\n\nObservability classification: observed-only — all 11 `*_out` variables are determined by trivial algebraic equations from the 11 parameters. Equivalent to evaluating `get_conditions_dict(RemoteConditions())` upstream.\n\nTolerance rationale (model-level rel=1e-12): the equations are exact identity assignments. Floating-point round-off is ~1e-15; 1e-12 is comfortably tight without being fragile across MTK simplification permutations."
+  },
+  "tolerance": {
+    "rel": 1e-12
+  },
+  "variables": {
+    "M": {
+      "type": "parameter",
+      "units": "m^-3",
+      "default": 2.5e+25,
+      "description": "Total air at STP"
+    },
+    "O2": {
+      "type": "parameter",
+      "units": "m^-3",
+      "default": 5.25e+24,
+      "description": "O₂, 21% of M"
+    },
+    "H2O": {
+      "type": "parameter",
+      "units": "m^-3",
+      "default": 4e+23,
+      "description": "Water vapor"
+    },
+    "O3": {
+      "type": "parameter",
+      "units": "m^-3",
+      "default": 7.5e+17,
+      "description": "Ozone, ~30 ppb"
+    },
+    "NO": {
+      "type": "parameter",
+      "units": "m^-3",
+      "default": 250000000000000.0,
+      "description": "NO, ~10 ppt"
+    },
+    "NO2": {
+      "type": "parameter",
+      "units": "m^-3",
+      "default": 500000000000000.0,
+      "description": "NO₂, ~20 ppt"
+    },
+    "CO": {
+      "type": "parameter",
+      "units": "m^-3",
+      "default": 2e+18,
+      "description": "CO, ~80 ppb"
+    },
+    "CH4": {
+      "type": "parameter",
+      "units": "m^-3",
+      "default": 4.5e+19,
+      "description": "CH₄, ~1800 ppb"
+    },
+    "OH": {
+      "type": "parameter",
+      "units": "m^-3",
+      "default": 1000000000000.0,
+      "description": "OH, typical daytime"
+    },
+    "HO2": {
+      "type": "parameter",
+      "units": "m^-3",
+      "default": 200000000000000.0,
+      "description": "HO₂, higher due to low NOx"
+    },
+    "CH3O2": {
+      "type": "parameter",
+      "units": "m^-3",
+      "default": 200000000000000.0,
+      "description": "CH₃O₂"
+    },
+    "M_out": {
+      "type": "unknown",
+      "units": "m^-3",
+      "description": "Total air number density"
+    },
+    "O2_out": {
+      "type": "unknown",
+      "units": "m^-3",
+      "description": "O₂ concentration"
+    },
+    "H2O_out": {
+      "type": "unknown",
+      "units": "m^-3",
+      "description": "Water vapor concentration"
+    },
+    "O3_out": {
+      "type": "unknown",
+      "units": "m^-3",
+      "description": "Ozone concentration"
+    },
+    "NO_out": {
+      "type": "unknown",
+      "units": "m^-3",
+      "description": "NO concentration"
+    },
+    "NO2_out": {
+      "type": "unknown",
+      "units": "m^-3",
+      "description": "NO₂ concentration"
+    },
+    "CO_out": {
+      "type": "unknown",
+      "units": "m^-3",
+      "description": "CO concentration"
+    },
+    "CH4_out": {
+      "type": "unknown",
+      "units": "m^-3",
+      "description": "CH₄ concentration"
+    },
+    "OH_out": {
+      "type": "unknown",
+      "units": "m^-3",
+      "description": "OH concentration"
+    },
+    "HO2_out": {
+      "type": "unknown",
+      "units": "m^-3",
+      "description": "HO₂ concentration"
+    },
+    "CH3O2_out": {
+      "type": "unknown",
+      "units": "m^-3",
+      "description": "CH₃O₂ concentration"
+    }
+  },
+  "equations": [
+    {
+      "lhs": "M_out",
+      "rhs": "M"
+    },
+    {
+      "lhs": "O2_out",
+      "rhs": "O2"
+    },
+    {
+      "lhs": "H2O_out",
+      "rhs": "H2O"
+    },
+    {
+      "lhs": "O3_out",
+      "rhs": "O3"
+    },
+    {
+      "lhs": "NO_out",
+      "rhs": "NO"
+    },
+    {
+      "lhs": "NO2_out",
+      "rhs": "NO2"
+    },
+    {
+      "lhs": "CO_out",
+      "rhs": "CO"
+    },
+    {
+      "lhs": "CH4_out",
+      "rhs": "CH4"
+    },
+    {
+      "lhs": "OH_out",
+      "rhs": "OH"
+    },
+    {
+      "lhs": "HO2_out",
+      "rhs": "HO2"
+    },
+    {
+      "lhs": "CH3O2_out",
+      "rhs": "CH3O2"
+    }
+  ],
+  "tests": [
+    {
+      "id": "default_remote_preset",
+      "description": "All 11 outputs should equal the upstream default remote-conditions preset values (Seinfeld & Pandis Ch 6 background regime). Reproduces `get_conditions_dict(RemoteConditions())` from GasChem.jl test/test_combined_system.jl.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "M_out",
+          "time": 0.0,
+          "expected": 2.5e+25
+        },
+        {
+          "variable": "O2_out",
+          "time": 0.0,
+          "expected": 5.25e+24
+        },
+        {
+          "variable": "H2O_out",
+          "time": 0.0,
+          "expected": 4e+23
+        },
+        {
+          "variable": "O3_out",
+          "time": 0.0,
+          "expected": 7.5e+17
+        },
+        {
+          "variable": "NO_out",
+          "time": 0.0,
+          "expected": 250000000000000.0
+        },
+        {
+          "variable": "NO2_out",
+          "time": 0.0,
+          "expected": 500000000000000.0
+        },
+        {
+          "variable": "CO_out",
+          "time": 0.0,
+          "expected": 2e+18
+        },
+        {
+          "variable": "CH4_out",
+          "time": 0.0,
+          "expected": 4.5e+19
+        },
+        {
+          "variable": "OH_out",
+          "time": 0.0,
+          "expected": 1000000000000.0
+        },
+        {
+          "variable": "HO2_out",
+          "time": 0.0,
+          "expected": 200000000000000.0
+        },
+        {
+          "variable": "CH3O2_out",
+          "time": 0.0,
+          "expected": 200000000000000.0
+        }
+      ]
+    },
+    {
+      "id": "remote_vs_typical_NO_low",
+      "description": "Remote NO (2.5e14 m⁻³, ~10 ppt) should be ~1000× lower than typical NO (2.5e15 m⁻³, ~0.1 ppb). Override NO to the typical value and check that the preset reflects the original remote default at zero override. This test pins the canonical remote-NO defaults from GasChem.jl test/test_combined_system.jl line 89 (`@test remote[:NO] < typical[:NO]`).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "NO_out",
+          "time": 0.0,
+          "expected": 250000000000000.0
+        },
+        {
+          "variable": "NO2_out",
+          "time": 0.0,
+          "expected": 500000000000000.0
+        }
+      ]
+    },
+    {
+      "id": "remote_vs_typical_HO2_high",
+      "description": "Remote HO₂ (2.0e14 m⁻³) should be ~2× higher than typical HO₂ (1.0e14 m⁻³) because lower NOx leaves more HO₂ unconverted to OH. Pins the canonical remote-HO₂ default from GasChem.jl test/test_combined_system.jl line 91 (`@test remote[:HO2] > typical[:HO2]`).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "HO2_out",
+          "time": 0.0,
+          "expected": 200000000000000.0
+        }
+      ]
+    },
+    {
+      "id": "remote_air_density_equals_typical",
+      "description": "Total air density M (2.5e25 m⁻³, STP) is regime-independent and equals the typical-conditions value. Pins GasChem.jl test/test_combined_system.jl line 92 (`@test remote[:M] ≈ typical[:M]`).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "M_out",
+          "time": 0.0,
+          "expected": 2.5e+25
+        },
+        {
+          "variable": "O2_out",
+          "time": 0.0,
+          "expected": 5.25e+24
+        }
+      ]
+    },
+    {
+      "id": "parameter_override_passthrough",
+      "description": "Override O3 and NO to non-default values; outputs should reflect the overrides exactly (identity equations). Confirms the model behaves as a pure pass-through.",
+      "parameter_overrides": {
+        "O3": 1.5e+18,
+        "NO": 1e+16
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "O3_out",
+          "time": 0.0,
+          "expected": 1.5e+18
+        },
+        {
+          "variable": "NO_out",
+          "time": 0.0,
+          "expected": 1e+16
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "default_remote_snapshot",
+      "description": "Snapshot of the 11 default remote-conditions species concentrations. Reproduces the canonical preset used in GasChem.jl regime-comparison tests (RemoteConditions vs TypicalConditions vs UrbanConditions).",
+      "initial_state": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "plots": [
+        {
+          "id": "remote_concentrations_bar",
+          "type": "line",
+          "description": "Constant species concentrations under the remote preset — every *_out variable stays at its parameter default across the time span (no time evolution; preset model).",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "O3_out",
+            "label": "O₃ concentration (m⁻³)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "no_sweep",
+      "description": "Sweep NO from a remote background (1e13 m⁻³, ~0.4 ppt) to mid-urban (1e17 m⁻³, ~4 ppb) to show how the preset interface propagates parameter overrides. Useful for downstream sensitivity tests against RemoteConditions defaults.",
+      "initial_state": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "NO",
+            "range": {
+              "start": 10000000000000.0,
+              "stop": 1e+17,
+              "count": 30
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "no_out_vs_no",
+          "type": "line",
+          "description": "NO_out vs NO override — confirms identity passthrough across four decades.",
+          "x": {
+            "variable": "NO",
+            "label": "NO override (m⁻³)"
+          },
+          "y": {
+            "variable": "NO_out",
+            "label": "NO_out (m⁻³)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

@@ -1,0 +1,380 @@
+---
+title: "SettlingVelocity"
+slug: "settlingvelocity"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["particle_dyn"]
+domain: "aerosol"
+subdomain: "particle_dyn"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/particle_dyn/settling.esm"
+reference: "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 9, Eqs. 9.38 (relaxation time) and 9.42 (terminal settling velocity)."
+description: "Terminal settling velocity and relaxation time for aerosol single-particle dynamics. Migrated from Aerosol.jl@c8c640bb src/single_particle_dynamics.jl:113 (`SettlingVelocity` @component). Computes the terminal settling velocity v_t and the relaxation time τ (time constant for velocity adjustment) for a spherical particle falling under gravity in a viscous fluid (Seinfeld & Pandis 2006, Chapter 9, Eqs. 9.38 and 9.42)."
+tags: ["aerosol", "particle_dyn", "model", "particle-dynamics", "settling-velocity"]
+---
+
+## Description
+
+Terminal settling velocity and relaxation time for aerosol single-particle dynamics. Migrated from Aerosol.jl@c8c640bb src/single_particle_dynamics.jl:113 (`SettlingVelocity` @component). Computes the terminal settling velocity v_t and the relaxation time τ (time constant for velocity adjustment) for a spherical particle falling under gravity in a viscous fluid (Seinfeld & Pandis 2006, Chapter 9, Eqs. 9.38 and 9.42).
+
+## Reference
+
+_source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/single_particle_dynamics.jl:113
+Upstream `SettlingVelocity` is an MTK `@component` with one constant (g = 9.807 m/s²), four `@parameters` (D_p, ρ_p, μ, C_c) and two variables (v_t, τ). The equations are:
+  • v_t ~ (D_p^2 * ρ_p * g * C_c) / (18 * μ)  (Eq. 9.42 — terminal settling velocity)
+  • τ   ~ (ρ_p * D_p^2 * C_c) / (18 * μ)       (Eq. 9.38 — relaxation time)
+Both equations are algebraic (no derivatives), making this an observed-only component. Note that v_t = τ * g, so the two outputs share the same denominator.
+
+Observability classification: observed-only — every output is given by a single algebraic equation in which the output appears only on the LHS. Both v_t and τ are fully determined by parameters alone; they are independent outputs (no variable reuse between equations) and migrate as `type: state` with explicit `equations`, matching the sibling single_particle_dynamics.jl migrations mean_free_path.esm, slip.esm, stokes.esm, mobility.esm and aerodynamic_diameter.esm. Test scenarios use `time_span: [0, 1]` and sample at t=0.
+
+Constant g (9.807 m/s²) migrates as `type: parameter` carrying its numeric default, consistent with how π_val is handled in mobility.esm and mean_free_path.esm. The name `g` is not one of the ESS schema's reserved physical-constant names.
+
+Tolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); both equations are products and divisions of parameters. Floating-point round-off is ~1e-15. 1e-9 leaves comfortable headroom._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `g` | `m/s^2` | `9.807` | Gravitational acceleration |
+| `D_p` | `m` | `1e-06` | Particle diameter |
+| `ρ_p` | `kg/m^3` | `1000.0` | Particle density |
+| `μ` | `kg/(m*s)` | `1.8e-05` | Dynamic viscosity of air |
+| `C_c` | `1` | `1.0` | Slip correction factor (dimensionless) |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `v_t` | `m/s` |  | Terminal settling velocity |
+| `τ` | `s` |  | Relaxation time |
+
+## Observed expressions
+
+$$
+v_{t} = \frac{D_{p}^{2} \cdot ρ_{p} \cdot g \cdot C_{c}}{18 \cdot μ}
+$$
+_Terminal settling velocity_
+
+$$
+τ = \frac{ρ_{p} \cdot D_{p}^{2} \cdot C_{c}}{18 \cdot μ}
+$$
+_Relaxation time_
+
+## Analyses
+
+### size_dependence
+
+Sweep particle diameter D_p from 100 nm to 10 μm (log scale) at default conditions (ρ_p = 1000 kg/m³, μ = 1.8e-5 kg/(m·s), C_c = 1.0, g = 9.807 m/s²). Both τ and v_t scale as D_p², rising four decades across the range. At 100 nm v_t ≈ 3.0e-7 m/s (negligible settling); at 10 μm v_t ≈ 3.0e-3 m/s (≈ 0.3 cm/s, gravitational settling is significant).
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `D_p`
+
+![Terminal settling velocity v_t vs particle diameter (log x-axis) — v_t ∝ D_p², rising four decades from ≈ 3.0e-7 m/s at 100 nm to ≈ 3.0e-3 m/s at 10 μm.](/plots/aerosol/particle_dyn/settlingvelocity/size_dependence-settling_velocity_vs_diameter.png)
+
+![Relaxation time τ vs particle diameter (log x-axis) — τ ∝ D_p², the same quadratic growth as v_t (since v_t = τ*g).](/plots/aerosol/particle_dyn/settlingvelocity/size_dependence-relaxation_time_vs_diameter.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/single_particle_dynamics.jl:113\nUpstream `SettlingVelocity` is an MTK `@component` with one constant (g = 9.807 m/s²), four `@parameters` (D_p, ρ_p, μ, C_c) and two variables (v_t, τ). The equations are:\n  • v_t ~ (D_p^2 * ρ_p * g * C_c) / (18 * μ)  (Eq. 9.42 — terminal settling velocity)\n  • τ   ~ (ρ_p * D_p^2 * C_c) / (18 * μ)       (Eq. 9.38 — relaxation time)\nBoth equations are algebraic (no derivatives), making this an observed-only component. Note that v_t = τ * g, so the two outputs share the same denominator.\n\nObservability classification: observed-only — every output is given by a single algebraic equation in which the output appears only on the LHS. Both v_t and τ are fully determined by parameters alone; they are independent outputs (no variable reuse between equations) and migrate as `type: state` with explicit `equations`, matching the sibling single_particle_dynamics.jl migrations mean_free_path.esm, slip.esm, stokes.esm, mobility.esm and aerodynamic_diameter.esm. Test scenarios use `time_span: [0, 1]` and sample at t=0.\n\nConstant g (9.807 m/s²) migrates as `type: parameter` carrying its numeric default, consistent with how π_val is handled in mobility.esm and mean_free_path.esm. The name `g` is not one of the ESS schema's reserved physical-constant names.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); both equations are products and divisions of parameters. Floating-point round-off is ~1e-15. 1e-9 leaves comfortable headroom."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {
+    "g": {
+      "type": "parameter",
+      "units": "m/s^2",
+      "default": 9.807,
+      "description": "Gravitational acceleration"
+    },
+    "D_p": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1e-06,
+      "description": "Particle diameter"
+    },
+    "ρ_p": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 1000.0,
+      "description": "Particle density"
+    },
+    "μ": {
+      "type": "parameter",
+      "units": "kg/(m*s)",
+      "default": 1.8e-05,
+      "description": "Dynamic viscosity of air"
+    },
+    "C_c": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "Slip correction factor (dimensionless)"
+    },
+    "v_t": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Terminal settling velocity"
+    },
+    "τ": {
+      "type": "unknown",
+      "units": "s",
+      "description": "Relaxation time"
+    }
+  },
+  "equations": [
+    {
+      "lhs": "v_t",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "^",
+                        "args": [
+                          "D_p",
+                          2
+                        ]
+                      },
+                      "ρ_p"
+                    ]
+                  },
+                  "g"
+                ]
+              },
+              "C_c"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              18,
+              "μ"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "τ",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "ρ_p",
+                  {
+                    "op": "^",
+                    "args": [
+                      "D_p",
+                      2
+                    ]
+                  }
+                ]
+              },
+              "C_c"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              18,
+              "μ"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "default_conditions",
+      "description": "Default conditions: D_p = 1.0e-6 m, ρ_p = 1000 kg/m³, μ = 1.8e-5 kg/(m·s), C_c = 1.0, g = 9.807 m/s². Relaxation time τ = ρ_p*D_p²*C_c/(18μ) = 1e-9/3.24e-4 ≈ 3.0864e-6 s; terminal settling velocity v_t = τ*g ≈ 3.0269e-5 m/s. For a 1 μm particle in air at standard conditions with no slip correction, gravity barely overcomes drag — settling is extremely slow.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ",
+          "time": 0.0,
+          "expected": 3.08641975308642e-06
+        },
+        {
+          "variable": "v_t",
+          "time": 0.0,
+          "expected": 3.0268518518518523e-05
+        }
+      ]
+    },
+    {
+      "id": "table_9_4_1um",
+      "description": "1 μm particle from Table 9.4 (Seinfeld & Pandis 2006): D_p = 1.0e-6 m, ρ_p = 1000 kg/m³, C_c = 1.164 (Cunningham slip correction at 298 K, 1 atm). τ = ρ_p*D_p²*C_c/(18μ) = 1.164e-9/3.24e-4 ≈ 3.5926e-6 s, which matches the tabulated value of ≈ 3.6e-6 s. v_t = τ*g ≈ 3.5233e-5 m/s. Mirrors the upstream `SettlingVelocity relaxation time from Table 9.4` test.",
+      "parameter_overrides": {
+        "C_c": 1.164
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ",
+          "time": 0.0,
+          "expected": 3.5925925925925922e-06
+        },
+        {
+          "variable": "v_t",
+          "time": 0.0,
+          "expected": 3.5232555555555556e-05
+        }
+      ]
+    },
+    {
+      "id": "table_9_4_10um",
+      "description": "10 μm particle from Table 9.4: D_p = 1.0e-5 m, ρ_p = 1000 kg/m³, C_c = 1.016 (near-continuum regime). τ ∝ D_p², so a 10× larger diameter raises τ by 100×: τ ≈ 3.1358e-4 s (≈ 3.14e-4 s in the table). v_t = τ*g ≈ 3.075e-3 m/s ≈ 0.3 cm/s. Mirrors the upstream `SettlingVelocity relaxation time from Table 9.4` test.",
+      "parameter_overrides": {
+        "D_p": 1e-05,
+        "C_c": 1.016
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ",
+          "time": 0.0,
+          "expected": 0.0003135802469135803
+        },
+        {
+          "variable": "v_t",
+          "time": 0.0,
+          "expected": 0.003075281481481482
+        }
+      ]
+    },
+    {
+      "id": "large_particle",
+      "description": "Large particle (D_p = 1.0e-5 m = 10 μm) at unit slip correction C_c = 1.0: τ = ρ_p*D_p²/(18μ) ≈ 3.0864e-4 s — 100× the 1 μm default, confirming the D_p² scaling. v_t ≈ 3.0269e-3 m/s ≈ 0.3 cm/s. Larger particles settle measurably faster.",
+      "parameter_overrides": {
+        "D_p": 1e-05
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ",
+          "time": 0.0,
+          "expected": 0.000308641975308642
+        },
+        {
+          "variable": "v_t",
+          "time": 0.0,
+          "expected": 0.003026851851851852
+        }
+      ]
+    },
+    {
+      "id": "dense_slip_corrected",
+      "description": "Dense particle (ρ_p = 2000 kg/m³) with slip correction C_c = 1.5: τ scales linearly with both ρ_p and C_c, giving τ = 3.0864e-6 × 2 × 1.5 ≈ 9.2593e-6 s. v_t = τ*g ≈ 9.0806e-5 m/s. Denser and more rarefied particles settle faster at the same size.",
+      "parameter_overrides": {
+        "ρ_p": 2000.0,
+        "C_c": 1.5
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ",
+          "time": 0.0,
+          "expected": 9.25925925925926e-06
+        },
+        {
+          "variable": "v_t",
+          "time": 0.0,
+          "expected": 9.080555555555556e-05
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "size_dependence",
+      "description": "Sweep particle diameter D_p from 100 nm to 10 μm (log scale) at default conditions (ρ_p = 1000 kg/m³, μ = 1.8e-5 kg/(m·s), C_c = 1.0, g = 9.807 m/s²). Both τ and v_t scale as D_p², rising four decades across the range. At 100 nm v_t ≈ 3.0e-7 m/s (negligible settling); at 10 μm v_t ≈ 3.0e-3 m/s (≈ 0.3 cm/s, gravitational settling is significant).",
+      "initial_state": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "D_p",
+            "range": {
+              "start": 1e-07,
+              "stop": 1e-05,
+              "count": 50,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "settling_velocity_vs_diameter",
+          "type": "line",
+          "description": "Terminal settling velocity v_t vs particle diameter (log x-axis) — v_t ∝ D_p², rising four decades from ≈ 3.0e-7 m/s at 100 nm to ≈ 3.0e-3 m/s at 10 μm.",
+          "x": {
+            "variable": "D_p",
+            "label": "D_p (m)"
+          },
+          "y": {
+            "variable": "v_t",
+            "label": "v_t (m/s)"
+          }
+        },
+        {
+          "id": "relaxation_time_vs_diameter",
+          "type": "line",
+          "description": "Relaxation time τ vs particle diameter (log x-axis) — τ ∝ D_p², the same quadratic growth as v_t (since v_t = τ*g).",
+          "x": {
+            "variable": "D_p",
+            "label": "D_p (m)"
+          },
+          "y": {
+            "variable": "τ",
+            "label": "τ (s)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

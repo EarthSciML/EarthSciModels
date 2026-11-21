@@ -1,0 +1,440 @@
+---
+title: "StokesNumber"
+slug: "stokesnumber"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["particle_dyn"]
+domain: "aerosol"
+subdomain: "particle_dyn"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/particle_dyn/stokes.esm"
+reference: "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 9, Eqs. 9.38 (relaxation time), 9.98 (stop distance) and 9.101 (Stokes number)."
+description: "Stokes number and stop distance for aerosol single-particle dynamics. Migrated from Aerosol.jl@c8c640bb src/single_particle_dynamics.jl:329 (`StokesNumber` @component). Computes the particle relaxation time τ, the stop distance s_p (the distance a particle travels before coming to rest), and the dimensionless Stokes number St characterizing particle inertia relative to a flow (Seinfeld & Pandis 2006, Chapter 9, Eqs. 9.38, 9.98 and 9.101)."
+tags: ["aerosol", "particle_dyn", "model", "particle-dynamics", "stokes-number"]
+---
+
+## Description
+
+Stokes number and stop distance for aerosol single-particle dynamics. Migrated from Aerosol.jl@c8c640bb src/single_particle_dynamics.jl:329 (`StokesNumber` @component). Computes the particle relaxation time τ, the stop distance s_p (the distance a particle travels before coming to rest), and the dimensionless Stokes number St characterizing particle inertia relative to a flow (Seinfeld & Pandis 2006, Chapter 9, Eqs. 9.38, 9.98 and 9.101).
+
+## Reference
+
+_source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/single_particle_dynamics.jl:329
+Upstream `StokesNumber` is an MTK `@component` with six `@parameters` (D_p, ρ_p, μ, C_c, U, L) and three variables (τ, s_p, St) — no constants. The equations are:
+  • τ   ~ (ρ_p * D_p^2 * C_c) / (18 * μ)  (Eq. 9.38 — relaxation time)
+  • s_p ~ τ * U                            (Eq. 9.98 — stop distance)
+  • St  ~ τ * U / L                        (Eq. 9.101 — Stokes number)
+All three equations are algebraic (no derivatives), making this an observed-only component.
+
+Observability classification: observed-only — every output is given by a single algebraic equation in which the output appears only on the LHS. τ is an intermediate algebraic variable: it is the LHS of the relaxation-time equation and is reused on the RHS of the s_p and St equations, forming a triangular algebraic system. All three outputs migrate as `type: state` with explicit `equations`, matching the sibling single_particle_dynamics.jl migrations mean_free_path.esm, slip.esm and aerodynamic_diameter.esm (in slip.esm the intermediate Kn is likewise a `type: state` reused by the C_c equation). Test scenarios use `time_span: [0, 1]` and sample at t=0.
+
+Tolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the τ equation is a product/division of parameters, and the s_p and St equations are products/divisions of τ and parameters. Floating-point round-off is ~1e-15. 1e-9 leaves comfortable headroom._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `D_p` | `m` | `1e-06` | Particle diameter |
+| `ρ_p` | `kg/m^3` | `1000.0` | Particle density |
+| `μ` | `kg/(m*s)` | `1.8e-05` | Dynamic viscosity of air |
+| `C_c` | `1` | `1.0` | Slip correction factor (dimensionless) |
+| `U` | `m/s` | `1.0` | Initial particle velocity |
+| `L` | `m` | `0.01` | Characteristic length scale |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `τ` | `s` |  | Relaxation time |
+| `s_p` | `m` |  | Stop distance |
+| `St` | `1` |  | Stokes number (dimensionless) |
+
+## Observed expressions
+
+$$
+τ = \frac{ρ_{p} \cdot D_{p}^{2} \cdot C_{c}}{18 \cdot μ}
+$$
+_Relaxation time_
+
+$$
+s_{p} = τ \cdot U
+$$
+_Stop distance_
+
+$$
+St = \frac{τ \cdot U}{L}
+$$
+_Stokes number (dimensionless)_
+
+## Analyses
+
+### size_dependence
+
+Sweep particle diameter D_p from 100 nm to 10 μm (log scale) for a fast flow over a small obstacle (U = 10 m/s, L = 0.001 m). The Stokes number St ∝ D_p² rises from ≈ 3.1e-4 (perfect flow tracer) to ≈ 3.1 (strong inertial impaction), crossing St ≈ 1 — the transition where particles can no longer follow fluid streamlines. The stop distance s_p ∝ D_p² grows over the same range.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `D_p`
+
+![Stokes number St vs particle diameter (log x-axis) — St ∝ D_p², crossing St ≈ 1 within the swept range to mark the onset of inertial impaction.](/plots/aerosol/particle_dyn/stokesnumber/size_dependence-stokes_number_vs_diameter.png)
+
+![Stop distance s_p vs particle diameter (log x-axis) — s_p ∝ D_p², the distance a particle of given size coasts before the drag force brings it to rest.](/plots/aerosol/particle_dyn/stokesnumber/size_dependence-stop_distance_vs_diameter.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/single_particle_dynamics.jl:329\nUpstream `StokesNumber` is an MTK `@component` with six `@parameters` (D_p, ρ_p, μ, C_c, U, L) and three variables (τ, s_p, St) — no constants. The equations are:\n  • τ   ~ (ρ_p * D_p^2 * C_c) / (18 * μ)  (Eq. 9.38 — relaxation time)\n  • s_p ~ τ * U                            (Eq. 9.98 — stop distance)\n  • St  ~ τ * U / L                        (Eq. 9.101 — Stokes number)\nAll three equations are algebraic (no derivatives), making this an observed-only component.\n\nObservability classification: observed-only — every output is given by a single algebraic equation in which the output appears only on the LHS. τ is an intermediate algebraic variable: it is the LHS of the relaxation-time equation and is reused on the RHS of the s_p and St equations, forming a triangular algebraic system. All three outputs migrate as `type: state` with explicit `equations`, matching the sibling single_particle_dynamics.jl migrations mean_free_path.esm, slip.esm and aerodynamic_diameter.esm (in slip.esm the intermediate Kn is likewise a `type: state` reused by the C_c equation). Test scenarios use `time_span: [0, 1]` and sample at t=0.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the τ equation is a product/division of parameters, and the s_p and St equations are products/divisions of τ and parameters. Floating-point round-off is ~1e-15. 1e-9 leaves comfortable headroom."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {
+    "D_p": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1e-06,
+      "description": "Particle diameter"
+    },
+    "ρ_p": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 1000.0,
+      "description": "Particle density"
+    },
+    "μ": {
+      "type": "parameter",
+      "units": "kg/(m*s)",
+      "default": 1.8e-05,
+      "description": "Dynamic viscosity of air"
+    },
+    "C_c": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "Slip correction factor (dimensionless)"
+    },
+    "U": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 1.0,
+      "description": "Initial particle velocity"
+    },
+    "L": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0.01,
+      "description": "Characteristic length scale"
+    },
+    "τ": {
+      "type": "unknown",
+      "units": "s",
+      "description": "Relaxation time"
+    },
+    "s_p": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Stop distance"
+    },
+    "St": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Stokes number (dimensionless)"
+    }
+  },
+  "equations": [
+    {
+      "lhs": "τ",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "ρ_p",
+                  {
+                    "op": "^",
+                    "args": [
+                      "D_p",
+                      2
+                    ]
+                  }
+                ]
+              },
+              "C_c"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              18,
+              "μ"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "s_p",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "τ",
+          "U"
+        ]
+      }
+    },
+    {
+      "lhs": "St",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "τ",
+              "U"
+            ]
+          },
+          "L"
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "default_conditions",
+      "description": "Default conditions: D_p = 1.0e-6 m, ρ_p = 1000 kg/m³, μ = 1.8e-5 kg/(m·s), C_c = 1.0, U = 1.0 m/s, L = 0.01 m. Relaxation time τ = ρ_p*D_p²*C_c/(18μ) = 1e-9/3.24e-4 ≈ 3.0864e-6 s; stop distance s_p = τ*U ≈ 3.0864e-6 m; Stokes number St = τ*U/L ≈ 3.0864e-4 (St ≪ 1, the particle closely follows the flow).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ",
+          "time": 0.0,
+          "expected": 3.08641975308642e-06
+        },
+        {
+          "variable": "s_p",
+          "time": 0.0,
+          "expected": 3.08641975308642e-06
+        },
+        {
+          "variable": "St",
+          "time": 0.0,
+          "expected": 0.00030864197530864197
+        }
+      ]
+    },
+    {
+      "id": "stop_distance",
+      "description": "Faster initial velocity (U = 10 m/s) at default size: τ is unchanged at 3.0864e-6 s, but the stop distance scales linearly with velocity, s_p = τ*U ≈ 3.0864e-5 m. Mirrors the upstream `s_p = τU` test. St = τ*U/L ≈ 3.0864e-3.",
+      "parameter_overrides": {
+        "U": 10.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ",
+          "time": 0.0,
+          "expected": 3.08641975308642e-06
+        },
+        {
+          "variable": "s_p",
+          "time": 0.0,
+          "expected": 3.08641975308642e-05
+        },
+        {
+          "variable": "St",
+          "time": 0.0,
+          "expected": 0.0030864197530864196
+        }
+      ]
+    },
+    {
+      "id": "inertial_impaction",
+      "description": "Fast flow over a small obstacle (U = 10 m/s, L = 0.001 m) at default particle size: St = τ*U/L ≈ 0.0309. Mirrors the upstream `St = τU/L` test. Shrinking the characteristic length L by 10× raises St by 10× relative to the stop_distance scenario, moving the particle toward the inertial-impaction regime.",
+      "parameter_overrides": {
+        "U": 10.0,
+        "L": 0.001
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ",
+          "time": 0.0,
+          "expected": 3.08641975308642e-06
+        },
+        {
+          "variable": "s_p",
+          "time": 0.0,
+          "expected": 3.08641975308642e-05
+        },
+        {
+          "variable": "St",
+          "time": 0.0,
+          "expected": 0.0308641975308642
+        }
+      ]
+    },
+    {
+      "id": "large_inertial_particle",
+      "description": "Large particle (D_p = 1.0e-5 m = 10 μm): τ ∝ D_p², so a 10× larger diameter raises τ by 100× to ≈ 3.0864e-4 s. With default U = 1 m/s and L = 0.01 m, s_p ≈ 3.0864e-4 m and St ≈ 0.0309 — inertia is now appreciable.",
+      "parameter_overrides": {
+        "D_p": 1e-05
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ",
+          "time": 0.0,
+          "expected": 0.000308641975308642
+        },
+        {
+          "variable": "s_p",
+          "time": 0.0,
+          "expected": 0.000308641975308642
+        },
+        {
+          "variable": "St",
+          "time": 0.0,
+          "expected": 0.030864197530864203
+        }
+      ]
+    },
+    {
+      "id": "small_tracer_particle",
+      "description": "Small particle (D_p = 1.0e-7 m = 100 nm): τ ∝ D_p², so a 10× smaller diameter lowers τ by 100× to ≈ 3.0864e-8 s. s_p ≈ 3.0864e-8 m and St ≈ 3.0864e-6 — the particle behaves as a near-perfect flow tracer (St ≪ 1).",
+      "parameter_overrides": {
+        "D_p": 1e-07
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ",
+          "time": 0.0,
+          "expected": 3.086419753086419e-08
+        },
+        {
+          "variable": "s_p",
+          "time": 0.0,
+          "expected": 3.086419753086419e-08
+        },
+        {
+          "variable": "St",
+          "time": 0.0,
+          "expected": 3.086419753086419e-06
+        }
+      ]
+    },
+    {
+      "id": "dense_slip_corrected_particle",
+      "description": "Dense particle (ρ_p = 2000 kg/m³) with a slip correction above unity (C_c = 1.5): τ = ρ_p*D_p²*C_c/(18μ) scales linearly with both ρ_p and C_c, giving τ = 3.0864e-6*2*1.5 ≈ 9.2593e-6 s. At default U and L, s_p ≈ 9.2593e-6 m and St ≈ 9.2593e-4.",
+      "parameter_overrides": {
+        "ρ_p": 2000.0,
+        "C_c": 1.5
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ",
+          "time": 0.0,
+          "expected": 9.25925925925926e-06
+        },
+        {
+          "variable": "s_p",
+          "time": 0.0,
+          "expected": 9.25925925925926e-06
+        },
+        {
+          "variable": "St",
+          "time": 0.0,
+          "expected": 0.0009259259259259261
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "size_dependence",
+      "description": "Sweep particle diameter D_p from 100 nm to 10 μm (log scale) for a fast flow over a small obstacle (U = 10 m/s, L = 0.001 m). The Stokes number St ∝ D_p² rises from ≈ 3.1e-4 (perfect flow tracer) to ≈ 3.1 (strong inertial impaction), crossing St ≈ 1 — the transition where particles can no longer follow fluid streamlines. The stop distance s_p ∝ D_p² grows over the same range.",
+      "initial_state": {},
+      "parameters": {
+        "U": 10.0,
+        "L": 0.001
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "D_p",
+            "range": {
+              "start": 1e-07,
+              "stop": 1e-05,
+              "count": 50,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "stokes_number_vs_diameter",
+          "type": "line",
+          "description": "Stokes number St vs particle diameter (log x-axis) — St ∝ D_p², crossing St ≈ 1 within the swept range to mark the onset of inertial impaction.",
+          "x": {
+            "variable": "D_p",
+            "label": "D_p (m)"
+          },
+          "y": {
+            "variable": "St",
+            "label": "St (dimensionless)"
+          }
+        },
+        {
+          "id": "stop_distance_vs_diameter",
+          "type": "line",
+          "description": "Stop distance s_p vs particle diameter (log x-axis) — s_p ∝ D_p², the distance a particle of given size coasts before the drag force brings it to rest.",
+          "x": {
+            "variable": "D_p",
+            "label": "D_p (m)"
+          },
+          "y": {
+            "variable": "s_p",
+            "label": "s_p (m)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>
