@@ -2,7 +2,7 @@
   "esm": "2.0.0",
   "metadata": {
     "name": "Freitas2007PlumeRise",
-    "description": "One-dimensional, time-dependent wildfire plume-rise model of Freitas et al. (2007), with the environmental wind drag of Freitas et al. (2010), as implemented in the stand-alone Fortran plume model of Mallia and Wilmot (see references). A buoyant plume rises above a circular fire of area A𝒻 into a prescribed ambient sounding; the model predicts the vertical profiles of plume vertical velocity, temperature, water vapor, cloud water, rain, cloud ice, horizontal velocity, radius and a passive tracer, and from them the plume-top height hₚ.\n\nFORMULATION. The column has NLEV levels on two staggered grids spaced Δz = 100 m apart: scalar levels zₜ (level 1 at the surface, level 2 at 50 m, then every Δz) and vertical-velocity levels (faces) z𝑤 = (k − 1)Δz. Level 1 is the lower boundary and the top level is held fixed; every other level obeys ∂X/∂t = advection + eddy diffusion + exchange with the environment + sources. (1) Vertical momentum: dw/dt = flux-form momentum advection + buoyancy (relative virtual-temperature excess times g/(1 + γ), with virtual-mass coefficient γ = 0.5, minus condensate loading) − entrainment drag (2α|w|/(1.5 r) and the wind-driven term |u − uₐ|/(π r), each times |w|) + eddy diffusion − Rayleigh sponge damping. (2) Scalars: advection by the air mass flux wρ through the faces with the scalar interpolated linearly to the face (centred), eddy diffusion with a diffusivity decreasing linearly from ν₀ = 500 m²/s at the surface, entrainment of ambient air at the rate λ = 2α|w̄|/r plus the wind-driven rate (2/π)|uₐ − u|/r, dry-adiabatic cooling −w̄g/cₚ, radius growth by entrainment and wind shear, and sedimentation of rain and ice at fixed fall speeds. (3) Microphysics (Kessler / Ogura–Takahashi bulk scheme with Berry autoconversion): a staged process chain — cloud condensation or evaporation limited by the rate |w̄ ∂qₛ/∂z|, rain evaporation, ice sublimation, vapor deposition onto ice, freezing of rain, melting, then autoconversion and accretion — gives the state X⁽ᵃᵈʲ⁾ the parcel reaches over the adjustment interval τμ, and the model relaxes towards it, M = (X⁽ᵃᵈʲ⁾ − X)/τμ. Parenthesized superscripts (0)…(6) number the stages of the chain. The chain is evaluated at every level, so the lower boundary uses exactly the same equations as the interior (with the interval 3τμ there, as the Fortran applies one full step at the surface and three substeps above). (4) Lower boundary: the Turner/Briggs similarity solution for a buoyant point source below the surface gives w₀ and the plume temperature from the convective heat flux ℋ₀ = ηQ𝒻 (η = 0.55); the fire adds combustion water and fuel moisture to the ambient vapor, any excess over saturation becomes cloud water, and rain and ice are taken from level 2. ℋ₀ is a step function of time: a small value in the first minute, a ramp in one-minute steps to the full flux at 4 minutes, the full flux until t𝒻 and a small value afterwards (the Fortran heating table indexed by the minute that contains t). (5) Plume top and sponge: hₚ is the height of the first velocity level with w ≤ wₘᵢₙ = 1 m/s (the Fortran ztop). A continuous version of that level, jᶜ (w interpolated linearly to wₘᵢₙ), feeds kₜ, the highest plume-top level reached so far (the Fortran kkmax, starting at level 10); the Rayleigh sponge acts above (kₜ − 1)Δz, its rate rising linearly to 1/τᴅ over the 20 levels ℋᴅ and constant above.\n\nAMBIENT PROFILES AND COUPLING. Tₑ, pₑ, qᵥₑ and uₑ are shaped parameters on the scalar levels: the coupling inputs through which a host model or a data source supplies the sounding on the plume grid. Their defaults are the Williams Flats fire sounding (Spokane, OTX, 2019-08-09 00Z) interpolated to the plume grid as the Fortran does; the fire defaults are Q𝒻 = 2.56 kW/m², A𝒻 = 750 ha and α = 0.05. The level count is the metaparameter NLEV (default 200, reaching 19.85 km); binding another value requires supplying the four profiles at that length. The prognostic states are scaled to values of order 1–10 (temperature as the excess T − Tₑ, water in g/kg, radius in km, tracer as a fraction of its boundary value c₀ = 1000) so that the finite-difference Jacobian used by implicit integrators perturbs every component by a meaningful relative amount; with unscaled states that perturbation (proportional to the norm of the whole state vector) was about 0.5 g/kg on every water species and the implicit integration failed.\n\nDEPARTURES FROM THE REFERENCE FORTRAN. Defects of the Fortran corrected here: (1) the lower-boundary ventilation coefficient of ice sublimation and melting uses the boundary velocity w₀ (the Fortran used an array element that is never set, which switched both processes off at level 1); (2) when deposition onto ice would exceed the available vapor, the vapor is added to the existing ice (the Fortran replaced the ice by the vapor); (3) rain evaporates into the vapor deficit qₛ − qᵥ (the Fortran also subtracted cloud water, which can grow rain in unsaturated air); (4) melting uses the same latent-heat coefficient L𝒻/cₚ as freezing (the Fortran used 332.27 K against 332.67 K); (5) with no fire heat flux the similarity solution is 0/0 in the thermal correction β₀ and in the fire moisture increment δq₀; both take their limit, zero; (6) the heat-flux ramp is divided into tᵣ/tₘ steps (4 at the defaults, as in the Fortran); (7) sedimentation: the Fortran calls its fall routine inside the three-substep microphysics loop and accumulates the tendency each time, so rain and ice sedimented three times too fast, and it differenced ρv rather than the fall flux ρqv (its own comment asks whether the gradient is correct); here the tendency is minus the divergence of ρqv over ρ, counted once, with the flux through each face taken from the level above; (8) ice sublimation is driven by the subsaturation qᵥ/qₛ − 1 (the Fortran used SD/qₛ − 1 = −qᵥ/qₛ, where SD is the remaining vapor deficit, so sublimation was fastest in nearly saturated air); (9) vertical velocity: the Fortran's leapfrog step advances w from the previous time level by Δt·F instead of 2Δt·F, so its w evolved at half the rate of its own forcing while every other variable advanced at the full rate (the steady state is unaffected, the rise is not); here dw/dt = F; (10) the Fortran's surface microphysics read the module variables WBAR and DQSDZ left over from the last interior level of the previous step; here the surface condensation capacity |w̄ ∂qₛ/∂z| is zero (the gradient of qₛ is zero at the boundary); (11) the Fortran resets condensate below 1e-10 kg/kg to zero at every microphysics substep, an underflow guard that wipes out rain produced by less than 1e-10 in one substep, so the onset of rain by continental autoconversion depends on its time step (at small steps there is none); here the threshold qε defaults to 0. Formulation differences that are not defects: the model is a continuous-time ODE system, whereas the Fortran is an operator-split scheme with steps of up to 5 s. In the limit of vanishing step the Fortran's scalar transport becomes the centred flux used here (its Lax–Wendroff-type correction is proportional to Δt and its positivity limiter only acts when a face would empty half a cell in one step), its microphysics becomes an instantaneous adjustment (here a relaxation over τμ) and its sponge time 3Δt vanishes (here a fixed τᴅ = 15 s, the Fortran value at its maximum step). The Fortran integrates only up to 20 levels above kkmax and leaves the levels above unchanged; here the whole column is integrated, with the sponge, at full strength above the 20-level layer, damping w and relaxing T to Tₑ there. The plume-top level that sets the sponge is continuous (jᶜ, tracked with τⱼ = 0.5 s) rather than the integer level, which jumps when the plume top passes a level and made the implicit integration fail.\n\nNUMERICAL PARAMETERS THAT REMAIN. τμ = 5/3 s (the Fortran substep at its maximum step) is a relaxation time for saturation adjustment; rate-limited processes do not depend on it. Tripling it to 5 s changes cloud water at 1200 s by at most 1.4 % and vertical velocity below the plume head by less than 2 %; with τμ = 0.5 s the Rust BDF integration fails after about 3 minutes of model time. τᴅ = 15 s sets the sponge strength above the plume, and τⱼ = 0.5 s how closely kₜ tracks the plume top. hₚ is quantized to Δz, as in the Fortran. The centred advection is not positivity-preserving; at cloud edges water species can undershoot to small negative values (about 1e-3 g/kg), which the microphysics treats as zero.\n\nVALIDITY. This is the Freitas 1-D entraining-plume model for vegetation fires: hydrostatic ambient, top-hat profiles, a fixed entrainment coefficient, bulk microphysics with fixed fall speeds and a fixed droplet number; it is not designed for plumes whose radius approaches their height or for strongly sheared environments beyond the wind-drag closure. The default sounding has a superadiabatic surface layer (virtual potential temperature decreasing by about 1.8 K up to 1250 m), as is common in late afternoon, so even without a fire (Q𝒻 = 0, where the boundary reduces to the ambient state) the column develops a dry convective updraft, reaching about 2.6 m/s at 900 s; that behavior is physical, not numerical, and the no-fire case integrates without solver failures.\n\nTESTS. Two tests (51 assertions) compare with the reference Fortran (repository and commit in the references; GNU Fortran 11.5.0, -O3, Williams Flats inputs) built with departures (1)–(4) and (7)–(10) patched in, its maximum time step reduced from 5 s to 0.2 s and its sponge time fixed at 15 s, so that it approximates the continuous-time limit that the model represents. At its native 5 s step the corrected Fortran differs from that limit by up to 76 % in vertical velocity near the plume head at 300 s and 30 % in cloud water at 1200 s, while between 0.2 s and 0.1 s steps it changes by at most 1.5 % at the asserted levels. Fix (11) is not patched: with continental autoconversion neither the model nor the reference forms appreciable rain, and the maritime test forms rain well above the threshold. Values are taken from the Fortran output by linear interpolation in time. The patch is recorded in the pull request that introduced these tests. Tolerances are about twice the largest model–reference difference measured for each field over the asserted levels: 0.6–0.9 % for vertical velocity, 0.04–0.06 K for the temperature excess, 0.2–0.7 % for vapor, 2 % for cloud water, 20 % for the small rain and ice amounts of the maritime case, and one grid level for hₚ.",
+    "description": "One-dimensional, time-dependent wildfire plume-rise model of Freitas et al. (2007), with the environmental wind drag of Freitas et al. (2010), as implemented in the stand-alone Fortran plume model of Mallia and Wilmot (see references). A buoyant plume rises above a circular fire of area A𝒻 into a prescribed ambient sounding; the model predicts the vertical profiles of plume vertical velocity, temperature, water vapor, cloud water, rain, cloud ice, horizontal velocity, radius and a passive tracer, and from them the plume-top height hₚ.\n\nFORMULATION. The column has NLEV levels on two staggered grids spaced Δz = 100 m apart: scalar levels zₜ (level 1 at the surface, level 2 at 50 m, then every Δz) and vertical-velocity levels (faces) z𝑤 = (k − 1)Δz. Level 1 is the lower boundary and the top level is held fixed; every other level obeys ∂X/∂t = advection + eddy diffusion + exchange with the environment + sources. (1) Vertical momentum: dw/dt = flux-form momentum advection + buoyancy (relative virtual-temperature excess times g/(1 + γ), with virtual-mass coefficient γ = 0.5, minus condensate loading) − entrainment drag (2α|w|/(1.5 r) and the wind-driven term |u − uₐ|/(π r), each times |w|) + eddy diffusion − Rayleigh sponge damping. (2) Scalars: advection by the air mass flux wρ through the faces with the scalar interpolated linearly to the face (centred), eddy diffusion with a diffusivity decreasing linearly from ν₀ = 500 m²/s at the surface, entrainment of ambient air at the rate λ = 2α|w̄|/r plus the wind-driven rate (2/π)|uₐ − u|/r, dry-adiabatic cooling −w̄g/cₚ, radius growth by entrainment and wind shear, and sedimentation of rain and ice at fixed fall speeds. (3) Microphysics (Kessler / Ogura–Takahashi bulk scheme with Berry autoconversion): a staged process chain — cloud condensation or evaporation limited by the rate |w̄ ∂qₛ/∂z|, rain evaporation, ice sublimation, vapor deposition onto ice, freezing of rain, melting, then autoconversion and accretion — gives the state X⁽ᵃᵈʲ⁾ the parcel reaches over the adjustment interval τμ, and the model relaxes towards it, M = (X⁽ᵃᵈʲ⁾ − X)/τμ. Parenthesized superscripts (0)…(6) number the stages of the chain. The chain is evaluated at every level, so the lower boundary uses exactly the same equations as the interior (with the interval 3τμ there, as the Fortran applies one full step at the surface and three substeps above). (4) Lower boundary: the Turner/Briggs similarity solution for a buoyant point source below the surface gives w₀ and the plume temperature from the convective heat flux ℋ₀ = ηQ𝒻 (η = 0.55); the fire adds combustion water and fuel moisture to the ambient vapor, any excess over saturation becomes cloud water, and rain and ice are taken from level 2. ℋ₀ is a step function of time: a small value in the first minute, a ramp in one-minute steps to the full flux at 4 minutes, the full flux until t𝒻 and a small value afterwards (the Fortran heating table indexed by the minute that contains t). (5) Plume top and sponge: hₚ is the height of the first velocity level with w ≤ wₘᵢₙ = 1 m/s (the Fortran ztop). A continuous version of that level, jᶜ (w interpolated linearly to wₘᵢₙ), feeds kₜ, the highest plume-top level reached so far (the Fortran kkmax, starting at level 10); the Rayleigh sponge acts above (kₜ − 1)Δz, its rate rising linearly to 1/τᴅ over the 20 levels ℋᴅ and constant above.\n\nAMBIENT SOUNDING AND COUPLING. The ambient atmosphere is a sounding on its own NSND levels — heights above the fire zₛ, pressure pₛ, temperature Tₛ, relative humidity RHₛ and wind components uₛ, vₛ — the coupling inputs through which a host model or data source supplies the ambient column. The model interpolates it linearly to the plume grid, as the Fortran does (htint), giving Tₑ, pₑ, uₑ = |(uₑˣ, uₑʸ)| and qᵥₑ = max(RH·qₛ(Tₑ, pₑ), 1e-8). The default is the Williams Flats fire sounding (Spokane, OTX, 2019-08-09 00Z, 90 levels, surface at 728 m); the fire defaults are Q𝒻 = 2.56 kW/m², A𝒻 = 750 ha and α = 0.05. Because the sounding is interpolated, the grid is free: the level count is the metaparameter NLEV (default 200, reaching 19.85 km, as in the Fortran) and Δz is a parameter, and both can be changed at a mount (freitas_2007_tests.esm runs the model on 52 levels of 200 m). Levels above the sponge over the highest plume top are inert, so a shorter column gives the same answer as long as it reaches ℋᴅ above the plume top. The prognostic states are scaled to values of order 1–10 (temperature as the excess T − Tₑ, water in g/kg, radius in km, tracer as a fraction of its boundary value c₀ = 1000) so that the finite-difference Jacobian used by implicit integrators perturbs every component by a meaningful relative amount; with unscaled states that perturbation (proportional to the norm of the whole state vector) was about 0.5 g/kg on every water species and the implicit integration failed.\n\nDEPARTURES FROM THE REFERENCE FORTRAN. Defects of the Fortran corrected here: (1) the lower-boundary ventilation coefficient of ice sublimation and melting uses the boundary velocity w₀ (the Fortran used an array element that is never set, which switched both processes off at level 1); (2) when deposition onto ice would exceed the available vapor, the vapor is added to the existing ice (the Fortran replaced the ice by the vapor); (3) rain evaporates into the vapor deficit qₛ − qᵥ (the Fortran also subtracted cloud water, which can grow rain in unsaturated air); (4) melting uses the same latent-heat coefficient L𝒻/cₚ as freezing (the Fortran used 332.27 K against 332.67 K); (5) with no fire heat flux the similarity solution is 0/0 in the thermal correction β₀ and in the fire moisture increment δq₀; both take their limit, zero; (6) the heat-flux ramp is divided into tᵣ/tₘ steps (4 at the defaults, as in the Fortran); (7) sedimentation: the Fortran calls its fall routine inside the three-substep microphysics loop and accumulates the tendency each time, so rain and ice sedimented three times too fast, and it differenced ρv rather than the fall flux ρqv (its own comment asks whether the gradient is correct); here the tendency is minus the divergence of ρqv over ρ, counted once, with the flux through each face taken from the level above; (8) ice sublimation is driven by the subsaturation qᵥ/qₛ − 1 (the Fortran used SD/qₛ − 1 = −qᵥ/qₛ, where SD is the remaining vapor deficit, so sublimation was fastest in nearly saturated air); (9) vertical velocity: the Fortran's leapfrog step advances w from the previous time level by Δt·F instead of 2Δt·F, so its w evolved at half the rate of its own forcing while every other variable advanced at the full rate (the steady state is unaffected, the rise is not); here dw/dt = F; (10) the Fortran's surface microphysics read the module variables WBAR and DQSDZ left over from the last interior level of the previous step; here the surface condensation capacity |w̄ ∂qₛ/∂z| is zero (the gradient of qₛ is zero at the boundary); (11) the Fortran resets condensate below 1e-10 kg/kg to zero at every microphysics substep, an underflow guard that wipes out rain produced by less than 1e-10 in one substep, so the onset of rain by continental autoconversion depends on its time step (at small steps there is none); here the threshold qε defaults to 0. Formulation differences that are not defects: the model is a continuous-time ODE system, whereas the Fortran is an operator-split scheme with steps of up to 5 s. In the limit of vanishing step the Fortran's scalar transport becomes the centred flux used here (its Lax–Wendroff-type correction is proportional to Δt and its positivity limiter only acts when a face would empty half a cell in one step), its microphysics becomes an instantaneous adjustment (here a relaxation over τμ) and its sponge time 3Δt vanishes (here a fixed τᴅ = 15 s, the Fortran value at its maximum step). The Fortran integrates only up to 20 levels above kkmax and leaves the levels above unchanged; here the whole column is integrated, with the sponge, at full strength above the 20-level layer, damping w and relaxing T to Tₑ there. The plume-top level that sets the sponge is continuous (jᶜ, tracked with τⱼ = 0.5 s) rather than the integer level, which jumps when the plume top passes a level and made the implicit integration fail.\n\nNUMERICAL PARAMETERS THAT REMAIN. τμ = 5/3 s (the Fortran substep at its maximum step) is a relaxation time for saturation adjustment; rate-limited processes do not depend on it. Tripling it to 5 s changes cloud water at 1200 s by at most 1.4 % and vertical velocity below the plume head by less than 2 %; with τμ = 0.5 s the Rust BDF integration fails after about 3 minutes of model time. τᴅ = 15 s sets the sponge strength above the plume, and τⱼ = 0.5 s how closely kₜ tracks the plume top. hₚ is quantized to Δz, as in the Fortran. The centred advection is not positivity-preserving; at cloud edges water species can undershoot to small negative values (about 1e-3 g/kg), which the microphysics treats as zero.\n\nVALIDITY. This is the Freitas 1-D entraining-plume model for vegetation fires: hydrostatic ambient, top-hat profiles, a fixed entrainment coefficient, bulk microphysics with fixed fall speeds and a fixed droplet number; it is not designed for plumes whose radius approaches their height or for strongly sheared environments beyond the wind-drag closure. The default sounding has a superadiabatic surface layer (virtual potential temperature decreasing by about 1.8 K up to 1250 m), as is common in late afternoon, so even without a fire (Q𝒻 = 0, where the boundary reduces to the ambient state) the column develops a dry convective updraft, reaching about 2.6 m/s at 900 s; that behavior is physical, not numerical, and the no-fire case integrates without solver failures.\n\nTESTS. This file carries an instantaneous test of its default configuration: the lower-boundary similarity solution under full heating and the interpolated sounding, against the reference Fortran (single-precision agreement, 1e-5). The time-dependent comparison with the Fortran is in freitas_2007_tests.esm, which mounts this model on 52 levels of 200 m so that its 20-minute integration takes about 10 s instead of several minutes on 200 levels: one run of the Williams Flats fire with the Fortran's maritime autoconversion, covering the dry rise (300 s), the pyrocumulus cloud, rain and ice (1200 s), 39 assertions. Its expected values come from the reference Fortran (repository and commit in the references; GNU Fortran 11.5.0, -O3) built with departures (1)–(4) and (7)–(10) patched in, on the same 200 m grid, with its maximum time step reduced from 5 s to 0.2 s and its sponge time fixed at 15 s, so that it approximates the continuous-time limit that the model represents: at its native 5 s step the corrected Fortran differs from that limit by up to 19 % in vertical velocity at 300 s and 17–21 % in cloud water and rain at 1200 s, while between 0.2 s and 0.1 s steps it changes by at most 0.6 % at the asserted levels. Fix (11) is not patched (the rain amounts asserted are far above its threshold). Tolerances are about twice the largest model–reference difference measured for each field: 0.8–2 % for vertical velocity, 0.04–0.06 K for the temperature excess, ≤ 0.3 % for vapor, 0.7–2 % for the tracer, 3 % for cloud water, 20 % for the small rain and ice amounts, and one grid level for hₚ. The Fortran patch and the generator of both files are recorded in the pull request that introduced them.",
     "references": [
       {
         "citation": "Freitas, S. R., Longo, K. M., Chatfield, R., Latham, D., Silva Dias, M. A. F., Andreae, M. O., Prins, E., Santos, J. C., Gielow, R., and Carvalho Jr., J. A. (2007). Including the sub-grid scale plume rise of vegetation fires in low resolution atmospheric transport models. Atmospheric Chemistry and Physics, 7, 3385–3398.",
@@ -45,10 +45,15 @@
     "element_type": "Float64"
   },
   "metaparameters": {
+    "NSND": {
+      "type": "integer",
+      "default": 90,
+      "description": "Number of levels of the ambient sounding (zₛ, pₛ, Tₛ, RHₛ, uₛ, vₛ)."
+    },
     "NLEV": {
       "type": "integer",
       "default": 200,
-      "description": "Number of levels on each staggered grid (scalar levels zt and velocity levels zm), spaced Δz apart. The default 200 (to 19.85 km) matches the reference Fortran and the length of the default ambient profiles; binding another value requires supplying Tₑ, pₑ, qᵥₑ and uₑ of that length."
+      "description": "Number of levels on each staggered grid (scalar levels zt and velocity levels zm), spaced Δz apart. The default 200 (to 19.85 km) matches the reference Fortran; levels above the sponge over the highest plume top are inert, so a shorter column gives the same answer when it reaches at least ℋᴅ above the plume top. The ambient sounding is interpolated to whatever grid results, so NLEV (and Δz) can be bound freely at a mount."
     }
   },
   "index_sets": {
@@ -59,850 +64,614 @@
     "zm": {
       "kind": "interval",
       "size": "NLEV"
+    },
+    "snd": {
+      "kind": "interval",
+      "size": "NSND"
     }
   },
   "models": {
     "Freitas2007PlumeRise": {
       "variables": {
-        "Tₑ": {
+        "zₛ": {
           "type": "parameter",
-          "units": "K",
+          "units": "m",
           "shape": [
-            "zt"
+            "snd"
           ],
-          "description": "Ambient (environmental) temperature on the scalar levels zₜ. Coupling input: a host model or data source supplies it on the plume grid; the default is the Williams Flats sounding (Spokane OTX, 2019-08-09 00Z) interpolated to the plume grid as the reference Fortran does. Also the initial plume temperature.",
           "default": [
-            307.34999999999997,
-            306.2987179487179,
-            304.71363636363634,
-            303.6995081967213,
-            302.68311475409837,
-            301.6667213114754,
-            300.65999999999997,
-            299.65999999999997,
-            298.65999999999997,
-            297.65999999999997,
-            296.65999999999997,
-            295.65999999999997,
-            294.67771084337346,
-            293.71385542168673,
-            292.83345323741,
-            291.9736842105263,
-            291.11842105263156,
-            290.2631578947368,
-            289.39590163934423,
-            288.5106557377049,
-            287.62540983606556,
-            286.7475308641975,
-            285.88333333333327,
-            285.01913580246907,
-            284.1549382716049,
-            283.28684210526313,
-            282.40964912280697,
-            281.53226950354605,
-            280.645744680851,
-            279.759219858156,
-            278.8693760262725,
-            277.9662561576354,
-            277.0631362889983,
-            276.1600164203612,
-            275.2568965517241,
-            274.353776683087,
-            273.4490163934426,
-            272.53098360655736,
-            271.6129508196721,
-            270.6962264150943,
-            269.79999999999995,
-            268.90377358490565,
-            268.2431818181818,
-            267.6009433962264,
-            267.22358490566035,
-            266.84215686274507,
-            266.0578431372549,
-            265.2735294117647,
-            264.4892156862745,
-            263.7049019607843,
-            262.92058823529413,
-            262.1891304347826,
-            261.4890977443609,
-            260.73721804511274,
-            259.98533834586465,
-            259.225,
-            258.59999999999997,
-            258.0661616161616,
-            257.5893939393939,
-            257.3525157232704,
-            257.0380503144654,
-            256.5186106346483,
-            255.79819897084045,
-            255.07778730703257,
-            254.35737564322469,
-            253.63696397941678,
-            252.9165523156089,
-            252.19769230769228,
-            251.47974358974355,
-            250.69363636363633,
-            249.87459016393439,
-            249.05491803278684,
-            248.2352459016393,
-            247.40404530744334,
-            246.56262135922327,
-            245.7211974110032,
-            244.8833333333333,
-            244.04999999999998,
-            243.21666666666664,
-            242.36923076923074,
-            241.5514925373134,
-            240.80522388059697,
-            240.0463114754098,
-            239.26762295081966,
-            238.4889344262295,
-            237.55175438596487,
-            236.6702247191011,
-            235.91067415730336,
-            235.3552631578947,
-            234.7282608695652,
-            234.32692307692307,
-            233.87879529872671,
-            232.9777179236043,
-            232.07664054848186,
-            231.17556317335942,
-            230.274485798237,
-            229.37340842311457,
-            228.47233104799213,
-            227.57125367286972,
-            226.67017629774728,
-            225.76909892262483,
-            224.86802154750242,
-            224.04629629629628,
-            223.22619047619045,
-            222.40608465608463,
-            221.58333333333331,
-            220.95,
-            220.62625899280573,
-            220.3025179856115,
-            220.24999999999997,
-            220.62427385892113,
-            219.96037344398337,
-            219.29647302904561,
-            219.31619217081848,
-            219.38736654804268,
-            219.35769230769228,
-            218.55396475770922,
-            217.9372246696035,
-            217.51363636363635,
-            218.3659763313609,
-            219.6677514792899,
-            219.45909090909086,
-            219.59692442882246,
-            220.33506151142353,
-            221.07319859402457,
-            221.81133567662565,
-            222.5494727592267,
-            223.28760984182776,
-            223.0474193548387,
-            222.53129032258062,
-            222.01516129032257,
-            221.4990322580645,
-            220.98290322580644,
-            220.46677419354836,
-            220.03715596330272,
-            219.67018348623853,
-            219.71666666666664,
-            219.82238239757206,
-            219.36714719271623,
-            218.91191198786038,
-            218.45667678300453,
-            218.0014415781487,
-            217.54620637329285,
-            217.09097116843702,
-            217.60151515151512,
-            217.1720779220779,
-            217.11794258373203,
-            217.78779904306217,
-            218.1307692307692,
-            217.74615384615382,
-            217.36153846153843,
-            216.97692307692304,
-            216.59230769230768,
-            216.2076923076923,
-            215.8230769230769,
-            215.4348739495798,
-            214.93067226890753,
-            214.68529411764703,
-            214.4892156862745,
-            214.29313725490192,
-            214.20530085959882,
-            214.14799426934096,
-            214.0906876790831,
-            214.14437869822484,
-            214.4698224852071,
-            214.79526627218934,
-            215.12071005917159,
-            215.44615384615383,
-            215.77159763313608,
-            216.0970414201183,
-            216.39722222222218,
-            216.63718861209964,
-            216.49483985765121,
-            216.35249110320282,
-            216.27352941176468,
-            216.35756302521006,
-            216.44159663865545,
-            216.5444055944056,
-            216.64930069930068,
-            216.7541958041958,
-            216.8590909090909,
-            216.963986013986,
-            217.0973684210526,
-            217.23080808080806,
-            217.0554054054054,
-            216.81516516516515,
-            216.57492492492491,
-            216.62591623036647,
-            216.99240837696334,
-            217.35890052356018,
-            217.72539267015705,
-            217.69409448818894,
-            217.457874015748,
-            217.28178807947018,
-            217.54668874172182,
-            217.78999999999996,
-            218.0195081967213,
-            218.2490163934426,
-            218.47894736842102,
-            218.70921052631576
-          ]
+            0.0,
+            9.0,
+            87.0,
+            186.0,
+            491.0,
+            761.0,
+            1101.0,
+            1267.0,
+            1406.0,
+            1710.0,
+            2015.0,
+            2420.0,
+            2648.0,
+            2930.0,
+            3539.0,
+            3844.0,
+            4056.0,
+            4149.0,
+            4237.0,
+            4449.0,
+            4653.0,
+            5010.0,
+            5102.0,
+            5368.0,
+            5398.0,
+            5446.0,
+            5574.0,
+            5673.0,
+            5720.0,
+            5819.0,
+            5978.0,
+            6004.0,
+            6587.0,
+            6782.0,
+            6892.0,
+            7197.0,
+            7506.0,
+            7806.0,
+            7910.0,
+            8111.0,
+            8355.0,
+            8416.0,
+            8530.0,
+            8619.0,
+            8708.0,
+            8822.0,
+            8914.0,
+            9031.0,
+            10052.0,
+            10430.0,
+            10514.0,
+            10550.0,
+            10828.0,
+            10916.0,
+            11157.0,
+            11438.0,
+            11464.0,
+            11502.0,
+            11729.0,
+            11795.0,
+            11964.0,
+            12074.0,
+            12103.0,
+            12672.0,
+            13292.0,
+            13510.0,
+            13600.0,
+            14259.0,
+            14358.0,
+            14512.0,
+            14510.0,
+            14719.0,
+            15447.0,
+            15566.0,
+            15872.0,
+            16221.0,
+            16897.0,
+            17041.0,
+            17322.0,
+            17560.0,
+            18132.0,
+            18170.0,
+            18269.0,
+            18602.0,
+            18984.0,
+            19238.0,
+            19389.0,
+            19694.0,
+            19998.0,
+            20272.0
+          ],
+          "description": "Heights of the ambient sounding levels above the fire (the lowest sounding level). Coupling input, with pₛ, Tₛ, RHₛ, uₛ and vₛ: a host model or data source supplies the ambient column on its own NSND levels, and the model interpolates it linearly to the plume grid as the Fortran does (htint). The default is the Williams Flats fire sounding (Spokane, OTX, 2019-08-09 00Z), surface at 728 m."
         },
-        "pₑ": {
+        "pₛ": {
           "type": "parameter",
           "units": "kPa",
           "shape": [
-            "zt"
+            "snd"
           ],
-          "description": "Ambient pressure on the scalar levels zₜ (kPa). Coupling input; default as for Tₑ. Used in the air density and the saturation mixing ratio.",
           "default": [
-            92.60000000000001,
-            92.07948717948719,
-            91.0,
-            89.97049180327869,
-            88.98688524590165,
-            88.0032786885246,
-            87.03185185185185,
-            86.06888888888889,
-            85.10592592592593,
-            84.13617647058824,
-            83.16558823529412,
-            82.19500000000001,
-            81.25722891566265,
-            80.35361445783133,
-            79.42374100719425,
-            78.49473684210527,
-            77.57368421052632,
-            76.65263157894738,
-            75.74590163934427,
-            74.86065573770493,
-            73.97540983606558,
-            73.10617283950617,
-            72.26666666666667,
-            71.42716049382716,
-            70.58765432098765,
-            69.75,
-            68.91666666666667,
-            68.08297872340427,
-            67.23191489361703,
-            66.3808510638298,
-            65.5423645320197,
-            64.75418719211822,
-            63.96600985221675,
-            63.17783251231528,
-            62.389655172413796,
-            61.60147783251232,
-            60.820655737704925,
-            60.099344262295084,
-            59.37803278688525,
-            58.65754716981132,
-            57.95,
-            57.24245283018868,
-            56.49318181818182,
-            55.80801886792453,
-            55.10047169811321,
-            54.393137254901966,
-            53.70686274509804,
-            53.02058823529412,
-            52.34789915966387,
-            51.67563025210084,
-            51.003361344537815,
-            50.33913043478261,
-            49.675187969924814,
-            48.998496240601504,
-            48.321804511278195,
-            47.775000000000006,
-            47.15,
-            46.462626262626266,
-            45.91818181818182,
-            45.30503144654088,
-            44.67610062893082,
-            44.13173241852488,
-            43.54854202401373,
-            42.96535162950258,
-            42.38216123499143,
-            41.79897084048027,
-            41.21578044596912,
-            40.676923076923075,
-            40.16410256410256,
-            39.62909090909091,
-            39.07672131147542,
-            38.519344262295085,
-            37.96196721311476,
-            37.442718446601944,
-            36.95728155339806,
-            36.47184466019418,
-            35.980000000000004,
-            35.480000000000004,
-            34.980000000000004,
-            34.48846153846154,
-            34.00099502487562,
-            33.50348258706468,
-            33.024180327868855,
-            32.57336065573771,
-            32.12254098360656,
-            31.650877192982456,
-            31.210112359550564,
-            30.760674157303374,
-            30.31578947368421,
-            29.878260869565217,
-            29.446153846153848,
-            29.02370225269344,
-            28.62213516160627,
-            28.2205680705191,
-            27.81900097943193,
-            27.41743388834476,
-            27.01586679725759,
-            26.61429970617042,
-            26.21273261508325,
-            25.81116552399608,
-            25.40959843290891,
-            25.00803134182174,
-            24.637037037037036,
-            24.266666666666666,
-            23.8962962962963,
-            23.52857142857143,
+            92.6,
+            92.5,
+            91.7,
+            90.6,
+            87.6,
+            85.0,
+            81.7,
+            80.2,
+            78.9,
+            76.1,
+            73.4,
+            70.0,
+            68.1,
+            65.7,
+            60.9,
+            58.7,
+            57.2,
+            56.5,
+            55.9,
+            54.4,
+            53.0,
+            50.6,
+            50.0,
+            48.2,
+            48.1,
+            47.8,
+            47.0,
+            46.3,
+            46.1,
+            45.5,
+            44.5,
+            44.4,
+            41.0,
+            40.0,
+            39.4,
+            37.7,
+            36.2,
+            34.7,
+            34.2,
+            33.2,
+            32.1,
+            31.8,
+            31.3,
+            30.9,
+            30.5,
+            30.0,
+            29.6,
+            29.1,
+            25.0,
+            23.6,
+            23.3,
             23.1,
-            22.776258992805758,
-            22.452517985611514,
-            22.125000000000004,
-            21.787136929460583,
-            21.4551867219917,
-            21.123236514522823,
-            20.80213523131673,
-            20.481850533807833,
-            20.153846153846157,
-            19.851982378854625,
-            19.54361233480176,
-            19.236363636363638,
-            18.937278106508877,
-            18.6414201183432,
-            18.287272727272725,
-            18.05957820738137,
-            17.760808435852372,
-            17.462038664323373,
-            17.163268892794378,
-            16.86449912126538,
-            16.56572934973638,
-            16.311290322580646,
-            16.06935483870968,
-            15.82741935483871,
-            15.585483870967742,
-            15.343548387096774,
-            15.101612903225806,
-            14.86697247706422,
-            14.637614678899082,
-            14.411111111111111,
-            14.193778452200304,
-            13.981335356600912,
-            13.768892261001518,
-            13.556449165402125,
-            13.344006069802733,
-            13.131562974203339,
-            12.919119878603945,
-            12.716161616161617,
-            12.520779220779222,
-            12.323444976076555,
-            12.132057416267942,
-            11.944642857142858,
-            11.76607142857143,
-            11.5875,
-            11.408928571428572,
-            11.230357142857144,
-            11.051785714285716,
-            10.873214285714287,
-            10.694957983193278,
-            10.526890756302521,
-            10.362745098039216,
-            10.199346405228757,
-            10.0359477124183,
-            9.865902578796561,
-            9.693982808022923,
-            9.522063037249284,
-            9.361390532544378,
-            9.228254437869822,
-            9.095118343195267,
-            8.96198224852071,
-            8.828846153846154,
-            8.695710059171597,
-            8.562573964497041,
-            8.426388888888889,
-            8.287188612099644,
-            8.144839857651245,
-            8.002491103202848,
-            7.864705882352942,
-            7.738655462184874,
-            7.612605042016807,
-            7.505594405594406,
-            7.400699300699301,
-            7.295804195804196,
-            7.190909090909091,
-            7.086013986013986,
-            6.9526315789473685,
-            6.81919191919192,
-            6.727027027027027,
-            6.636936936936937,
-            6.546846846846847,
-            6.449738219895288,
-            6.345026178010471,
-            6.240314136125654,
-            6.135602094240838,
-            6.022047244094488,
-            5.903937007874016,
-            5.792052980132451,
-            5.725827814569537,
-            5.640000000000001,
-            5.541639344262295,
-            5.4432786885245905,
-            5.363157894736842,
-            5.2973684210526315
-          ]
+            22.2,
+            21.9,
+            21.1,
+            20.2,
+            20.1,
+            20.0,
+            19.3,
+            19.1,
+            18.6,
+            18.2,
+            18.2,
+            16.5,
+            15.0,
+            14.5,
+            14.3,
+            12.9,
+            12.7,
+            12.4,
+            12.4,
+            12.0,
+            10.7,
+            10.5,
+            10.0,
+            9.4,
+            8.5,
+            8.3,
+            7.9,
+            7.6,
+            7.0,
+            6.9,
+            6.8,
+            6.5,
+            6.1,
+            5.8,
+            5.7,
+            5.4,
+            5.2,
+            5.0
+          ],
+          "description": "Ambient pressure at the sounding levels (coupling input)."
         },
-        "qᵥₑ": {
+        "Tₛ": {
+          "type": "parameter",
+          "units": "K",
+          "shape": [
+            "snd"
+          ],
+          "default": [
+            307.34999999999997,
+            307.34999999999997,
+            305.34999999999997,
+            304.34999999999997,
+            301.25,
+            298.54999999999995,
+            295.15,
+            293.54999999999995,
+            292.34999999999997,
+            289.75,
+            287.04999999999995,
+            283.54999999999995,
+            281.54999999999995,
+            279.04999999999995,
+            273.54999999999995,
+            270.75,
+            268.84999999999997,
+            268.25,
+            267.65,
+            266.84999999999997,
+            265.25,
+            262.45,
+            261.84999999999997,
+            259.84999999999997,
+            259.65,
+            259.25,
+            258.45,
+            257.95,
+            257.65,
+            257.45,
+            256.95,
+            256.84999999999997,
+            252.64999999999998,
+            251.24999999999997,
+            250.34999999999997,
+            247.84999999999997,
+            245.24999999999997,
+            242.74999999999997,
+            241.84999999999997,
+            240.34999999999997,
+            238.45,
+            237.84999999999997,
+            236.84999999999997,
+            236.04999999999998,
+            235.64999999999998,
+            234.84999999999997,
+            234.45,
+            234.04999999999998,
+            224.84999999999997,
+            221.74999999999997,
+            221.04999999999998,
+            220.95,
+            220.04999999999998,
+            220.84999999999997,
+            219.24999999999997,
+            219.45,
+            219.24999999999997,
+            218.84999999999997,
+            217.45,
+            217.64999999999998,
+            219.84999999999997,
+            219.34999999999997,
+            219.24999999999997,
+            223.45,
+            220.24999999999997,
+            219.45,
+            220.04999999999998,
+            217.04999999999998,
+            217.64999999999998,
+            216.84999999999997,
+            216.84999999999997,
+            218.24999999999997,
+            215.45,
+            214.84999999999997,
+            214.24999999999997,
+            214.04999999999998,
+            216.24999999999997,
+            216.64999999999998,
+            216.24999999999997,
+            216.45,
+            217.04999999999998,
+            217.14999999999998,
+            217.24999999999997,
+            216.45,
+            217.84999999999997,
+            217.24999999999997,
+            217.64999999999998,
+            218.34999999999997,
+            219.04999999999998,
+            219.64999999999998
+          ],
+          "description": "Ambient temperature at the sounding levels (coupling input)."
+        },
+        "RHₛ": {
           "type": "parameter",
           "units": "1",
           "shape": [
-            "zt"
+            "snd"
           ],
-          "description": "Ambient water-vapor mass mixing ratio on the scalar levels zₜ. Coupling input; default as for Tₑ (relative humidity times the Tetens saturation ratio, floored at 1e-8). Also the initial plume vapor.",
           "default": [
-            0.007670637822426877,
-            0.008167032201928498,
-            0.007683430786432647,
-            0.007451298301379723,
-            0.007288937753088391,
-            0.00712322752312455,
-            0.00703151253586201,
-            0.00698119980090104,
-            0.006917675472060055,
-            0.006794707502648837,
-            0.006660083206174751,
-            0.006520726003165171,
-            0.006413894884218147,
-            0.006336768463166246,
-            0.006101218811350345,
-            0.0058958123553253024,
-            0.005759455159649059,
-            0.005623147623298658,
-            0.005481611063611498,
-            0.005332682022539591,
-            0.005184955008104765,
-            0.005043973775524844,
-            0.004913667715594537,
-            0.004783861615950036,
-            0.00465475254123569,
-            0.004485394114404093,
-            0.004229282804325231,
-            0.003991560179959919,
-            0.004009432764459786,
-            0.00401563858373814,
-            0.004012450230386284,
-            0.004003740116477845,
-            0.0039846300072891435,
-            0.003956082115315893,
-            0.003919001339421297,
-            0.003874237883789294,
-            0.003826288412238155,
-            0.0037996701575170344,
-            0.0037634461419488465,
-            0.003720082110582226,
-            0.0036908159558399494,
-            0.003652718286986574,
-            0.003434394932845938,
-            0.003139883853287471,
-            0.0021423380830033313,
-            0.0011835574116797717,
-            0.0009844660062684953,
-            0.0008012675771444877,
-            0.0008417015709558877,
-            0.0008823944610494264,
-            0.0009170373347964829,
-            0.0008490177176185688,
-            0.0007242035730976798,
-            0.0006907889661841471,
-            0.0006587797739674224,
-            0.0009721281746886865,
-            0.000751297504022073,
-            0.0008230806913854097,
-            0.0011042892593369305,
-            0.0014500412699420314,
-            0.0013559085084889244,
-            0.0012913404686084502,
-            0.0012273452030706533,
-            0.001166261474612085,
-            0.001107971600000861,
-            0.0010523620100984963,
-            0.0009993231289985257,
-            0.000944059783766883,
-            0.000888976132717105,
-            0.0008475078833688598,
-            0.0008073899387338096,
-            0.0007654428283836639,
-            0.0007253936880631575,
-            0.0006857184605471244,
-            0.0006467034367914746,
-            0.0006096187552800551,
-            0.0005882363369126875,
-            0.000583436727997305,
-            0.0005766910620354154,
-            0.0005692275612657338,
-            0.0005313445417574865,
-            0.0004533570359534971,
-            0.0003847707839186246,
-            0.0003261828249344942,
-            0.0002732166575996453,
-            0.0002616850225300073,
-            0.00022652058199249022,
-            9.473760417013684e-05,
-            6.612588720866472e-05,
-            0.00012790260564756698,
-            0.00016195753499059957,
-            0.00014500054696071056,
-            0.0001337568292854423,
-            0.00012330256480889553,
-            0.00011358871975118584,
-            0.00010456886449681579,
-            9.61990616797074e-05,
-            8.843775779602127e-05,
-            8.124567827353711e-05,
-            7.458572592867076e-05,
-            6.8422882744155e-05,
-            6.272411490205821e-05,
-            5.615013000901058e-05,
-            5.0160107677749645e-05,
-            4.473279597797439e-05,
-            3.9769232806241175e-05,
-            3.4075493430313706e-05,
-            2.8815675668311842e-05,
-            2.3793634471753314e-05,
-            1.8777402703077265e-05,
-            1.2884941582129203e-05,
-            8.574558069659526e-06,
-            4.751666769819466e-06,
-            4.6026746378720376e-06,
-            4.7153379095866175e-06,
-            4.774820638692788e-06,
-            4.393797867012672e-06,
-            4.136573259222941e-06,
-            3.987763543223349e-06,
-            3.768467376726261e-06,
-            2.90228335040775e-06,
-            1.6224968137659066e-06,
-            2.277752195720107e-06,
-            4.67605390149283e-06,
-            7.578730351136938e-06,
-            1.1065030133776828e-05,
-            1.5225103746383408e-05,
-            2.0161420096351053e-05,
-            1.9753382025580883e-05,
-            1.781381675009889e-05,
-            1.600618016051281e-05,
-            1.4323015810670938e-05,
-            1.2757221771525248e-05,
-            1.1302036468266806e-05,
-            1.0076343619315786e-05,
-            9.006357633111757e-06,
-            8.719688094534634e-06,
-            8.69523752848312e-06,
-            7.829866850061769e-06,
-            7.018873942897911e-06,
-            6.259424576193973e-06,
-            5.548807784781719e-06,
-            4.884431300813843e-06,
-            4.263817115013381e-06,
-            5.975945887915998e-06,
-            4.9951651490848496e-06,
-            4.728110827206303e-06,
-            6.0022578321118046e-06,
-            6.785046355317572e-06,
-            6.1072591740495644e-06,
-            5.466026807346652e-06,
-            4.859690518357489e-06,
-            4.2866526325940616e-06,
-            3.745374515934943e-06,
-            3.2343745952426374e-06,
-            2.797092301317561e-06,
-            3.7706475030220373e-06,
-            3.530537470416001e-06,
-            3.0785701228727598e-06,
-            2.6351659041877217e-06,
-            2.5584700070811935e-06,
-            2.58469073188984e-06,
-            2.6119895297076013e-06,
-            2.675292121345165e-06,
-            2.829988626087514e-06,
-            2.993799674697984e-06,
-            3.1672941408913045e-06,
-            3.3510803145616954e-06,
-            3.545809059646847e-06,
-            3.752177270259542e-06,
-            3.959770547996906e-06,
-            4.14949486685295e-06,
-            4.14727056261233e-06,
-            4.1461975188992795e-06,
-            4.177135849780301e-06,
-            4.29034042057229e-06,
-            4.407740498498719e-06,
-            4.528722061298131e-06,
-            4.653790125172558e-06,
-            4.783201756206805e-06,
-            4.917155378746505e-06,
-            5.055861256240223e-06,
-            5.239452816351518e-06,
-            5.431665249954872e-06,
-            5.386952733266611e-06,
-            5.2985462719853e-06,
-            5.212135891946242e-06,
-            5.32460652333183e-06,
-            5.666656876115272e-06,
-            6.031217023028559e-06,
-            6.419869270883257e-06,
-            6.5156584678725646e-06,
-            6.453988470315769e-06,
-            6.436140931631062e-06,
-            6.728705140346633e-06,
-            7.040456054248424e-06,
-            7.371862862267578e-06,
-            7.720761567110633e-06,
-            8.061144355686706e-06,
-            8.395377818993094e-06
-          ]
+            0.2,
+            0.22,
+            0.23,
+            0.23,
+            0.25,
+            0.28,
+            0.31,
+            0.33,
+            0.33,
+            0.35,
+            0.37,
+            0.4,
+            0.39,
+            0.45,
+            0.59,
+            0.68,
+            0.75,
+            0.73,
+            0.72,
+            0.27,
+            0.2,
+            0.28,
+            0.23,
+            0.23,
+            0.22,
+            0.36,
+            0.27,
+            0.34,
+            0.38,
+            0.6,
+            0.55,
+            0.55,
+            0.54,
+            0.53,
+            0.54,
+            0.55,
+            0.56,
+            0.66,
+            0.7,
+            0.57,
+            0.44,
+            0.45,
+            0.48,
+            0.25,
+            0.08,
+            0.24,
+            0.38,
+            0.34,
+            0.34,
+            0.3,
+            0.29,
+            0.27,
+            0.17,
+            0.11,
+            0.04,
+            0.04,
+            0.04,
+            0.04,
+            0.04,
+            0.04,
+            0.02,
+            0.01,
+            0.01,
+            0.09,
+            0.06,
+            0.05,
+            0.05,
+            0.03,
+            0.04,
+            0.03,
+            0.03,
+            0.04,
+            0.02,
+            0.03,
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02,
+            0.02
+          ],
+          "description": "Ambient relative humidity (fraction) at the sounding levels (coupling input); the vapor mixing ratio is RH times the Tetens saturation mixing ratio, as in the Fortran."
         },
-        "uₑ": {
+        "uₛ": {
           "type": "parameter",
           "units": "m/s",
           "shape": [
-            "zt"
+            "snd"
           ],
-          "description": "Ambient horizontal wind speed on the scalar levels zₜ. Coupling input; default as for Tₑ.",
           "default": [
-            2.6,
-            3.61486343421434,
-            4.7175565064887195,
-            4.968476663978701,
-            4.789840034061546,
-            4.647241368657196,
-            4.696317194685082,
-            4.876783029556026,
-            5.076886778805608,
-            4.513489336656237,
-            3.8954630028424337,
-            3.3439906429851995,
-            2.9502475454531156,
-            2.6501411930225816,
-            2.2992660180066773,
-            1.7609846552062574,
-            1.0079347295533405,
-            0.4080573317582878,
-            0.3274821678026217,
-            0.2623188957671635,
-            0.6966447059431687,
-            1.2106143226240031,
-            1.840639071359007,
-            2.4874740064411047,
-            3.1407501115597873,
-            3.5949319174650087,
-            3.589121286483726,
-            3.603016123799183,
-            3.7642550715651812,
-            3.9442090487246535,
-            4.099854890989567,
-            4.162767385959938,
-            4.327209308899661,
-            4.582263022505311,
-            4.9138390615471526,
-            5.307615297770664,
-            5.667541405462081,
-            5.547041635668775,
-            5.746933960429205,
-            6.184677838777896,
-            5.938921609541552,
-            5.7128830219339,
-            5.099686115549712,
-            5.0886152758341625,
-            5.050584426739126,
-            5.099152247012666,
-            5.056372801047191,
-            5.097481385167986,
-            4.996818339372755,
-            4.970709047970608,
-            5.027313219846766,
-            5.090649415721722,
-            5.298496240601503,
-            5.712030075187969,
-            6.125563909774436,
-            6.199999999999999,
-            6.199999999999999,
-            6.199999999999999,
-            6.1663471827824345,
-            6.228338488575813,
-            6.551126063799293,
-            6.6577690846368425,
-            6.590369970468272,
-            6.557194249048126,
-            6.558761270289202,
-            6.5950462690065645,
-            6.66548228478819,
-            7.023076923076924,
-            7.535897435897436,
-            8.318181818181817,
-            8.585499071646767,
-            8.408864319532489,
-            8.25996288215399,
-            8.546538475578576,
-            9.217541377781071,
-            9.907114023758073,
-            10.509216522184373,
-            10.999461453878636,
-            11.50805434665456,
-            12.261232481320024,
-            13.18177425878258,
-            13.923771433051817,
-            14.730380234557934,
-            15.58721137769275,
-            16.45626127837647,
-            17.44679381153262,
-            18.724207876485394,
-            19.88035223997114,
-            21.15186881396044,
-            22.251450121629105,
-            22.93543128019354,
-            23.849053851752814,
-            24.643994444577473,
-            25.455286296019832,
-            26.28141518845046,
-            27.121025310089294,
-            27.972902765009984,
-            28.835960361990935,
-            29.709223762382813,
-            30.591818984750812,
-            31.48296121230655,
-            32.38194481903221,
-            32.94444444444444,
-            33.5,
-            34.05555555555555,
-            34.5,
-            34.5,
-            32.7994600729807,
-            31.109564267769677,
-            29.4241815177106,
-            27.71747376602788,
-            26.011425844464945,
-            24.317998672800506,
-            22.63815919126774,
-            20.96525207343558,
-            19.26923076923077,
-            20.04977973568282,
-            21.19515418502203,
-            21.940909090909095,
-            21.11183431952663,
-            20.22426035502959,
-            19.240000000000002,
-            18.674687030062017,
-            18.044895128122555,
-            17.507357344897173,
-            17.070790805399678,
-            16.743095673868694,
-            16.53074781338498,
-            15.905430562629313,
-            15.144236668046123,
-            14.384427819052181,
-            13.626235711076312,
-            12.869946082818684,
-            12.115915204559172,
-            11.798596263823503,
-            11.798566009050205,
-            12.021768206083424,
-            12.33880455272674,
-            12.41984012790108,
-            12.50536979555006,
-            12.595302003242779,
-            12.689543147447408,
-            12.78799796440277,
-            12.890569905664037,
-            12.9,
-            12.541558441558442,
-            12.298840362177916,
-            12.298342850898184,
-            12.274017956200536,
-            12.1929447015568,
-            12.116118411943102,
-            12.043620361840823,
-            11.975529159038556,
-            11.911920375352341,
-            11.852866176136533,
-            11.78722561246026,
-            11.366395265334102,
-            11.2969154118389,
-            11.296286745951843,
-            11.298966604592259,
-            11.153417826706466,
-            10.994136848826864,
-            10.868337941192744,
-            10.744811282437707,
-            10.57625572588484,
-            10.442623926250002,
-            10.345269322377844,
-            10.285222109494827,
-            10.263137138926687,
-            10.279259099023491,
-            10.110317129739652,
-            9.796258666895648,
-            9.771310487762072,
-            9.776979156588082,
-            9.731719915881486,
-            9.507932139855097,
-            9.317177357266848,
-            8.262727451270372,
-            7.121238914094299,
-            5.997781469940968,
-            4.904761115757407,
-            3.868066803462266,
-            3.8069743933478115,
-            5.004040404040404,
-            5.245324523837685,
-            5.425316351966508,
-            5.605890062109134,
-            5.888365052166998,
-            6.2809156526236505,
-            6.673608692319588,
-            7.066420424520041,
-            7.329699705343515,
-            7.526517637654711,
-            7.739644204560685,
-            8.070632664249224,
-            7.207454560887545,
-            5.701713525029351,
-            4.4797219657384675,
-            3.441844128932956,
-            2.6586286851941665
-          ]
+            2.1298096183182933,
+            2.684693934184062,
+            3.8276946803395795,
+            5.02252893766797,
+            4.169035259201585,
+            4.9262354513565265,
+            3.0528978824742423,
+            2.5901036715336536,
+            2.0999999998724963,
+            -0.2500005301813014,
+            0.8660303013496974,
+            3.5453145442362146,
+            3.5994523921295283,
+            4.03770365101432,
+            3.2693237534444366,
+            5.988721457266669,
+            5.284922523702027,
+            4.6221437632077915,
+            4.822125150715766,
+            5.093007652968537,
+            4.988563928793236,
+            4.018884573754934,
+            3.6062777000893638,
+            4.384102302069423,
+            4.384102302069423,
+            4.384102302069423,
+            4.384102302069423,
+            4.384102302069423,
+            4.818341746444385,
+            5.572550152907492,
+            6.674510792493225,
+            6.663304244566118,
+            5.8024030190429725,
+            6.66843332039267,
+            7.534463621742367,
+            6.281613911266791,
+            6.89211459838498,
+            6.768286766609239,
+            7.94212347564827,
+            10.1824311531935,
+            10.825086298331218,
+            10.927506294846886,
+            11.642555739276903,
+            12.005535486445059,
+            12.10852311687826,
+            12.6761980967851,
+            12.637923261583467,
+            12.559260464971338,
+            11.08170116461106,
+            11.799959573428444,
+            11.799959573428444,
+            11.799959573428444,
+            11.644014898027239,
+            11.510862251756269,
+            10.986752260119902,
+            9.75014473918833,
+            9.500141027927093,
+            9.75014473918833,
+            11.050164037746777,
+            10.800160326485537,
+            10.05014919270182,
+            9.500141027927093,
+            9.785863673396792,
+            13.679208817564792,
+            10.21915755592643,
+            10.418836310596326,
+            10.959435627981266,
+            12.122079825287086,
+            12.122079825287086,
+            11.558262158994664,
+            11.558262158994664,
+            11.404408048046163,
+            10.21915755592643,
+            9.583001651925196,
+            9.256480264229506,
+            9.86633504572319,
+            10.298433233037262,
+            9.78656372531209,
+            9.585823035804939,
+            8.739103725269754,
+            3.0529097464256294,
+            4.443271191419612,
+            4.9262354513565265,
+            5.55392281823937,
+            7.042678487708099,
+            7.558544842859519,
+            8.0754386840936,
+            3.5506790550151726,
+            1.7781092352956474,
+            1.1019615309299247e-05
+          ],
+          "description": "Eastward ambient wind at the sounding levels (coupling input)."
+        },
+        "vₛ": {
+          "type": "parameter",
+          "units": "m/s",
+          "shape": [
+            "snd"
+          ],
+          "default": [
+            1.4912783072649072,
+            1.549973702923796,
+            1.469269694133818,
+            0.8855524096787505,
+            1.944002316751185,
+            1.319925860720274,
+            -0.5383442385540018,
+            -0.2266340016588144,
+            -2.314119215020081e-05,
+            -0.43301239579146944,
+            0.49999151707219225,
+            0.6250958185967651,
+            0.06278914550317176,
+            -0.7120036703456152,
+            -4.6692100183183,
+            -1.6047477394512146,
+            -2.1353205657387826,
+            -2.155408785413875,
+            -1.66045446514936,
+            -0.26697012342941406,
+            1.060297094376375,
+            3.139835470663171,
+            3.6062114677093136,
+            4.384021784274068,
+            4.384021784274068,
+            4.384021784274068,
+            4.384021784274068,
+            4.384021784274068,
+            3.9017409978714985,
+            2.7178456161693028,
+            0.5838712879492055,
+            0.7002689085966679,
+            3.349943164383688,
+            3.8499346814558804,
+            4.349926198528072,
+            5.270799433651361,
+            7.654329256226744,
+            9.665934732085784,
+            10.165268058322745,
+            10.182244144120416,
+            12.452610434510579,
+            13.022657416060735,
+            14.377096224823372,
+            15.366102878859962,
+            16.66564333975814,
+            18.103148947381,
+            18.736138760009425,
+            20.0986312114285,
+            30.44595045811935,
+            32.41929909892338,
+            32.41929909892338,
+            32.41929909892338,
+            27.430948161784706,
+            25.853240613530303,
+            21.562265065960723,
+            16.887411807760184,
+            16.454401248586848,
+            16.887411807760184,
+            19.139066715461546,
+            18.706056156288206,
+            17.407024478768193,
+            16.454401248586848,
+            16.286094441752848,
+            9.226551150102493,
+            5.899899901451869,
+            5.539661535960435,
+            5.583974455182876,
+            4.411936163337795,
+            4.411936163337795,
+            4.206729830159293,
+            4.206729830159293,
+            4.60754566701839,
+            5.899899901451869,
+            5.987994600799084,
+            6.481324950805173,
+            4.392656686509248,
+            0.179646721856297,
+            -0.513001413648678,
+            -2.0376448969904923,
+            -3.1808907681617007,
+            0.5382769549027699,
+            1.1905213645712276,
+            1.319925860720274,
+            1.2821627545050807,
+            1.4968900155901765,
+            1.469149365613234,
+            1.4238293645815203,
+            -2.050043474728416,
+            2.5393557347005027,
+            1.4999999999595226
+          ],
+          "description": "Northward ambient wind at the sounding levels (coupling input)."
         },
         "q∅": {
           "type": "parameter",
@@ -1360,6 +1129,62 @@
             "zm"
           ],
           "description": "Heights of the vertical-velocity levels (faces): (k − 1)Δz."
+        },
+        "Tₑ": {
+          "type": "unknown",
+          "units": "K",
+          "shape": [
+            "zt"
+          ],
+          "description": "Ambient temperature on the scalar levels, interpolated from the sounding; also the initial plume temperature."
+        },
+        "pₑ": {
+          "type": "unknown",
+          "units": "kPa",
+          "shape": [
+            "zt"
+          ],
+          "description": "Ambient pressure on the scalar levels, interpolated from the sounding."
+        },
+        "RHₑ": {
+          "type": "unknown",
+          "units": "1",
+          "shape": [
+            "zt"
+          ],
+          "description": "Ambient relative humidity on the scalar levels, interpolated from the sounding."
+        },
+        "uₑˣ": {
+          "type": "unknown",
+          "units": "m/s",
+          "shape": [
+            "zt"
+          ],
+          "description": "Eastward ambient wind on the scalar levels."
+        },
+        "uₑʸ": {
+          "type": "unknown",
+          "units": "m/s",
+          "shape": [
+            "zt"
+          ],
+          "description": "Northward ambient wind on the scalar levels."
+        },
+        "qᵥₑ": {
+          "type": "unknown",
+          "units": "1",
+          "shape": [
+            "zt"
+          ],
+          "description": "Ambient water-vapor mixing ratio on the scalar levels: RH times the Tetens saturation mixing ratio, floored at 1e-8 (as in the Fortran); also the initial plume vapor."
+        },
+        "uₑ": {
+          "type": "unknown",
+          "units": "m/s",
+          "shape": [
+            "zt"
+          ],
+          "description": "Ambient horizontal wind speed on the scalar levels."
         },
         "velocity_state": {
           "type": "unknown",
@@ -2160,6 +1985,12 @@
           "type": "unknown",
           "units": "1",
           "description": "Number of levels on each grid (the length of the index sets zt and zm)."
+        },
+        "ℓν": {
+          "type": "parameter",
+          "units": "m",
+          "default": 20000.0,
+          "description": "Height over which the eddy diffusivity would decrease linearly from ν₀ to zero (the Fortran reduces it by ν₀/200 per 100 m level, i.e. over its 200-level, 20 km grid); fixed in metres so that the profile does not depend on the number of levels."
         },
         "𝒱𝑤": {
           "type": "unknown",
@@ -6176,6 +6007,196 @@
             ]
           },
           "description": "Sedimentation tendency of the mixing ratio q for the (negative, downward) fall speed v: minus the divergence of the fall flux ρqv over the layer, divided by ρ, with the flux through each face taken from the level above it (upwind for downward fall). Applied once per unit time. Units: s⁻¹."
+        },
+        "𝓘": {
+          "params": [
+            "f",
+            "z"
+          ],
+          "body": {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "z",
+                  {
+                    "op": "index",
+                    "args": [
+                      "zₛ",
+                      "NSND"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "index",
+                "args": [
+                  "f",
+                  "NSND"
+                ]
+              },
+              {
+                "op": "faq",
+                "args": [],
+                "output_idx": [],
+                "ranges": {
+                  "j": [
+                    1,
+                    {
+                      "op": "-",
+                      "args": [
+                        "NSND",
+                        1
+                      ]
+                    }
+                  ]
+                },
+                "reduce": "+",
+                "expr": {
+                  "op": "ifelse",
+                  "args": [
+                    {
+                      "op": "and",
+                      "args": [
+                        {
+                          "op": "<=",
+                          "args": [
+                            {
+                              "op": "index",
+                              "args": [
+                                "zₛ",
+                                "j"
+                              ]
+                            },
+                            "z"
+                          ]
+                        },
+                        {
+                          "op": "<",
+                          "args": [
+                            "z",
+                            {
+                              "op": "index",
+                              "args": [
+                                "zₛ",
+                                {
+                                  "op": "+",
+                                  "args": [
+                                    "j",
+                                    1
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "op": "+",
+                      "args": [
+                        {
+                          "op": "index",
+                          "args": [
+                            "f",
+                            "j"
+                          ]
+                        },
+                        {
+                          "op": "/",
+                          "args": [
+                            {
+                              "op": "*",
+                              "args": [
+                                {
+                                  "op": "-",
+                                  "args": [
+                                    {
+                                      "op": "index",
+                                      "args": [
+                                        "f",
+                                        {
+                                          "op": "+",
+                                          "args": [
+                                            "j",
+                                            1
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "op": "index",
+                                      "args": [
+                                        "f",
+                                        "j"
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "op": "-",
+                                  "args": [
+                                    "z",
+                                    {
+                                      "op": "index",
+                                      "args": [
+                                        "zₛ",
+                                        "j"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "op": "-",
+                              "args": [
+                                {
+                                  "op": "index",
+                                  "args": [
+                                    "zₛ",
+                                    {
+                                      "op": "+",
+                                      "args": [
+                                        "j",
+                                        1
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "op": "index",
+                                  "args": [
+                                    "zₛ",
+                                    "j"
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "op": "*",
+                      "args": [
+                        0,
+                        {
+                          "op": "index",
+                          "args": [
+                            "f",
+                            "j"
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "description": "Linear interpolation of the sounding profile f (on the levels zₛ) to the height z, constant above the top sounding level (the Fortran htint inside the sounding). Units of f."
         }
       },
       "equations": [
@@ -6230,6 +6251,212 @@
                 "Δz"
               ]
             }
+          }
+        },
+        {
+          "lhs": "Tₑ",
+          "rhs": {
+            "op": "faq",
+            "args": [],
+            "output_idx": [
+              "k"
+            ],
+            "ranges": {
+              "k": [
+                1,
+                "NLEV"
+              ]
+            },
+            "expr": {
+              "op": "apply_expression_template",
+              "args": [],
+              "name": "𝓘",
+              "bindings": {
+                "f": "Tₛ",
+                "z": {
+                  "op": "index",
+                  "args": [
+                    "zₜ",
+                    "k"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "lhs": "pₑ",
+          "rhs": {
+            "op": "faq",
+            "args": [],
+            "output_idx": [
+              "k"
+            ],
+            "ranges": {
+              "k": [
+                1,
+                "NLEV"
+              ]
+            },
+            "expr": {
+              "op": "apply_expression_template",
+              "args": [],
+              "name": "𝓘",
+              "bindings": {
+                "f": "pₛ",
+                "z": {
+                  "op": "index",
+                  "args": [
+                    "zₜ",
+                    "k"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "lhs": "RHₑ",
+          "rhs": {
+            "op": "faq",
+            "args": [],
+            "output_idx": [
+              "k"
+            ],
+            "ranges": {
+              "k": [
+                1,
+                "NLEV"
+              ]
+            },
+            "expr": {
+              "op": "apply_expression_template",
+              "args": [],
+              "name": "𝓘",
+              "bindings": {
+                "f": "RHₛ",
+                "z": {
+                  "op": "index",
+                  "args": [
+                    "zₜ",
+                    "k"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "lhs": "uₑˣ",
+          "rhs": {
+            "op": "faq",
+            "args": [],
+            "output_idx": [
+              "k"
+            ],
+            "ranges": {
+              "k": [
+                1,
+                "NLEV"
+              ]
+            },
+            "expr": {
+              "op": "apply_expression_template",
+              "args": [],
+              "name": "𝓘",
+              "bindings": {
+                "f": "uₛ",
+                "z": {
+                  "op": "index",
+                  "args": [
+                    "zₜ",
+                    "k"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "lhs": "uₑʸ",
+          "rhs": {
+            "op": "faq",
+            "args": [],
+            "output_idx": [
+              "k"
+            ],
+            "ranges": {
+              "k": [
+                1,
+                "NLEV"
+              ]
+            },
+            "expr": {
+              "op": "apply_expression_template",
+              "args": [],
+              "name": "𝓘",
+              "bindings": {
+                "f": "vₛ",
+                "z": {
+                  "op": "index",
+                  "args": [
+                    "zₜ",
+                    "k"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "lhs": "qᵥₑ",
+          "rhs": {
+            "op": "max",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "RHₑ",
+                  {
+                    "op": "apply_expression_template",
+                    "args": [],
+                    "name": "qₛ",
+                    "bindings": {
+                      "X": "Tₑ",
+                      "P": "pₑ"
+                    }
+                  }
+                ]
+              },
+              1e-08
+            ]
+          }
+        },
+        {
+          "lhs": "uₑ",
+          "rhs": {
+            "op": "sqrt",
+            "args": [
+              {
+                "op": "+",
+                "args": [
+                  {
+                    "op": "^",
+                    "args": [
+                      "uₑˣ",
+                      2
+                    ]
+                  },
+                  {
+                    "op": "^",
+                    "args": [
+                      "uₑʸ",
+                      2
+                    ]
+                  }
+                ]
+              }
+            ]
           }
         },
         {
@@ -10159,13 +10386,19 @@
                               "op": "/",
                               "args": [
                                 {
-                                  "op": "-",
+                                  "op": "*",
                                   "args": [
-                                    "k",
-                                    1
+                                    {
+                                      "op": "-",
+                                      "args": [
+                                        "k",
+                                        1
+                                      ]
+                                    },
+                                    "Δz"
                                   ]
                                 },
-                                "nₗ"
+                                "ℓν"
                               ]
                             }
                           ]
@@ -11356,436 +11589,89 @@
       ],
       "tests": [
         {
-          "id": "williams_flats_continental",
-          "description": "Williams Flats fire (2.56 kW/m2, 750 ha) with the default continental Berry autoconversion. At 300 s the plume is still dry and rising (top 1.3 km): vertical velocity, temperature excess, vapor and tracer near the source. At 1200 s the plume has reached 5.9 km and carries a pyrocumulus cloud above 3.5 km: cloud water through the cloud, and the vertical velocity, temperature excess, vapor and tracer through the column. Reference: the stand-alone Fortran (tartanrunner25/Plume-model_stand_alone at 9265514, GNU Fortran 11.5.0 -O3) with the Williams Flats inputs, built with the corrections listed as departures (1)-(4) and (7)-(10) (preprocessor flags FIX_PR FIX_SED FIX_SUBL FIX_LEAPFROG), its maximum time step reduced from 5 s to 0.2 s (DTMAX) and its sponge time fixed at 15 s (FIXED_SPONGE), so that it approximates the continuous-time limit this model represents; values are interpolated linearly in time between the two Fortran steps that bracket the assertion time and converted to the state units (temperature excess T - Te, water in g/kg, tracer as a fraction of the boundary value 1000). Tolerances are about twice the largest model-reference difference measured for each field over the asserted levels (one tolerance per field and test), with floors of 0.2 % (relative), 0.02 K and one grid level (100 m) for hp. Levels at the advancing plume head, where the reference itself changes by several per cent between 0.2 s and 0.1 s steps, are not asserted.",
+          "id": "williams_flats_lower_boundary_and_sounding",
+          "description": "Default 200-level configuration, evaluated at t = 0 with the first-minute heat-flux floor ℋₘᵢₙ set to the full convective flux of the Williams Flats fire (ηQ𝒻 = 1408 W/m²): the lower-boundary similarity solution (w₀, the plume temperature T₀⁽⁰⁾ and the vapor qᵥ₀⁽⁰⁾ including the fire water) and the ambient sounding interpolated to the plume grid at levels 50 (4.85 km) and 120 (11.85 km). Expected values are the reference Fortran's W(1), T(1), QV(1) under full heating and its interpolated TE, PE, QVENV and VEL_E (single precision; tolerance 1e-5 relative). The time-dependent behavior is tested on a shorter, coarser column in freitas_2007_tests.esm, which mounts this model, because the implicit integration of the full 200-level column takes minutes.",
           "time_span": {
             "start": 0,
-            "end": 1200.0
+            "end": 1
+          },
+          "parameter_overrides": {
+            "ℋₘᵢₙ": 1408.0
           },
           "assertions": [
             {
-              "variable": "hₚ",
-              "time": 300.0,
-              "expected": 1300.0,
+              "variable": "w₀",
+              "time": 0,
+              "expected": 9.3712,
               "tolerance": {
-                "abs": 100.0
+                "rel": 1e-05
               }
             },
             {
-              "variable": "hₚ",
-              "time": 1200.0,
-              "expected": 5900.0,
+              "variable": "T₀⁽⁰⁾",
+              "time": 0,
+              "expected": 307.49255,
               "tolerance": {
-                "abs": 100.0
+                "rel": 1e-05
               }
             },
             {
-              "variable": "velocity_state[2]",
-              "time": 300.0,
-              "expected": 9.36303,
+              "variable": "qᵥ₀⁽⁰⁾",
+              "time": 0,
+              "expected": 0.00767874,
               "tolerance": {
-                "rel": 0.006
+                "rel": 1e-05
               }
             },
             {
-              "variable": "velocity_state[4]",
-              "time": 300.0,
-              "expected": 9.36142,
+              "variable": "Tₑ[50]",
+              "time": 0,
+              "expected": 263.7049,
               "tolerance": {
-                "rel": 0.006
+                "rel": 1e-05
               }
             },
             {
-              "variable": "velocity_state[6]",
-              "time": 300.0,
-              "expected": 9.20619,
+              "variable": "pₑ[50]",
+              "time": 0,
+              "expected": 51.675632,
               "tolerance": {
-                "rel": 0.006
+                "rel": 1e-05
               }
             },
             {
-              "variable": "velocity_state[8]",
-              "time": 300.0,
-              "expected": 8.6175,
+              "variable": "qᵥₑ[50]",
+              "time": 0,
+              "expected": 0.000882394,
               "tolerance": {
-                "rel": 0.006
+                "rel": 1e-05
               }
             },
             {
-              "variable": "temperature_state[3]",
-              "time": 300.0,
-              "expected": 1.03937,
+              "variable": "uₑ[50]",
+              "time": 0,
+              "expected": 4.9707088,
               "tolerance": {
-                "abs": 0.04
+                "rel": 1e-05
               }
             },
             {
-              "variable": "temperature_state[6]",
-              "time": 300.0,
-              "expected": 1.06436,
+              "variable": "Tₑ[120]",
+              "time": 0,
+              "expected": 218.36597,
               "tolerance": {
-                "abs": 0.04
+                "rel": 1e-05
               }
             },
             {
-              "variable": "temperature_state[9]",
-              "time": 300.0,
-              "expected": 0.969635,
+              "variable": "qᵥₑ[120]",
+              "time": 0,
+              "expected": 3.7684672e-06,
               "tolerance": {
-                "abs": 0.04
-              }
-            },
-            {
-              "variable": "vapor_state[3]",
-              "time": 300.0,
-              "expected": 7.68372,
-              "tolerance": {
-                "rel": 0.002
-              }
-            },
-            {
-              "variable": "vapor_state[6]",
-              "time": 300.0,
-              "expected": 7.65309,
-              "tolerance": {
-                "rel": 0.002
-              }
-            },
-            {
-              "variable": "vapor_state[9]",
-              "time": 300.0,
-              "expected": 7.54159,
-              "tolerance": {
-                "rel": 0.002
-              }
-            },
-            {
-              "variable": "tracer_state[3]",
-              "time": 300.0,
-              "expected": 0.958394,
-              "tolerance": {
-                "rel": 0.006
-              }
-            },
-            {
-              "variable": "tracer_state[6]",
-              "time": 300.0,
-              "expected": 0.886618,
-              "tolerance": {
-                "rel": 0.006
-              }
-            },
-            {
-              "variable": "tracer_state[9]",
-              "time": 300.0,
-              "expected": 0.759426,
-              "tolerance": {
-                "rel": 0.006
-              }
-            },
-            {
-              "variable": "velocity_state[10]",
-              "time": 1200.0,
-              "expected": 9.85727,
-              "tolerance": {
-                "rel": 0.009000000000000001
-              }
-            },
-            {
-              "variable": "velocity_state[20]",
-              "time": 1200.0,
-              "expected": 11.1714,
-              "tolerance": {
-                "rel": 0.009000000000000001
-              }
-            },
-            {
-              "variable": "velocity_state[30]",
-              "time": 1200.0,
-              "expected": 10.7079,
-              "tolerance": {
-                "rel": 0.009000000000000001
-              }
-            },
-            {
-              "variable": "velocity_state[40]",
-              "time": 1200.0,
-              "expected": 9.71811,
-              "tolerance": {
-                "rel": 0.009000000000000001
-              }
-            },
-            {
-              "variable": "velocity_state[50]",
-              "time": 1200.0,
-              "expected": 11.5568,
-              "tolerance": {
-                "rel": 0.009000000000000001
-              }
-            },
-            {
-              "variable": "temperature_state[10]",
-              "time": 1200.0,
-              "expected": 1.08112,
-              "tolerance": {
-                "abs": 0.06
-              }
-            },
-            {
-              "variable": "temperature_state[20]",
-              "time": 1200.0,
-              "expected": 0.365295,
-              "tolerance": {
-                "abs": 0.06
-              }
-            },
-            {
-              "variable": "temperature_state[30]",
-              "time": 1200.0,
-              "expected": -0.625092,
-              "tolerance": {
-                "abs": 0.06
-              }
-            },
-            {
-              "variable": "temperature_state[40]",
-              "time": 1200.0,
-              "expected": 0.887991,
-              "tolerance": {
-                "abs": 0.06
-              }
-            },
-            {
-              "variable": "temperature_state[50]",
-              "time": 1200.0,
-              "expected": 1.46091,
-              "tolerance": {
-                "abs": 0.06
-              }
-            },
-            {
-              "variable": "vapor_state[20]",
-              "time": 1200.0,
-              "expected": 7.45545,
-              "tolerance": {
-                "rel": 0.007
-              }
-            },
-            {
-              "variable": "vapor_state[36]",
-              "time": 1200.0,
-              "expected": 6.62447,
-              "tolerance": {
-                "rel": 0.007
-              }
-            },
-            {
-              "variable": "vapor_state[44]",
-              "time": 1200.0,
-              "expected": 5.10209,
-              "tolerance": {
-                "rel": 0.007
-              }
-            },
-            {
-              "variable": "vapor_state[52]",
-              "time": 1200.0,
-              "expected": 3.74455,
-              "tolerance": {
-                "rel": 0.007
-              }
-            },
-            {
-              "variable": "cloud_state[36]",
-              "time": 1200.0,
-              "expected": 0.247763,
-              "tolerance": {
-                "rel": 0.02
-              }
-            },
-            {
-              "variable": "cloud_state[40]",
-              "time": 1200.0,
-              "expected": 0.825256,
-              "tolerance": {
-                "rel": 0.02
-              }
-            },
-            {
-              "variable": "cloud_state[44]",
-              "time": 1200.0,
-              "expected": 1.37465,
-              "tolerance": {
-                "rel": 0.02
-              }
-            },
-            {
-              "variable": "cloud_state[48]",
-              "time": 1200.0,
-              "expected": 1.83304,
-              "tolerance": {
-                "rel": 0.02
-              }
-            },
-            {
-              "variable": "cloud_state[52]",
-              "time": 1200.0,
-              "expected": 2.24993,
-              "tolerance": {
-                "rel": 0.02
-              }
-            },
-            {
-              "variable": "tracer_state[20]",
-              "time": 1200.0,
-              "expected": 0.739406,
-              "tolerance": {
-                "rel": 0.002
-              }
-            },
-            {
-              "variable": "tracer_state[40]",
-              "time": 1200.0,
-              "expected": 0.565651,
-              "tolerance": {
-                "rel": 0.002
-              }
-            },
-            {
-              "variable": "tracer_state[50]",
-              "time": 1200.0,
-              "expected": 0.495481,
-              "tolerance": {
-                "rel": 0.002
+                "rel": 1e-05
               }
             }
           ]
-        },
-        {
-          "id": "williams_flats_maritime",
-          "description": "The same fire with the maritime Berry autoconversion of the Fortran (droplet number 50 per cm3, dispersion 0.366), so that rain forms in the cloud, partly freezes and grows ice by deposition: cloud water, rain and ice through the cloud at 1200 s, with the plume top and two velocities. Reference: the stand-alone Fortran (tartanrunner25/Plume-model_stand_alone at 9265514, GNU Fortran 11.5.0 -O3) with the Williams Flats inputs, built with the corrections listed as departures (1)-(4) and (7)-(10) (preprocessor flags FIX_PR FIX_SED FIX_SUBL FIX_LEAPFROG), its maximum time step reduced from 5 s to 0.2 s (DTMAX) and its sponge time fixed at 15 s (FIXED_SPONGE), so that it approximates the continuous-time limit this model represents; values are interpolated linearly in time between the two Fortran steps that bracket the assertion time and converted to the state units (temperature excess T - Te, water in g/kg, tracer as a fraction of the boundary value 1000). Tolerances are about twice the largest model-reference difference measured for each field over the asserted levels (one tolerance per field and test), with floors of 0.2 % (relative), 0.02 K and one grid level (100 m) for hp. Levels at the advancing plume head, where the reference itself changes by several per cent between 0.2 s and 0.1 s steps, are not asserted.",
-          "time_span": {
-            "start": 0,
-            "end": 1200.0
-          },
-          "assertions": [
-            {
-              "variable": "hₚ",
-              "time": 1200.0,
-              "expected": 5900.0,
-              "tolerance": {
-                "abs": 100.0
-              }
-            },
-            {
-              "variable": "velocity_state[30]",
-              "time": 1200.0,
-              "expected": 10.7079,
-              "tolerance": {
-                "rel": 0.008
-              }
-            },
-            {
-              "variable": "velocity_state[50]",
-              "time": 1200.0,
-              "expected": 11.5473,
-              "tolerance": {
-                "rel": 0.008
-              }
-            },
-            {
-              "variable": "cloud_state[40]",
-              "time": 1200.0,
-              "expected": 0.808911,
-              "tolerance": {
-                "rel": 0.02
-              }
-            },
-            {
-              "variable": "cloud_state[44]",
-              "time": 1200.0,
-              "expected": 1.30901,
-              "tolerance": {
-                "rel": 0.02
-              }
-            },
-            {
-              "variable": "cloud_state[48]",
-              "time": 1200.0,
-              "expected": 1.76896,
-              "tolerance": {
-                "rel": 0.02
-              }
-            },
-            {
-              "variable": "cloud_state[52]",
-              "time": 1200.0,
-              "expected": 2.18932,
-              "tolerance": {
-                "rel": 0.02
-              }
-            },
-            {
-              "variable": "rain_state[42]",
-              "time": 1200.0,
-              "expected": 0.0795538,
-              "tolerance": {
-                "rel": 0.2
-              }
-            },
-            {
-              "variable": "rain_state[44]",
-              "time": 1200.0,
-              "expected": 0.067809,
-              "tolerance": {
-                "rel": 0.2
-              }
-            },
-            {
-              "variable": "rain_state[48]",
-              "time": 1200.0,
-              "expected": 0.019971,
-              "tolerance": {
-                "rel": 0.2
-              }
-            },
-            {
-              "variable": "rain_state[52]",
-              "time": 1200.0,
-              "expected": 0.00628985,
-              "tolerance": {
-                "rel": 0.2
-              }
-            },
-            {
-              "variable": "ice_state[44]",
-              "time": 1200.0,
-              "expected": 0.0259198,
-              "tolerance": {
-                "rel": 0.2
-              }
-            },
-            {
-              "variable": "ice_state[48]",
-              "time": 1200.0,
-              "expected": 0.0607041,
-              "tolerance": {
-                "rel": 0.2
-              }
-            },
-            {
-              "variable": "ice_state[52]",
-              "time": 1200.0,
-              "expected": 0.0636649,
-              "tolerance": {
-                "rel": 0.2
-              }
-            }
-          ],
-          "parameter_overrides": {
-            "nᵤ": 50.0,
-            "cᵤ": 0.366
-          }
         }
       ]
     }
