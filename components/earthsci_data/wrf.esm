@@ -1,5 +1,5 @@
 {
-  "esm": "1.0.0",
+  "esm": "1.2.0",
   "metadata": {
     "name": "WRF",
     "description": "WRF regridding model — the coupler half of the wrf loader+regridding-model split (RFC pure-io-data-loaders §6/§7; bead esm-3nc.1). Exposes WRF regional weather fields (UCAR RDA d340000, WRF-Chem v3.9.1 CONUS 12 km) on the simulation's target grid for advection and chemistry coupling in EarthSciML systems.\n\nStructure (RFC pure-io-data-loaders §6):\n  1. It declares the pure-I/O source inline: at 0.7.0 the loader was the separate file components/earthsci_data/wrf_loader.esm, mounted as the subsystem `raw`; at esm 1.0.0 it is the `WRF_hourly_d01` entry in this file's own `data_sources` and the standalone file is gone (a data source is not a component, so it neither needs nor may be a subsystem). Loader fields are referenced as raw.<var> (e.g. raw.U) and re-exposed as model-level observed variables (WRF.U, WRF.V, ...) to preserve the runtime MeanWind coupling contract (WRF.U/V/W → MeanWind via WRFCoupler/couple2).\n  2. Reprojection: WRF's native grid is projected (lambert_conformal), so the coordinate transform is the LCC reproject (ESD reprojection/lambert_conformal.esm, esd-47z.2) — selected by convention from the loader's grid.crs.projection = 'lambert_conformal' and parameterized by the loader's crs parameters {lat_1:30, lat_2:60, lat_0:38.999996, lon_0:-97, R:6370000}.\n  3. Regridding (per variable, RFC §5.2): the Arakawa-C-grid wind components U, V, W are edge/face-staggered → B-spline interpolation; the cell-centered scalars T, PH, PHB, P, PB, QVAPOR → conservative (area-weighted, mass-conserving) regridding. Declared in the `regrid` block.\n\nTop-level derived quantities computed on the target grid: total pressure P_total = P + PB, geopotential height z = (PH + PHB)/g, and the lat/lon coordinate metrics δxδlon and δyδlat (emitted only for lat/lon coordinate domains).\n\nMeanWind coupling (from EarthSciData.jl@830435a coupling.jl): MeanWind.v_lon ~ WRF.U, MeanWind.v_lat ~ WRF.V, MeanWind.v_lev ~ WRF.W.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/wrf.jl:169 (WRF constructor, esm-4l84); split into pure loader + regridding model by esm-3nc.1.",
@@ -219,7 +219,6 @@
         "U": {
           "type": "parameter",
           "units": "m/s",
-          "shape": [],
           "description": "Zonal (west–east) wind component (m/s). Sourced from the loader field raw.U (WRF variable U on the west_east_stag C-grid edges), regridded with a B-spline kernel. Coupled to MeanWind.v_lon via WRFCoupler/couple2.",
           "update": {
             "kind": "data",
@@ -233,7 +232,6 @@
         "V": {
           "type": "parameter",
           "units": "m/s",
-          "shape": [],
           "description": "Meridional (south–north) wind component (m/s). Sourced from the loader field raw.V (WRF variable V on the south_north_stag C-grid edges), regridded with a B-spline kernel. Coupled to MeanWind.v_lat via WRFCoupler/couple2.",
           "update": {
             "kind": "data",
@@ -247,7 +245,6 @@
         "W": {
           "type": "parameter",
           "units": "m/s",
-          "shape": [],
           "description": "Vertical wind component (m/s). Sourced from the loader field raw.W (WRF variable W on the bottom_top_stag C-grid edges), regridded with a B-spline kernel. Zero-extrapolated below the surface in the upstream loader. Coupled to MeanWind.v_lev via WRFCoupler/couple2.",
           "update": {
             "kind": "data",
@@ -261,7 +258,6 @@
         "T": {
           "type": "parameter",
           "units": "K",
-          "shape": [],
           "description": "Perturbation potential temperature (K). Full potential temperature θ = T + 300 K. Cell-centred (mass grid), conservatively regridded. Sourced from raw.T.",
           "update": {
             "kind": "data",
@@ -275,7 +271,6 @@
         "PH": {
           "type": "parameter",
           "units": "m^2/s^2",
-          "shape": [],
           "description": "Perturbation geopotential (m² s⁻²). On the w-level (bottom_top_stag) grid. PH + PHB gives total geopotential. Sourced from raw.PH.",
           "update": {
             "kind": "data",
@@ -289,7 +284,6 @@
         "PHB": {
           "type": "parameter",
           "units": "m^2/s^2",
-          "shape": [],
           "description": "Base-state geopotential (m² s⁻²). On the w-level (bottom_top_stag) grid. PH + PHB gives total geopotential. Sourced from raw.PHB.",
           "update": {
             "kind": "data",
@@ -303,7 +297,6 @@
         "P": {
           "type": "parameter",
           "units": "Pa",
-          "shape": [],
           "description": "Perturbation pressure (Pa). Cell-centred (mass grid). P + PB gives total atmospheric pressure. Sourced from raw.P.",
           "update": {
             "kind": "data",
@@ -317,7 +310,6 @@
         "PB": {
           "type": "parameter",
           "units": "Pa",
-          "shape": [],
           "description": "Base-state pressure (Pa). Cell-centred (mass grid). P + PB gives total atmospheric pressure. Sourced from raw.PB.",
           "update": {
             "kind": "data",
@@ -331,7 +323,6 @@
         "QVAPOR": {
           "type": "parameter",
           "units": "kg/kg",
-          "shape": [],
           "description": "Water vapor mixing ratio (kg water per kg dry air). Cell-centred (mass grid). Sourced from raw.QVAPOR.",
           "update": {
             "kind": "data",
@@ -386,7 +377,7 @@
                   "PHB"
                 ]
               },
-              9.80665
+              {"op": "const", "args": [], "value": 9.80665, "units": "m/s^2"}
             ]
           }
         },
@@ -395,7 +386,7 @@
           "rhs": {
             "op": "*",
             "args": [
-              6378134.3,
+              {"op": "const", "args": [], "value": 6378134.3, "units": "m/rad"},
               {
                 "op": "cos",
                 "args": [
@@ -407,7 +398,7 @@
         },
         {
           "lhs": "δyδlat",
-          "rhs": 6378166.0
+          "rhs": {"op": "const", "args": [], "value": 6378166.0, "units": "m/rad"}
         }
       ],
       "tests": []

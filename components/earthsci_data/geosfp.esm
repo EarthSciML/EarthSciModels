@@ -1,5 +1,5 @@
 {
-  "esm": "1.0.0",
+  "esm": "1.2.0",
   "metadata": {
     "name": "GEOSFP",
     "description": "GEOS-FP regridding model — the coupler half of the geosfp loader+regridding-model split (RFC pure-io-data-loaders §6/§7; bead esm-3nc.2, following the esm-3nc.1 era5/wrf pattern). Exposes NASA GMAO GEOS-FP assimilated meteorology (0.25°×0.3125° global, GEOS-Chem 72-level) on the simulation's target grid for coupling into EarthSciML systems.\n\nStructure (RFC §6): at 0.7.0 it declared the six pure-I/O GEOS-FP grid loaders as subsystems under their original names (GEOSFP_A1/A3cld/A3dyn/A3mstC/A3mstE/I3 → ./geosfp_<coll>_loader.esm); at esm 1.0.0 those six files are merged BACK into this one as the `data_sources` entries GEOSFP_A1 … GEOSFP_I3, keeping the SAME registry names, so fields are still referenced as GEOSFP.<coll>.<var> and re-exposed as model observeds (GEOSFP.T, GEOSFP.U, …). Each merged file's own metadata is preserved verbatim under its registry entry's metadata.merged_file_metadata. Native grids are geographic (longlat/WGS84) → longlat identity reprojection (esd-47z.1). Regridding is per-variable (`regrid`): A3dyn staggered winds U/V/OMEGA → B-spline (esd-47z.3); all other fields → conservative. The hybrid sigma-pressure Ap/Bp tables (former GEOSFP_hybrid_coefs kind:lookup, removed in the 0.6.0 hard break) are now the top-level function_tables geosfp_Ap_pa and geosfp_Bp, consumed by P = Ap(lev)+Bp(lev)·PS.\n\nDerived observeds on the target grid: pressure P, virtual temperature Tv and Tv_sfc, layer-mean virtual temperature Tv_bar, and the lat/lon coordinate metrics δxδlon, δyδlat. MeanWind coupling: GEOSFP.U/V/OMEGA → MeanWind v_lon/v_lat/v_lev.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/geosfp.jl:410 (GEOSFP constructor, esm-1c6s); split into pure loaders + regridding model by esm-3nc.2.",
@@ -58,6 +58,7 @@
         "url": "http://geoschemdata.wustl.edu/ExtData/"
       },
       "metadata": {
+        "esio_format": "netcdf",
         "tags": [
           "geos_fp",
           "meteorology",
@@ -141,6 +142,7 @@
         "url": "http://geoschemdata.wustl.edu/ExtData/"
       },
       "metadata": {
+        "esio_format": "netcdf",
         "tags": [
           "geos_fp",
           "cloud",
@@ -227,6 +229,7 @@
         "url": "http://geoschemdata.wustl.edu/ExtData/"
       },
       "metadata": {
+        "esio_format": "netcdf",
         "tags": [
           "geos_fp",
           "dynamics",
@@ -316,6 +319,7 @@
         "url": "http://geoschemdata.wustl.edu/ExtData/"
       },
       "metadata": {
+        "esio_format": "netcdf",
         "tags": [
           "geos_fp",
           "moisture",
@@ -403,6 +407,7 @@
         "url": "http://geoschemdata.wustl.edu/ExtData/"
       },
       "metadata": {
+        "esio_format": "netcdf",
         "tags": [
           "geos_fp",
           "moisture",
@@ -491,6 +496,7 @@
         "url": "http://geoschemdata.wustl.edu/ExtData/"
       },
       "metadata": {
+        "esio_format": "netcdf",
         "tags": [
           "geos_fp",
           "meteorology",
@@ -564,6 +570,14 @@
   },
   "models": {
     "GEOSFP": {
+      "expression_template_imports": [
+        {
+          "ref": "esm:std/interp.esm",
+          "only": [
+            "linear"
+          ]
+        }
+      ],
       "reference": {
         "notes": "This is the regridding-model half of the pure-IO loader migration (RFC pure-io-data-loaders §6/§7; esm-3nc.1 era5/wrf pattern, bead esm-3nc.2). The pre-migration geosfp.esm carried both the GEOSFP coupler model AND seven co-located data_loaders blocks (six grid loaders GEOSFP_A1/A3cld/A3dyn/A3mstC/A3mstE/I3 plus a GEOSFP_hybrid_coefs kind:lookup table). The six grid loaders became, at 0.7.0, pure-I/O files referenced as subsystems under their ORIGINAL names (GEOSFP_A1 … GEOSFP_I3 → ./geosfp_<coll>_loader.esm). At esm 1.0.0 they are six `data_sources` entries in THIS file under those same names — a data source is not a component, so it neither needs nor may be a subsystem — and every observed expression GEOSFP_<coll>.<var> keeps resolving unchanged. The GEOSFP_hybrid_coefs lookup became the top-level function_tables geosfp_Ap_pa and geosfp_Bp (kind:lookup is no longer a valid DataLoader kind in esm 0.6.0).\n\nReprojection (RFC §6 step 2): every loader's grid.crs.projection is 'longlat' (geographic WGS84), so the reprojection rule selected by convention is ESD reprojection/longlat.esm (esd-47z.1) — the IDENTITY transform (a no-op for an unprojected grid).\n\nRegridding (RFC §6 step 3 / §5.2): declared per variable in the model `regrid` block. The A3dyn C-grid wind components U (x-edge), V (y-edge), OMEGA (z-edge interface) are staggered → B-spline interpolating regridder (ESD regridding/bspline_regrid.esm, esd-47z.3); every other consumed loader field (all A1/A3cld/A3mstC/A3mstE/I3 fields and A3dyn RH/DTRAIN) is cell-centered → conservative area-weighted overlap join (ESD regridding/conservative_regrid_overlap_join.esm). OMEGA's upstream zero-extrapolation (extrapolate_type=0.0) has no schema field and is documented in the A3dyn loader metadata.\n\nMeanWind coupling: the re-exposed top-level GEOSFP.U/V/OMEGA observeds preserve the couple2 contract (GEOSFP.U/V/OMEGA → MeanWind v_lon/v_lat/v_lev).\n\nsource_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/geosfp.jl:410\n\nUpstream GEOSFP(domain, domaininfo; name=:GEOSFP, stream=true, spatial_interp=:linear) creates an MTK System with:\n  - @parameters: lon/lat (rad) and lev (1) from pvars(domaininfo); t_ref (s)\n  - For every varname in every GEOSFPFileSet collection (A1/A3cld/A3dyn/A3mstC/A3mstE/I3),\n    one DataSetInterpolator and one observed equation via create_interp_equation (uses interp_unsafe)\n  - Coordinate mapping: lon/lat in radians (loadmetadata converts from degrees); lev=1..72\n  - Staggering: geosfp_staggering() returns:\n      A3dyn/U   → (true, false, false)  # x-staggered (lon edges)\n      A3dyn/V   → (false, true, false)  # y-staggered (lat edges)\n      A3dyn/OMEGA → (false, false, true)  # z-staggered (lev interfaces)\n      all others → (false, false, false) # cell-centered\n  - Extrapolation: OMEGA uses zero extrapolation (extrapolate_type=0.0); all others use Flat() (clamp)\n  - Hybrid pressure: P ~ P_unit * Ap(lev) + Bp(lev) * I3₊PS\n    where Ap/Bp are DataInterpolations.LinearInterpolation tables indexed 1:73\n    (lev=1 → surface ≈ PS, lev=73 → 1 Pa). Encoded as the top-level function_tables geosfp_Ap_pa (Pa) and geosfp_Bp (dimensionless); P is observed = table_lookup(geosfp_Ap_pa, lev) + table_lookup(geosfp_Bp, lev) * GEOSFP_I3.PS.\n  - Virtual temperature: Tv ~ T * (1 + 0.61 * QV); Tv_sfc ~ T2M * (1 + 0.61 * QV2M)\n  - Layer-mean virtual temp: Tv̄ ~ 0.5 * (Tv + Tv_sfc)\n  - Coordinate metrics (lat/lon domain only): δxδlon ~ lon2m * cos(lat); δyδlat ~ lat2meters\n  - discrete_events: build_interp_event fires at each file collection boundary to reload buffers\n  - metadata: Dict(CoupleType => GEOSFPCoupler, SysDomainInfo => domaininfo)\n  - couple2 with MeanWindCoupler: maps GEOSFP.A3dyn₊U/V/OMEGA → MeanWind v_lon/v_lat/v_lev\n\ngt-p3ep resolution: the @register_symbolic interp_unsafe pattern for all file-variable equations is replaced by the data_loaders §8 mechanism (GEOSFP_A1.*, GEOSFP_A3*.*, GEOSFP_I3.* references). The Ap/Bp hybrid coordinate tables — formerly the GEOSFP_hybrid_coefs (kind: lookup) data loader, a kind removed in the 0.6.0 hard break — are now the top-level function_tables geosfp_Ap_pa and geosfp_Bp, resolving the fixed-table lookup gap for P.\n\ngt-6ohw gap (DataInterpolations.derivative): δPδlev and δZδlev require the symbolic derivative of Ap(lev) and Bp(lev) with respect to lev (via DataInterpolations.derivative), which is not yet representable in the ESM expression language. These variables are omitted. When gt-6ohw is resolved:\n  δPδlev (Pa): d(P)/d(lev) = d(Ap(lev))/d(lev) + d(Bp(lev))/d(lev) * PS\n    For the linear interpolation with unit spacing: d(Ap)/d(lev) at integer lev n = Ap[n+1]-Ap[n]\n    The upstream code uses: expand_derivatives(Differential(lev)(P_unit * Ap(lev) + Bp(lev) * PS))\n  δZδlev (m): d(Z_agl)/d(lev) — requires Pmid = P_unit*Ap(lev+0.5)+Bp(lev+0.5)*PS (gt-p3ep(lookup)\n    with lev+0.5 offset) and derivatives of Ap/Bp at lev+0.5 (gt-6ohw). Both gaps must be resolved.\n\nZ_agl gap (gt-p3ep(lookup)): Z_agl = (Rd * Tv̄ / g) * log(PS / Pmid) where\n  Pmid = P_unit * Ap(lev+0.5) + Bp(lev+0.5) * PS\n  Evaluating Ap and Bp at the fractional level lev+0.5 is an offset-indexed lookup (gt-p3ep(lookup))\n  not yet representable in the ESM expression language. Z_agl is omitted; when gt-p3ep(lookup) is\n  resolved, add:\n    Pmid = table_lookup(geosfp_Ap_pa, lev+0.5) + table_lookup(geosfp_Bp, lev+0.5) * GEOSFP_I3.PS\n    Z_agl = (287.05 * Tv̄ / 9.80665) * log(I3₊PS / Pmid)\n\nUpstream test values at (-155.7°, 39.1°) for domain '4x5' (EarthSciData.jl test/geosfp_test.jl):\n  P at lev=[1,2,3,71,72,73]: [102340.38, 101572.77, 100805.17, 2.0, 1.5, 1.0] Pa\n  OMEGA at lev=[0.5,1,1.5,2,35,70,72.5]: [0.0, -0.00385, -0.00770, -0.00652, 1.12e-5, 0.0, 0.0] Pa/s\n  Z_agl at various levels: 63.38 m (lev=1.5) to 80132.64 m (lev=72.5)\n\nDomain notes: the default domain '0.25x0.3125' is the native GEOS-FP global grid. Regional and coarser domains (e.g. '4x5', '0.25x0.3125_NA', '2x2.5') change the URL prefix GEOS_{domain}/GEOS_FP/ and the filename suffix. The transformed domain in the filename replaces dots with nothing and underscores with dots: '0.25x0.3125_NA' → '025x03125.NA'. This ESM documents the default 0.25x0.3125 global domain."
       },
@@ -663,7 +677,8 @@
         "QV": {
           "type": "parameter",
           "units": "kg/kg",
-          "description": "Specific humidity of water vapor (kg/kg). 3-hourly instantaneous 3D field. Sourced from GEOSFP_I3.QV. Used in virtual temperature calculation.",
+          "default": 0.005,
+          "description": "Specific humidity of water vapor (kg/kg). 3-hourly instantaneous 3D field. Sourced from GEOSFP_I3.QV. Used in virtual temperature calculation. Default 0.005: lower-tropospheric specific humidity; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30: 0.0074 at the surface level, 0.0044 at level 10, 0.0015 at level 20 (the column falls to ~1e-6 aloft).",
           "update": {
             "kind": "data",
             "source": "GEOSFP_I3",
@@ -696,7 +711,8 @@
         "T2M": {
           "type": "parameter",
           "units": "K",
-          "description": "Air temperature at 2m above the displacement height (K). 1-hourly time-averaged 2D surface field. Used in near-surface virtual temperature Tv_sfc = T2M * (1 + 0.61*QV2M). Sourced from GEOSFP_A1.T2M.",
+          "default": 288.0,
+          "description": "Air temperature at 2m above the displacement height (K). 1-hourly time-averaged 2D surface field. Used in near-surface virtual temperature Tv_sfc = T2M * (1 + 0.61*QV2M). Sourced from GEOSFP_A1.T2M. Default 288.0: global-mean near-surface temperature; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean 286 K.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A1",
@@ -709,7 +725,8 @@
         "QV2M": {
           "type": "parameter",
           "units": "kg/kg",
-          "description": "Specific humidity at 2m (kg/kg). 1-hourly time-averaged 2D surface field. Used in near-surface virtual temperature Tv_sfc. Sourced from GEOSFP_A1.QV2M.",
+          "default": 0.008,
+          "description": "Specific humidity at 2m (kg/kg). 1-hourly time-averaged 2D surface field. Used in near-surface virtual temperature Tv_sfc. Sourced from GEOSFP_A1.QV2M. Default 0.008: near-surface specific humidity; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean 0.0079.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A1",
@@ -722,7 +739,8 @@
         "U10M": {
           "type": "parameter",
           "units": "m/s",
-          "description": "Eastward wind at 10m above the displacement height (m/s). 1-hourly time-averaged 2D surface field. Sourced from GEOSFP_A1.U10M.",
+          "default": 3.0,
+          "description": "Eastward wind at 10m above the displacement height (m/s). 1-hourly time-averaged 2D surface field. Sourced from GEOSFP_A1.U10M. Default 3.0: typical 10-m wind component magnitude; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean |U10M| 2.5 m/s (sign arbitrary: the mean is near zero).",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A1",
@@ -735,7 +753,8 @@
         "V10M": {
           "type": "parameter",
           "units": "m/s",
-          "description": "Northward wind at 10m above the displacement height (m/s). 1-hourly time-averaged 2D surface field. Sourced from GEOSFP_A1.V10M.",
+          "default": 3.0,
+          "description": "Northward wind at 10m above the displacement height (m/s). 1-hourly time-averaged 2D surface field. Sourced from GEOSFP_A1.V10M. Default 3.0: typical 10-m wind component magnitude; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean |V10M| 2.6 m/s (sign arbitrary: the mean is near zero).",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A1",
@@ -762,7 +781,8 @@
         "PRECTOT": {
           "type": "parameter",
           "units": "kg/m^2/s",
-          "description": "Total precipitation rate (kg m⁻² s⁻¹). 1-hourly time-averaged 2D field (large-scale plus convective). Sourced from GEOSFP_A1.PRECTOT.",
+          "default": 3e-05,
+          "description": "Total precipitation rate (kg m⁻² s⁻¹). 1-hourly time-averaged 2D field (large-scale plus convective). Sourced from GEOSFP_A1.PRECTOT. Default 3e-05: about 2.6 mm/day, the order of the US annual-mean precipitation (1 mm/day = 1.16e-5 kg/m^2/s); GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean 4.1e-5.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A1",
@@ -775,7 +795,8 @@
         "PRECANV": {
           "type": "parameter",
           "units": "kg/m^2/s",
-          "description": "Anvil precipitation rate (kg m⁻² s⁻¹). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.PRECANV.",
+          "default": 1e-06,
+          "description": "Anvil precipitation rate (kg m⁻² s⁻¹). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.PRECANV. Default 1e-06: anvil precipitation is a small part of the total; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean 1.3e-6.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A1",
@@ -787,8 +808,9 @@
         },
         "SLP": {
           "type": "parameter",
-          "units": "Pa",
-          "description": "Sea-level pressure (Pa). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.SLP.",
+          "units": "hPa",
+          "default": 1013.0,
+          "description": "Sea-level pressure (hPa). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.SLP. Default 1013.0: standard sea-level pressure 1013.25 hPa; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean 1020 hPa. Declared in hPa, as the GEOS-Chem-processed GEOS-FP files store pressures and as PS is declared; the loader returns raw file values.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A1",
@@ -815,7 +837,8 @@
         "CLDTOT": {
           "type": "parameter",
           "units": "1",
-          "description": "Total cloud fraction (dimensionless, 0–1). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.CLDTOT.",
+          "default": 0.6,
+          "description": "Total cloud fraction (dimensionless, 0–1). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.CLDTOT. Default 0.6: global-mean total cloud cover is about 0.6-0.7; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean 0.57.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A1",
@@ -841,21 +864,23 @@
         },
         "TROPP_H": {
           "type": "parameter",
-          "units": "Pa",
-          "description": "Tropopause pressure using the thermal definition (Pa). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.TROPP_H.",
+          "units": "hPa",
+          "default": 200.0,
+          "description": "Tropopause pressure using the thermal definition (hPa). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.TROPP_H. Default 200.0: mid-latitude thermal tropopause near 200 hPa (about 100 hPa in the tropics, 300 hPa at the poles); the 4x5 file's thermal tropopause TROPPT has CONUS mean 189 hPa. Declared in hPa, as the GEOS-Chem-processed GEOS-FP files store pressures and as PS is declared; the loader returns raw file values.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A1",
             "from": {
               "file_variable": "TROPP_H",
-              "description": "Tropopause pressure using the thermal definition (Pa). Time-averaged over 1-hour interval."
+              "description": "Tropopause pressure using the thermal definition (hPa, as stored in the file). Time-averaged over 1-hour interval."
             }
           }
         },
         "FRSEAICE": {
           "type": "parameter",
           "units": "1",
-          "description": "Sea ice area fraction (dimensionless, 0–1). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.FRSEAICE.",
+          "default": 0.05,
+          "description": "Sea ice area fraction (dimensionless, 0–1). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.FRSEAICE. Default 0.05: a nonzero scale for a field that is zero away from polar oceans: about 7% of the world ocean is ice-covered on average; the 4x5 CONUS box is ice-free except the Great Lakes (mean 0.001, 0.008 where nonzero).",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A1",
@@ -868,7 +893,8 @@
         "GWETTOP": {
           "type": "parameter",
           "units": "1",
-          "description": "Topsoil moisture (volumetric, dimensionless). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.GWETTOP.",
+          "default": 0.7,
+          "description": "Topsoil moisture (volumetric, dimensionless). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.GWETTOP. Default 0.7: moderately moist topsoil (0 = dry, 1 = saturated); GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean 0.77.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A1",
@@ -881,7 +907,8 @@
         "LAI": {
           "type": "parameter",
           "units": "1",
-          "description": "Leaf area index (m² leaf per m² ground, dimensionless). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.LAI.",
+          "default": 1.0,
+          "description": "Leaf area index (m² leaf per m² ground, dimensionless). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.LAI. Default 1.0: spring vegetated-land leaf area index (crops/grass ~1-3 in summer, forest ~4-6); GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean 0.94, 1.1 where nonzero.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A1",
@@ -978,7 +1005,8 @@
         "DTRAIN": {
           "type": "parameter",
           "units": "kg/m^2/s",
-          "description": "Detrainment of cloud mass (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3dyn.DTRAIN. Clamp extrapolation.",
+          "default": 0.0002,
+          "description": "Detrainment of cloud mass (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3dyn.DTRAIN. Clamp extrapolation. Default 0.0002: typical detrainment where convection is active; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean where nonzero 4e-4, level 10-20 means 2-3e-4 (zero outside convection).",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A3dyn",
@@ -1005,7 +1033,8 @@
         "QI": {
           "type": "parameter",
           "units": "kg/kg",
-          "description": "Mass fraction of cloud ice water (kg/kg). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.QI. Clamp extrapolation.",
+          "default": 2e-06,
+          "description": "Mass fraction of cloud ice water (kg/kg). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.QI. Clamp extrapolation. Default 2e-06: cloud ice where present; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean where nonzero 2.2e-6 (upper-tropospheric levels near 7e-6).",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A3cld",
@@ -1018,7 +1047,8 @@
         "QL": {
           "type": "parameter",
           "units": "kg/kg",
-          "description": "Mass fraction of cloud liquid water (kg/kg). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.QL. Clamp extrapolation.",
+          "default": 1e-05,
+          "description": "Mass fraction of cloud liquid water (kg/kg). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.QL. Clamp extrapolation. Default 1e-05: cloud liquid where present; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean where nonzero 7.8e-6, level 10 mean 1.3e-5.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A3cld",
@@ -1031,7 +1061,8 @@
         "OPTDEPTH": {
           "type": "parameter",
           "units": "1",
-          "description": "Grid-mean cloud optical depth at visible wavelengths (dimensionless). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.OPTDEPTH. Clamp extrapolation.",
+          "default": 1.0,
+          "description": "Grid-mean cloud optical depth at visible wavelengths (dimensionless). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.OPTDEPTH. Clamp extrapolation. Default 1.0: layer cloud optical depth where cloudy; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean where nonzero 1.6.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A3cld",
@@ -1044,7 +1075,8 @@
         "TAUCLI": {
           "type": "parameter",
           "units": "1",
-          "description": "Optical thickness of convective ice cloud (dimensionless). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.TAUCLI. Clamp extrapolation.",
+          "default": 0.2,
+          "description": "Optical thickness of convective ice cloud (dimensionless). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.TAUCLI. Clamp extrapolation. Default 0.2: layer ice-cloud optical depth where present; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean where nonzero 0.25.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A3cld",
@@ -1057,7 +1089,8 @@
         "TAUCLW": {
           "type": "parameter",
           "units": "1",
-          "description": "Optical thickness of convective liquid cloud (dimensionless). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.TAUCLW. Clamp extrapolation.",
+          "default": 1.0,
+          "description": "Optical thickness of convective liquid cloud (dimensionless). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.TAUCLW. Clamp extrapolation. Default 1.0: layer liquid-cloud optical depth where present; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean where nonzero 1.5.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A3cld",
@@ -1070,7 +1103,8 @@
         "CMFMC": {
           "type": "parameter",
           "units": "kg/m^2/s",
-          "description": "Upward moist convective mass flux (kg m⁻² s⁻¹). Defined on the 73 level edges (edge 1 = surface, edge 73 = model top; edge k is the bottom of layer k), not on layer centres. The GEOS-Chem-processed files label its units 'kg m-2 s-2'; that is a typo for kg m⁻² s⁻¹, which is how GEOS-Chem uses it (convection_mod, CMFMC*SDT is a mass per area). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.CMFMC. Clamp extrapolation.",
+          "default": 0.001,
+          "description": "Upward moist convective mass flux (kg m⁻² s⁻¹). Defined on the 73 level edges (edge 1 = surface, edge 73 = model top; edge k is the bottom of layer k), not on layer centres. The GEOS-Chem-processed files label its units 'kg m-2 s-2'; that is a typo for kg m⁻² s⁻¹, which is how GEOS-Chem uses it (convection_mod, CMFMC*SDT is a mass per area). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.CMFMC. Clamp extrapolation. Default 0.001: convective updraft mass flux at mid-troposphere where convection is active; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean where nonzero 1.7e-3, level 10 mean 1.8e-3.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A3mstE",
@@ -1083,7 +1117,8 @@
         "DQRCU": {
           "type": "parameter",
           "units": "kg/kg/s",
-          "description": "Convective rain production (kg kg⁻¹ s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.DQRCU. Clamp extrapolation.",
+          "default": 5e-10,
+          "description": "Convective rain production (kg kg⁻¹ s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.DQRCU. Clamp extrapolation. Default 5e-10: convective rain production where active; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean where nonzero 8.6e-10.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A3mstC",
@@ -1096,7 +1131,8 @@
         "DQRLSAN": {
           "type": "parameter",
           "units": "kg/kg/s",
-          "description": "Large-scale rain and snow production (kg kg⁻¹ s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.DQRLSAN. Clamp extrapolation.",
+          "default": 5e-09,
+          "description": "Large-scale rain and snow production (kg kg⁻¹ s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.DQRLSAN. Clamp extrapolation. Default 5e-09: large-scale rain and snow production where active; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean where nonzero 5.6e-9.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A3mstC",
@@ -1109,7 +1145,8 @@
         "REEVAPCN": {
           "type": "parameter",
           "units": "kg/kg/s",
-          "description": "Evaporation of precipitating convective condensate (kg kg⁻¹ s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.REEVAPCN. Clamp extrapolation.",
+          "default": 3e-10,
+          "description": "Evaporation of precipitating convective condensate (kg kg⁻¹ s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.REEVAPCN. Clamp extrapolation. Default 3e-10: convective re-evaporation where active; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean where nonzero 4.3e-10.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A3mstC",
@@ -1122,7 +1159,8 @@
         "REEVAPLS": {
           "type": "parameter",
           "units": "kg/kg/s",
-          "description": "Evaporation of precipitating large-scale and anvil condensate (kg kg⁻¹ s⁻¹). The GEOS-Chem-processed files label its units 'kg kg-1' without the per-second; GEOS-Chem uses it as a rate (wetscav_mod MAKE_QQ). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.REEVAPLS. Clamp extrapolation.",
+          "default": 3e-09,
+          "description": "Evaporation of precipitating large-scale and anvil condensate (kg kg⁻¹ s⁻¹). The GEOS-Chem-processed files label its units 'kg kg-1' without the per-second; GEOS-Chem uses it as a rate (wetscav_mod MAKE_QQ). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.REEVAPLS. Clamp extrapolation. Default 3e-09: large-scale re-evaporation where active; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean where nonzero 2.6e-9.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A3mstC",
@@ -1135,7 +1173,8 @@
         "PFICU": {
           "type": "parameter",
           "units": "kg/m^2/s",
-          "description": "Downward flux of ice precipitation from convection (kg m⁻² s⁻¹). Defined on the 73 level edges (edge 1 = surface, edge 73 = model top; edge k is the bottom of layer k), not on layer centres. 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.PFICU. Clamp extrapolation.",
+          "default": 1e-06,
+          "description": "Downward flux of ice precipitation from convection (kg m⁻² s⁻¹). Defined on the 73 level edges (edge 1 = surface, edge 73 = model top; edge k is the bottom of layer k), not on layer centres. 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.PFICU. Clamp extrapolation. Default 1e-06: convective ice precipitation flux where present; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean where nonzero 1.0e-6.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A3mstE",
@@ -1148,7 +1187,8 @@
         "PFILSAN": {
           "type": "parameter",
           "units": "kg/m^2/s",
-          "description": "Downward flux of ice precipitation from large-scale and anvil clouds (kg m⁻² s⁻¹). Defined on the 73 level edges (edge 1 = surface, edge 73 = model top; edge k is the bottom of layer k), not on layer centres. 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.PFILSAN. Clamp extrapolation.",
+          "default": 1e-05,
+          "description": "Downward flux of ice precipitation from large-scale and anvil clouds (kg m⁻² s⁻¹). Defined on the 73 level edges (edge 1 = surface, edge 73 = model top; edge k is the bottom of layer k), not on layer centres. 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.PFILSAN. Clamp extrapolation. Default 1e-05: large-scale ice precipitation flux where present; GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean where nonzero 1.6e-5.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A3mstE",
@@ -1189,7 +1229,7 @@
         "P": {
           "type": "unknown",
           "units": "Pa",
-          "description": "Atmospheric pressure at hybrid level lev (Pa): P = Ap(lev) + Bp(lev)*pa_per_hpa*PS. Ap [Pa] and Bp [dimensionless] are the GEOS-FP 72-level (73-edge) hybrid sigma-pressure coefficients, evaluated at the 1-based level index lev by piecewise-linear interpolation (interp.linear over the integer level axis 1..73; lev=1 -> surface ~ PS, lev=73 -> ~1 Pa). PS is the surface pressure from the GEOSFP_I3 loader subsystem, in hPa as the files store it; pa_per_hpa converts it to Pa. Uses interp.linear with inline const coefficient arrays (the tree-walk-native form, as fastjx.esm does) rather than a table_lookup over top-level function_tables, because the runtime evaluator does not lower/evaluate table_lookup."
+          "description": "Atmospheric pressure at hybrid level lev (Pa): P = Ap(lev) + Bp(lev)*pa_per_hpa*PS. Ap [Pa] and Bp [dimensionless] are the GEOS-FP 72-level (73-edge) hybrid sigma-pressure coefficients, evaluated at the 1-based level index lev by piecewise-linear interpolation (the `linear` template of esm:std/interp.esm, the pure-AST form of interp.linear, over the integer level axis 1..73; lev=1 -> surface ~ PS, lev=73 -> ~1 Pa). PS is the surface pressure from the GEOSFP_I3 loader subsystem, in hPa as the files store it; pa_per_hpa converts it to Pa. Uses interp.linear with inline const coefficient arrays (the tree-walk-native form, as fastjx.esm does) rather than a table_lookup over top-level function_tables, because the runtime evaluator does not lower/evaluate table_lookup."
         },
         "Tv": {
           "type": "unknown",
@@ -1219,7 +1259,8 @@
         "EFLUX": {
           "type": "parameter",
           "units": "W/m^2",
-          "description": "Latent heat flux from turbulence (W/m^2), positive upward. Time-averaged over 1-hour interval. The moisture counterpart to HFLUX: a boundary-layer scheme needs BOTH to form the VIRTUAL heat flux w'theta_v' = w'theta'*(1+0.61*QV2M) + 0.61*T2M*w'q', which is what sets buoyancy and hence the Monin-Obukhov length and the convective velocity scale. HFLUX alone drops the moisture term and systematically under-predicts instability over moist surfaces.",
+          "default": 70.0,
+          "description": "Latent heat flux from turbulence (W/m^2), positive upward. Time-averaged over 1-hour interval. The moisture counterpart to HFLUX: a boundary-layer scheme needs BOTH to form the VIRTUAL heat flux w'theta_v' = w'theta'*(1+0.61*QV2M) + 0.61*T2M*w'q', which is what sets buoyancy and hence the Monin-Obukhov length and the convective velocity scale. HFLUX alone drops the moisture term and systematically under-predicts instability over moist surfaces. Default 70.0: upward latent heat flux over land (global mean ~80 W/m^2); GEOS-FP 4x5 CONUS (lon -125..-65, lat 26..50) on 2016-04-30 mean 72.",
           "update": {
             "kind": "data",
             "source": "GEOSFP_A1",
@@ -1368,10 +1409,11 @@
             "op": "+",
             "args": [
               {
-                "op": "fn",
-                "name": "interp.linear",
-                "args": [
-                  {
+                "op": "apply_expression_template",
+                "args": [],
+                "name": "linear",
+                "bindings": {
+                  "table": {
                     "op": "const",
                     "args": [],
                     "value": [
@@ -1450,7 +1492,7 @@
                       1.0
                     ]
                   },
-                  {
+                  "axis": {
                     "op": "const",
                     "args": [],
                     "value": [
@@ -1529,17 +1571,19 @@
                       73
                     ]
                   },
-                  "lev"
-                ]
+                  "x": "lev",
+                  "n": 73
+                }
               },
               {
                 "op": "*",
                 "args": [
                   {
-                    "op": "fn",
-                    "name": "interp.linear",
-                    "args": [
-                      {
+                    "op": "apply_expression_template",
+                    "args": [],
+                    "name": "linear",
+                    "bindings": {
+                      "table": {
                         "op": "const",
                         "args": [],
                         "value": [
@@ -1618,7 +1662,7 @@
                           0.0
                         ]
                       },
-                      {
+                      "axis": {
                         "op": "const",
                         "args": [],
                         "value": [
@@ -1697,8 +1741,9 @@
                           73
                         ]
                       },
-                      "lev"
-                    ]
+                      "x": "lev",
+                      "n": 73
+                    }
                   },
                   "pa_per_hpa",
                   "PS"
@@ -1772,7 +1817,7 @@
           "rhs": {
             "op": "*",
             "args": [
-              6378134.3,
+              {"op": "const", "args": [], "value": 6378134.3, "units": "m/rad"},
               {
                 "op": "cos",
                 "args": [
@@ -1784,7 +1829,7 @@
         },
         {
           "lhs": "δyδlat",
-          "rhs": 6378166.0
+          "rhs": {"op": "const", "args": [], "value": 6378166.0, "units": "m/rad"}
         }
       ],
       "tests": []
