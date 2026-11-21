@@ -2,7 +2,7 @@
  "esm": "2.0.0",
  "metadata": {
   "name": "clm_soilfluxes",
-  "description": "CTSM/CLM ground energy and moisture flux update SoilFluxes (stage 2 of the EqESM project), transcribed from SoilFluxesMod.F90 (ctsm5.4.063, cesm3.0-alphabranch): the previous-time-step ground temperature and T^4 blend t_grnd0/lw_grnd (SoilFluxesMod.F90:175-183, :344-346), the sensible/latent flux corrections to the present soil temperature (:192-204), the liquid/solid partition of the ground evaporation into liquid evaporation, sublimation, liquid dew and solid dew (:208-274), the snow-evaporation moisture limit of the top layer (:276-297), the ground heat flux from absorbed shortwave, canopy longwave and black-body emission (:341-371), the total vegetation+ground fluxes and the history-tape latent heat breakdown (:373-394), the outgoing/net longwave radiation with the temperature-increment term and the bare-ground skin temperature (:451-495). The equations are written as math over the patch index set (the traced stage-1 dump rows carry p == c, so the column-level quantities of the Fortran are replicated patch-wise); the shared laws are imported by reference from ./clm_templates.esm (ground_temperature_blend, stefan_boltzmann_emission, flux_temperature_correction, stefan_boltzmann_emission_dT). All fluxes are mass fluxes in kg/m^2/s (= mm/s of water): the esm unit system requires the mass-flux form for dimensional consistency with the latent-heat multiplications (qflx*htvp [J/kg] = W/m^2), see README.md. The tests pin the stage-1 CLM dumps (stage1/dumps/clm/clm_soilfluxes.csv, clm_bareground.csv, clm_soiltemp.csv, clm_surfrad.csv, clm_run_imports.csv and, for the downward longwave forcing of columns 1-5, stage1/dumps/cdeps/datm_gswp3_exports.csv Faxa_lwdn; the traced columns 6-16 have no forc_lwrad and leave eflx_soil_grnd/eflx_lwrad_* unpinned — a documented gap). The assertions on quantities that are not dump columns (lw_grnd, qflx_ev_snow, qflx_ev_soil, evaporation_limit, qflx_soliddew_to_top_layer, lwrad_emission, lwrad_increment, eflx_lwrad_out, qflx_evap_tot) are labelled derived (not a dump column) and produced by stage1/analysis/clm_soilfluxes_derived.py.",
+  "description": "CTSM/CLM ground energy and moisture flux update SoilFluxes, transcribed from src/biogeophys/SoilFluxesMod.F90 of CTSM ctsm5.4.063 (cesm3.0-alphabranch; line numbers refer to that tag): the previous-time-step ground temperature and T^4 blend t_grnd0/lw_grnd (SoilFluxesMod.F90:175-183, :344-346), the sensible/latent flux corrections to the present soil temperature (:192-204), the liquid/solid partition of the ground evaporation into liquid evaporation, sublimation, liquid dew and solid dew (:208-274), the snow-evaporation moisture limit of the top layer (:276-297), the ground heat flux from absorbed shortwave, canopy longwave and black-body emission (:341-371), the total vegetation+ground fluxes and the history-tape latent heat breakdown (:373-394), the outgoing/net longwave radiation with the temperature-increment term and the bare-ground skin temperature (:451-495). The equations are written as math over the patch index set (the traced reference-dump rows carry p == c, so the column-level quantities of the Fortran are replicated patch-wise); the shared laws are imported by reference from ./clm_templates.esm (ground_temperature_blend, stefan_boltzmann_emission, flux_temperature_correction, stefan_boltzmann_emission_dT). All fluxes are mass fluxes in kg/m^2/s (= mm/s of water): the esm unit system requires the mass-flux form for dimensional consistency with the latent-heat multiplications (qflx*htvp [J/kg] = W/m^2), see README.md. The tests pin the reference dumps: a CESM3 / CTSM ctsm5.4.063 I2000Clm60Sp land-only run (GSWP3 forcing, dtime = 1800 s) instrumented with write statements at the SoilFluxes, BareGroundFluxes, SoilTemperature, ComputeGroundHeatFluxAndDeriv, SurfaceRadiation and BiogeophysPreFluxCalcs exits, recording the first 16 bare, deep-snowpack columns over the first 12 steps in full double precision; forc_lwrad is the downscaled column longwave recorded at ComputeGroundHeatFluxAndDeriv. Tested regime: all 192 dumped rows are dew rows (qflx_ev_snow < 0) below freezing (t_grnd < tfrz, so the dew is solid) with an all-snow blend (snl = -9, frac_sno_fluxes = 1, frac_h2osfc = 0, frac_veg_nosno = 0); the evaporation branch of the partition, the firing snow-evaporation limit, liquid dew, mixed snow/soil blends and snow-free columns are transcribed but not exercised, because the reference run has no such rows. The assertions on quantities that are not dump columns (lw_grnd, qflx_ev_snow, qflx_ev_soil, evaporation_limit, qflx_soliddew_to_top_layer, lwrad_emission, lwrad_increment, eflx_lwrad_out, qflx_evap_tot) are labelled derived (not a dump column) and computed offline (double-precision evaluation of the transcribed equations at the pinned dump inputs), cross-checked against every dump column they touch on all 192 rows (max rel err 7.9e-15).",
   "tags": [
    "land_surface",
    "clm",
@@ -41,7 +41,7 @@
   "N_PATCH": {
    "type": "integer",
    "default": 1,
-   "description": "number of patches in the stage-2 skeleton (one patch; the full model runs the clump-local begp:endp arrays; the traced dump rows have p == c, so one patch stands in for the traced column), [-]"
+   "description": "number of patches in the standalone component (one patch; the full model runs the clump-local begp:endp arrays; the traced dump rows have p == c, so one patch stands in for the traced column), [-]"
   }
  },
  "models": {
@@ -176,7 +176,7 @@
      ],
      "units": "kg/m^2/s",
      "default": 0.0,
-     "description": "pre-correction evaporation from surface water, corrected at SoilFluxesMod.F90:204; not dumped by stage 1 (untested input, see README-clm-soilfluxes.md), [mm/s]"
+     "description": "pre-correction evaporation from surface water, corrected at SoilFluxesMod.F90:204; not dumped by the reference run (untested input, see README.md), [mm/s]"
     },
     "h2osoi_liq_top": {
      "type": "parameter",
@@ -239,7 +239,7 @@
      ],
      "units": "W/m^2",
      "default": 0.0,
-     "description": "atmospheric downward longwave radiation forc_lwrad_downscaled_col (SoilFluxesMod.F90:89); for the traced columns 1-5 sourced from the DATM dump Faxa_lwdn at datm step s-1 (see README-clm-soilfluxes.md), [W/m2]"
+     "description": "atmospheric downward longwave radiation forc_lwrad_downscaled_col (SoilFluxesMod.F90:89); in the tests the column value recorded by the reference run at ComputeGroundHeatFluxAndDeriv, [W/m2]"
     },
     "emg": {
      "type": "parameter",
@@ -323,7 +323,7 @@
      "type": "parameter",
      "units": "W/m^2/K^4",
      "default": 5.67e-08,
-     "description": "Stefan-Boltzmann constant (clm_varcon sb = SHR_CONST_STEBOL = 5.67e-8, shr_const_mod.F90:23; CESM carries the rounded value rather than the CODATA 5.670374419e-8, and the dump pins 5.67e-8 exactly — see README-clm-soilfluxes.md), [W/m2/K4]"
+     "description": "Stefan-Boltzmann constant (clm_varcon sb = SHR_CONST_STEBOL = 5.67e-8, shr_const_mod.F90:23; CESM carries the rounded value rather than the CODATA 5.670374419e-8, and the dump pins 5.67e-8 exactly — see README.md), [W/m2/K4]"
     },
     "tfrz": {
      "type": "parameter",
@@ -1302,7 +1302,7 @@
    "tests": [
     {
      "id": "clm_soilfluxes_step1_p1",
-     "description": "Full instantaneous pin against clm_soilfluxes.csv / clm_bareground.csv / clm_soiltemp.csv / clm_surfrad.csv / clm_run_imports.csv (step 1, patch/column 1, a bare istsoil column with snl = -9, frac_sno_fluxes = 1, frac_h2osfc = 0, p == c): the sensible/latent corrections eflx_sh_grnd = pre + tinc*cgrnds, qflx_evap_soi = qflx_ev_snow = pre + tinc*cgrndl (:192-204, the flux_temperature_correction template) reproduce the dumped post-correction fluxes to round-off. The partition (qflx_ev_snow < 0 = dew at t_grnd < tfrz) gives qflx_soliddew_to_top_layer = |qflx_ev_snow| (:246); the snow-evaporation limit (:287) = (h2osoi_liq+h2osoi_ice)/(frac_sno_fluxes*dtime) = 3.0e-3 mm/s far exceeds the dew rate. With forc_lwrad = 147.651925373077091 W/m2 from the DATM dump (Faxa_lwdn, datm step 0 = clm step 1 - 1; see README-clm-soilfluxes.md), eflx_soil_grnd = (1-fs)*sabg_soil + fs*sabg_snow + dlrad + (1-fvn)*emg*forc_lwrad - emg*sb*lw_grnd - 4*emg*sb*t_grnd0^3*tinc - (eflx_sh_grnd + qflx_evap_soi*htvp) (:348-351) and eflx_lwrad_net = eflx_lwrad_out - forc_lwrad (:469-485) reproduce the dump to 7.9e-15/4.6e-16 rel — the pin that fixes sb = SHR_CONST_STEBOL = 5.67e-8 exactly. t_skin = sqrt(sqrt(lw_grnd)) (:483) and the totals eflx_sh_tot/eflx_lh_tot/eflx_lh_grnd (:375-393) are exact. The assertions on lw_grnd, qflx_ev_snow, qflx_ev_soil, evaporation_limit, qflx_soliddew_to_top_layer, lwrad_emission, lwrad_increment, eflx_lwrad_out and qflx_evap_tot are derived (not a dump column): expected values computed by stage1/analysis/clm_soilfluxes_derived.py from the pinned dump inputs (f64 evaluations of the transcribed equations, cross-checked against every dump column they touch, all 192 rows, max rel err 7.9e-15); the clm_soilfluxes.csv dump-column pins here are eflx_sh_grnd, qflx_evap_soi, eflx_soil_grnd, eflx_lwrad_net, t_skin, eflx_sh_tot, eflx_lh_tot, eflx_lh_grnd.",
+     "description": "Full instantaneous pin against clm_soilfluxes.csv / clm_bareground.csv / clm_soiltemp.csv / clm_surfrad.csv / clm_run_imports.csv (step 1, patch/column 1, a bare istsoil column with snl = -9, frac_sno_fluxes = 1, frac_h2osfc = 0, p == c): the sensible/latent corrections eflx_sh_grnd = pre + tinc*cgrnds, qflx_evap_soi = qflx_ev_snow = pre + tinc*cgrndl (:192-204, the flux_temperature_correction template) reproduce the dumped post-correction fluxes to round-off. The partition (qflx_ev_snow < 0 = dew at t_grnd < tfrz) gives qflx_soliddew_to_top_layer = |qflx_ev_snow| (:246); the snow-evaporation limit (:287) = (h2osoi_liq+h2osoi_ice)/(frac_sno_fluxes*dtime) = 3.0e-3 mm/s far exceeds the dew rate. With forc_lwrad = 147.651925373077091 W/m2 (the reference-run column longwave; equal to the DATM Faxa_lwdn export of the previous coupling step), eflx_soil_grnd = (1-fs)*sabg_soil + fs*sabg_snow + dlrad + (1-fvn)*emg*forc_lwrad - emg*sb*lw_grnd - 4*emg*sb*t_grnd0^3*tinc - (eflx_sh_grnd + qflx_evap_soi*htvp) (:348-351) and eflx_lwrad_net = eflx_lwrad_out - forc_lwrad (:469-485) reproduce the dump to 7.9e-15/4.6e-16 rel — the pin that fixes sb = SHR_CONST_STEBOL = 5.67e-8 exactly. t_skin = sqrt(sqrt(lw_grnd)) (:483) and the totals eflx_sh_tot/eflx_lh_tot/eflx_lh_grnd (:375-393) are exact. The assertions on lw_grnd, qflx_ev_snow, qflx_ev_soil, evaporation_limit, qflx_soliddew_to_top_layer, lwrad_emission, lwrad_increment, eflx_lwrad_out and qflx_evap_tot are derived (not a dump column): expected values computed offline from the pinned dump inputs (double-precision evaluations of the transcribed equations, cross-checked against every dump column they touch, all 192 rows, max rel err 7.9e-15); the clm_soilfluxes.csv dump-column pins here are eflx_sh_grnd, qflx_evap_soi, eflx_soil_grnd, eflx_lwrad_net, t_skin, eflx_sh_tot, eflx_lh_tot, eflx_lh_grnd.",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -1508,7 +1508,7 @@
     },
     {
      "id": "clm_soilfluxes_step12_p1",
-     "description": "Same full pin as clm_soilfluxes_step1_p1 at the last traced step (step 12, patch/column 1): a smaller tinc = -2.42e-2 K and weaker cgrnds/cgrndl (0.779 W/m2/K, 4.09e-8 kg/m2/s/K) with forc_lwrad = 145.790538681878843 W/m2 from the DATM dump at datm step 11. eflx_soil_grnd and eflx_lwrad_net reproduce the dump to round-off (the sb = 5.67e-8 pin at a second longwave value), t_skin = sqrt(sqrt(lw_grnd)) = t_grnd0 exactly, and the dew partition again gives qflx_soliddew_to_top_layer = |qflx_ev_snow| with the evaporation limit (h2osoi_liq+h2osoi_ice)/(frac_sno_fluxes*dtime) = 3.07e-3 far above the dew rate. The assertions on lw_grnd, qflx_ev_snow, qflx_ev_soil, evaporation_limit, qflx_soliddew_to_top_layer, lwrad_emission and lwrad_increment are derived (not a dump column), produced by stage1/analysis/clm_soilfluxes_derived.py at the pinned inputs; the dump-column pins here are eflx_sh_grnd, qflx_evap_soi, eflx_soil_grnd, eflx_lwrad_net, t_skin, eflx_sh_tot, eflx_lh_tot, eflx_lh_grnd.",
+     "description": "Same full pin as clm_soilfluxes_step1_p1 at the last traced step (step 12, patch/column 1): a smaller tinc = -2.42e-2 K and weaker cgrnds/cgrndl (0.779 W/m2/K, 4.09e-8 kg/m2/s/K) with forc_lwrad = 145.790538681878843 W/m2 (the reference-run column longwave). eflx_soil_grnd and eflx_lwrad_net reproduce the dump to round-off (the sb = 5.67e-8 pin at a second longwave value), t_skin = sqrt(sqrt(lw_grnd)) = t_grnd0 exactly, and the dew partition again gives qflx_soliddew_to_top_layer = |qflx_ev_snow| with the evaporation limit (h2osoi_liq+h2osoi_ice)/(frac_sno_fluxes*dtime) = 3.07e-3 far above the dew rate. The assertions on lw_grnd, qflx_ev_snow, qflx_ev_soil, evaporation_limit, qflx_soliddew_to_top_layer, lwrad_emission and lwrad_increment are derived (not a dump column), computed offline (double-precision evaluation of the transcribed equations at the pinned dump inputs); the dump-column pins here are eflx_sh_grnd, qflx_evap_soi, eflx_soil_grnd, eflx_lwrad_net, t_skin, eflx_sh_tot, eflx_lh_tot, eflx_lh_grnd.",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -1698,7 +1698,7 @@
     },
     {
      "id": "clm_soilfluxes_step7_p8",
-     "description": "Correction/partition/totals pin against the dumps at step 7, patch/column 8 (a column without a DATM longwave input: the traced columns 6-16 carry no forc_lwrad, so the forc_lwrad-dependent outputs eflx_soil_grnd/eflx_lwrad_out/eflx_lwrad_net are unpinned — a documented gap, see README-clm-soilfluxes.md). tinc = +2.44e-1 K here (warming, unlike the step-1/12 dew rows), pinning the corrections at a positive tinc; everything else reproduces the dumps to round-off: the corrected fluxes, the evaporation limit 3.36e-3 with excess 0, the solid-dew partition, lw_grnd and its emission/increment terms, t_skin = sqrt(sqrt(lw_grnd)) and the totals. The assertions on lw_grnd, qflx_ev_snow, qflx_ev_soil, evaporation_limit, qflx_soliddew_to_top_layer, lwrad_emission and lwrad_increment are derived (not a dump column), produced by stage1/analysis/clm_soilfluxes_derived.py at the pinned inputs; the dump-column pins here are eflx_sh_grnd, qflx_evap_soi, t_skin, eflx_sh_tot, eflx_lh_tot, eflx_lh_grnd.",
+     "description": "Correction/partition/totals pin against the dumps at step 7, patch/column 8 (forc_lwrad = 126.60598072969478 W/m2, the column longwave recorded by the reference run at ComputeGroundHeatFluxAndDeriv, so eflx_soil_grnd and eflx_lwrad_net are pinned against their dump columns). tinc = +2.44e-1 K here (warming, unlike the step-1/12 dew rows), pinning the corrections at a positive tinc; everything else reproduces the dumps to round-off: the corrected fluxes, the evaporation limit 3.36e-3 with excess 0, the solid-dew partition, lw_grnd and its emission/increment terms, t_skin = sqrt(sqrt(lw_grnd)) and the totals. The assertions on lw_grnd, qflx_ev_snow, qflx_ev_soil, evaporation_limit, qflx_soliddew_to_top_layer, lwrad_emission and lwrad_increment are derived (not a dump column), computed offline (double-precision evaluation of the transcribed equations at the pinned dump inputs); the dump-column pins here are eflx_sh_grnd, qflx_evap_soi, eflx_soil_grnd, eflx_lwrad_net, t_skin, eflx_sh_tot, eflx_lh_tot, eflx_lh_grnd.",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -1754,6 +1754,9 @@
       ],
       "htvp": [
        2834700.0
+      ],
+      "forc_lwrad": [
+       126.60598072969478
       ]
      },
      "tolerance": {
@@ -1864,12 +1867,28 @@
        "coords": {
         "patch": 1
        }
+      },
+      {
+       "variable": "eflx_soil_grnd",
+       "time": 0.0,
+       "expected": 4.5589870226806095,
+       "coords": {
+        "patch": 1
+       }
+      },
+      {
+       "variable": "eflx_lwrad_net",
+       "time": 0.0,
+       "expected": 66.78784258388725,
+       "coords": {
+        "patch": 1
+       }
       }
      ]
     },
     {
      "id": "clm_soilfluxes_step6_p16",
-     "description": "Same no-forc_lwrad pin as clm_soilfluxes_step7_p8 at the coldest traced column (step 6, patch/column 16, t_grnd = 238.5 K): the largest positive tinc of the pins (+2.92e-1 K) exercises the corrections at their strongest, and the partition is again solid dew. The assertions on lw_grnd, qflx_ev_snow, qflx_ev_soil, evaporation_limit, qflx_soliddew_to_top_layer, lwrad_emission and lwrad_increment are derived (not a dump column), produced by stage1/analysis/clm_soilfluxes_derived.py at the pinned inputs; the dump-column pins here are eflx_sh_grnd, qflx_evap_soi, t_skin, eflx_sh_tot, eflx_lh_tot, eflx_lh_grnd (eflx_soil_grnd/eflx_lwrad_* remain unpinned — no forc_lwrad for columns 6-16).",
+     "description": "Same pin as clm_soilfluxes_step7_p8 (forc_lwrad = 91.00777399057506 W/m2 from the reference run) at the coldest traced column (step 6, patch/column 16, t_grnd = 238.5 K): the largest positive tinc of the pins (+2.92e-1 K) exercises the corrections at their strongest, and the partition is again solid dew. The assertions on lw_grnd, qflx_ev_snow, qflx_ev_soil, evaporation_limit, qflx_soliddew_to_top_layer, lwrad_emission and lwrad_increment are derived (not a dump column), computed offline (double-precision evaluation of the transcribed equations at the pinned dump inputs); the dump-column pins here are eflx_sh_grnd, qflx_evap_soi, eflx_soil_grnd, eflx_lwrad_net, t_skin, eflx_sh_tot, eflx_lh_tot, eflx_lh_grnd.",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -1925,6 +1944,9 @@
       ],
       "htvp": [
        2834700.0
+      ],
+      "forc_lwrad": [
+       91.00777399057506
       ]
      },
      "tolerance": {
@@ -2032,6 +2054,22 @@
        "variable": "eflx_lh_grnd",
        "time": 0.0,
        "expected": -0.319417944301962,
+       "coords": {
+        "patch": 1
+       }
+      },
+      {
+       "variable": "eflx_soil_grnd",
+       "time": 0.0,
+       "expected": 14.405360558650155,
+       "coords": {
+        "patch": 1
+       }
+      },
+      {
+       "variable": "eflx_lwrad_net",
+       "time": 0.0,
+       "expected": 89.77857324497265,
        "coords": {
         "patch": 1
        }

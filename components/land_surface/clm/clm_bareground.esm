@@ -2,7 +2,7 @@
  "esm": "2.0.0",
  "metadata": {
   "name": "clm_bareground",
-  "description": "CLM bare-ground turbulent-flux component (stage 2 of the EqESM project): the pointwise laws of BareGroundFluxes in stage1/cesm/components/clm/src/biogeophys/BareGroundFluxesMod.F90 (cts5.4.063, cesm3.0-alphabranch checkout) transcribed exactly, with the expression templates of ./clm_templates.esm imported by reference. The traced configuration (the I2000Clm60Sp_clm_inst case, lnd_in of stage1/cime/cases/I2000Clm60Sp_clm_inst/run): z0param_method = 'Meier2022', use_z0m_snowmelt = .true. (so z0mg comes from the snowmelt-dependent branch of SetRoughnessLengthsAndForcHeightsNonLake, FrictionVelocityMod.F90:620-623), zetamaxstable = 2.0, soil_resis_method = 1 (the Swenson & Lawrence 2014 soil-resistance branch, inactive on the pinned rows because they are all dew rows with dqh > 0), do_soilevap_beta inactive, GSWP3 forcing heights 30 m, wind_min = 1.0 m/s and the Meier2022 constants of the ctsm60_params.c260518.nc parameter file. Structure, in the order of the Fortran: (a) the raw inputs (forc_t/forc_q/forc_u/forc_v/forc_pbot/forc_rho, thm, t_grnd, qg, the ground-layer temperatures t_soisno_top = t_soisno(c,snl+1)/t_soisno_soil = t_soisno(c,1)/t_h2osfc, the surface-humidity fields qg_snow/qg_soil/qg_h2osfc and dqgdT, thv, and the constants); (b) the derived inputs of F90:325-329 (ur = max(wind_min, |forc_u,forc_v|), dth, dqh, dthv, zldis = forc_hgt_u + z0mg) with forc_th = thv/(1 + 0.61*forc_q) recovered from the dumped virtual potential temperature (dthv = dth*(1 + 0.61*forc_q) + 0.61*forc_th*dqh of F90:328 then inverts to forc_th = thv/(1 + 0.61*forc_q)); (c) z0mg from the Meier2022 snowmelt template (the traced rows are all in the frac_sno_albedo > 0, snomelt_accum < 1e-5 branch, pinning z0mg = exp(-b1*pi/2 + b4)*1e-3 = 8.13402050576016129e-05; the bare-soil zlnd branch of the select case is included for completeness); (d) the MoninObukIni initialization of F90:331 (um_ini, rib, zeta_ini clamped to [0.01, 2.0], obu_ini = zldis/zeta_ini); (e) the stability iteration of F90:342-388. The esm has no loop construct, so the iteration is represented compositionally: the 17-equation update law is authored ONCE in the one-step model BareGroundStep of ./clm_bareground_step.esm (a single pass of the do-while: the FrictionVelocity profiles and friction velocity, the Meier2022 z0hg update, the stability-parameter clamp and the um/wc/obu update) and mounted three times by reference as top-level models step1..step3 (esm-spec section 4.7; top-level mounts are required because the pinned CLI silently drops couplings in the single-top-level-model build path, see README.md), with the chained inputs coupled by the 66 variable_map edges of the ./clm_bareground_steps_coupling.esm coupling library (imported by reference): um_ini/obu_ini/z0mg seed step1, each step's state feeds the next (um/obu/z0h), and the update-invariant pointwise fields (forc_hgt_u, forc_hgt_t, z0m = z0mg, ur, dth, dqh, forc_q, forc_th, thv, zii, beta, zetamaxstable and the constants vkc/grav/zetam/zetat/meier_param3/nu_param/beta_param) feed every step; the parent's zldis equals the step's own profile height zldis_u (z0mg is iteration-constant) and the Fortran's stale wc local is only read by the unstable um branch, so the zldis and wc couplings are dropped as dead. The parent keeps the external names of the Fortran locals: ustar/temp1/temp2/temp12m/temp22m/z0h/um = the step3 outputs (the exit state of the 3-iteration loop, which matches the traced run's niters = 3). The 2-m humidity profiles are the equality branches temp2 = temp1 and temp22m = temp12m (F90:997-998, 1051-1052) because forc_hgt_q_patch == forc_hgt_t_patch and z0qg == z0hg in the traced run. (f) the flux laws of F90:396-470: ram/rah/raw, raih = forc_rho*cpair/rah, the vapor pressure forc_e = max(forc_q*forc_pbot/(forc_q + 0.622), 0.01*forc_esat) with forc_esat from the QSat polynomial, the Magnus dewpoint forc_dewpoint of F90:548-578 (ice coefficients on all traced rows: t_grnd ~ 234-250 K < tfrz selects the ice branch), the raiw selection of F90:423-438 (the dqh > 0 dew branch with the t_grnd > forc_dewpoint no-dew gate, the sl14/beta branches of the dqh <= 0 side transcribed for completeness), ram1, cgrnds/cgrndl/cgrnd (cgrnd needs the htvp latent heat of vaporization), taux/tauy (the wind_stress_component law), the sensible heat partition eflx_sh_grnd/soil/snow/h2osfc and the evaporation qflx_evap_soi and qflx_ev_snow/soil/h2osfc (one law: the aerodynamic_surface_flux template, flux = -resistance*(atmosphere - surface); qg_h2osfc is not dumped, so qflx_ev_h2osfc is transcribed but unpinned), and the 2-m diagnostics t_ref2m/q_ref2m/rh_ref2m (the ref2m_profile law, with qsat_ref2m from the shared qsat_qs) and kbm1 = log(z0mg/z0h) (F90:471-499). The tests pin the stage-1 instrumentation dump stage1/dumps/clm/clm_bareground.csv (192 rows; five representative rows across the run, all stable with zeta clamped at 2.0 and all in the dew branch, see README.md for the branch census) plus the run-import and soil-temperature dumps that feed them; every asserted output is a dumped column, and z0mg is asserted from the template output. Not transcribed (dead or undumped in this configuration): the human-stress indices, the www soil-wetness variable, the rssun/rssha photosynthesis resistances, the u10 diagnostics of FrictionVelocityMod, and the ZengWang2007 z0hg branch (the traced run is Meier2022). Reference: stage1/cesm/components/clm/src/biogeophys/BareGroundFluxesMod.F90 and FrictionVelocityMod.F90.",
+  "description": "CLM bare-ground turbulent-flux component: the pointwise laws of BareGroundFluxes in src/biogeophys/BareGroundFluxesMod.F90 of CTSM ctsm5.4.063 (the CESM3.0 alpha-branch land model; F90 line numbers below refer to that tag) transcribed exactly, with the expression templates of ./clm_templates.esm imported by reference. The traced configuration (the lnd_in namelist of the I2000Clm60Sp reference case): z0param_method = 'Meier2022', use_z0m_snowmelt = .true. (so z0mg comes from the snowmelt-dependent branch of SetRoughnessLengthsAndForcHeightsNonLake, FrictionVelocityMod.F90:620-623), zetamaxstable = 2.0, soil_resis_method = 1 (the Swenson & Lawrence 2014 soil-resistance branch, inactive on the pinned rows because they are all dew rows with dqh > 0), do_soilevap_beta inactive, GSWP3 forcing heights 30 m, wind_min = 1.0 m/s and the Meier2022 constants of the ctsm60_params.c260518.nc parameter file. Structure, in the order of the Fortran: (a) the raw inputs (forc_t/forc_q/forc_u/forc_v/forc_pbot/forc_rho, thm, t_grnd, qg, the ground-layer temperatures t_soisno_top = t_soisno(c,snl+1)/t_soisno_soil = t_soisno(c,1)/t_h2osfc, the surface-humidity fields qg_snow/qg_soil/qg_h2osfc and dqgdT, thv, and the constants); (b) the derived inputs of F90:318-322 (ur = max(wind_min, |forc_u,forc_v|), dth, dqh, dthv, zldis = forc_hgt_u + z0mg) with forc_th = thv/(1 + 0.61*forc_q) recovered from the dumped virtual potential temperature (dthv = dth*(1 + 0.61*forc_q) + 0.61*forc_th*dqh of F90:328 then inverts to forc_th = thv/(1 + 0.61*forc_q)); (c) z0mg from the Meier2022 snowmelt template (the traced rows are all in the frac_sno_albedo > 0, snomelt_accum < 1e-5 branch, pinning z0mg = exp(-b1*pi/2 + b4)*1e-3 = 8.13402050576016129e-05; the bare-soil zlnd branch of the select case is included for completeness); (d) the MoninObukIni initialization of F90:331 (um_ini, rib, zeta_ini clamped to [0.01, 2.0], obu_ini = zldis/zeta_ini); (e) the stability iteration of F90:342-388. The esm has no loop construct, so the iteration is represented compositionally: the 17-equation update law is authored ONCE in the one-step model BareGroundStep of ./clm_bareground_step.esm (a single pass of the do-while: the FrictionVelocity profiles and friction velocity, the Meier2022 z0hg update, the stability-parameter clamp and the um/wc/obu update) and mounted three times by reference as top-level models step1..step3 (esm-spec section 4.7; top-level mounts are required because the Rust CLI silently drops couplings in the single-top-level-model build path, see README.md), with the chained inputs coupled by the 66 variable_map edges of the ./clm_bareground_steps_coupling.esm coupling library (imported by reference): um_ini/obu_ini/z0mg seed step1, each step's state feeds the next (um/obu/z0h), and the update-invariant pointwise fields (forc_hgt_u, forc_hgt_t, z0m = z0mg, ur, dth, dqh, forc_q, forc_th, thv, zii, beta, zetamaxstable and the constants vkc/grav/zetam/zetat/meier_param3/nu_param/beta_param) feed every step; the parent's zldis equals the step's own profile height zldis_u (z0mg is iteration-constant) and the Fortran's stale wc local is only read by the unstable um branch, so the zldis and wc couplings are dropped as dead. The parent keeps the external names of the Fortran locals: ustar/temp1/temp2/temp12m/temp22m/z0h/um = the step3 outputs (the exit state of the 3-iteration loop, which matches the traced run's niters = 3). The 2-m humidity profiles are the equality branches temp2 = temp1 and temp22m = temp12m (F90:997-998, 1051-1052) because forc_hgt_q_patch == forc_hgt_t_patch and z0qg == z0hg in the traced run. (f) the flux laws of F90:400-476: ram/rah/raw, raih = forc_rho*cpair/rah, the vapor pressure forc_e = max(forc_q*forc_pbot/(forc_q + 0.622), 0.01*forc_esat) with forc_esat from the QSat polynomial, the Magnus dewpoint forc_dewpoint of F90:548-578 (ice coefficients on all traced rows: t_grnd ~ 234-250 K < tfrz selects the ice branch), the raiw selection of F90:423-442 (the dqh > 0 dew branch with the t_grnd > forc_dewpoint no-dew gate, the sl14/beta branches of the dqh <= 0 side transcribed for completeness), ram1, cgrnds/cgrndl/cgrnd (cgrnd = cgrnds + htvp*cgrndl, F90:450, where htvp is the column latent heat chosen by BiogeophysPreFluxCalcsMod.F90:353-357: hsub = SHR_CONST_LATSUB = 2.8347e6 J/kg when the top layer snl+1 holds ice and no liquid, else hvap = 2.501e6 J/kg; every traced row has a dry snow top layer, so htvp = hsub), taux/tauy (the wind_stress_component law), the sensible heat partition eflx_sh_grnd/soil/snow/h2osfc and the evaporation qflx_evap_soi and qflx_ev_snow/soil/h2osfc (one law: the aerodynamic_surface_flux template, flux = -resistance*(atmosphere - surface); qg_h2osfc is not dumped, so qflx_ev_h2osfc is transcribed but unpinned), and the 2-m diagnostics t_ref2m/q_ref2m/rh_ref2m (the ref2m_profile law, with qsat_ref2m from the shared qsat_qs) and kbm1 = log(z0mg/z0h) (F90:478-495). The tests pin the reference dumps: a CESM3 / CTSM ctsm5.4.063 I2000Clm60Sp land-only run (GSWP3 forcing, dtime = 1800 s) instrumented with write statements at the BareGroundFluxes exit, recording the inputs and outputs of the first 16 bare, deep-snowpack patches over the first 12 steps in full double precision: five of the 192 dumped rows (one per step/column regime, see README.md), asserting every dumped output column plus z0mg and cgrnd (cgrnd from the ComputeGroundHeatFluxAndDeriv dump of the same run). Tested regime: every one of the 192 dumped rows is stable (dthv > 0; the iteration zeta clamped at zetamaxstable = 2.0, so the momentum/heat profiles take the zeta > 1 branch and the 2-m profiles the 0 < zeta <= 1 branch), in the dew branch (dqh > 0, raiw = forc_rho/raw), below freezing (ice dewpoint coefficients), fully snow covered (frac_sno_albedo = 1, snomelt_accum = 0) and has forc_u == forc_v. The unstable branches (zeta < 0 and zeta < -zetam/-zetat), the evaporating dqh <= 0 branches (sl14 soil resistance and soilbeta), the liquid dewpoint branch, the snowmelt/bare-soil z0mg branches and rh_ref2m/kbm1/qflx_ev_h2osfc are transcribed but NOT exercised by any test, because the reference run contains no such rows. Not transcribed (dead or undumped in this configuration): the human-stress indices, the www soil-wetness variable, the rssun/rssha photosynthesis resistances, the u10 diagnostics of FrictionVelocityMod, and the ZengWang2007 z0hg branch (the traced run is Meier2022). Reference: CTSM ctsm5.4.063, src/biogeophys/BareGroundFluxesMod.F90 and FrictionVelocityMod.F90.",
   "tags": [
    "land_surface",
    "clm",
@@ -115,7 +115,7 @@
      ],
      "units": "K",
      "default": 293.0,
-     "description": "atmospheric potential temperature at the forcing height (F90:328; not dumped by the instrumentation, recovered as forc_th = thv/(1 + 0.61*forc_q) from the dumped virtual potential temperature thv), [K]"
+     "description": "atmospheric potential temperature at the forcing height (F90:321; not dumped by the instrumentation, recovered as forc_th = thv/(1 + 0.61*forc_q) from the dumped virtual potential temperature thv), [K]"
     },
     "thm": {
      "type": "parameter",
@@ -124,7 +124,7 @@
      ],
      "units": "K",
      "default": 293.0,
-     "description": "atmospheric potential temperature at the ground level (F90:325), [K]"
+     "description": "atmospheric potential temperature at the ground level (F90:319), [K]"
     },
     "t_grnd": {
      "type": "parameter",
@@ -160,7 +160,7 @@
      ],
      "units": "kg/kg",
      "default": 0.002,
-     "description": "specific humidity at the snow surface (F90:465), [kg/kg]"
+     "description": "specific humidity at the snow surface (F90:474), [kg/kg]"
     },
     "qg_soil": {
      "type": "parameter",
@@ -169,7 +169,7 @@
      ],
      "units": "kg/kg",
      "default": 0.002,
-     "description": "specific humidity at the soil surface (F90:466), [kg/kg]"
+     "description": "specific humidity at the soil surface (F90:475), [kg/kg]"
     },
     "qg_h2osfc": {
      "type": "parameter",
@@ -178,7 +178,7 @@
      ],
      "units": "kg/kg",
      "default": 0.002,
-     "description": "specific humidity at the h2osfc surface (F90:467; not dumped by the instrumentation, so qflx_ev_h2osfc is unpinned; the traced columns have no h2osfc ponding), [kg/kg]"
+     "description": "specific humidity at the h2osfc surface (F90:476; not dumped by the instrumentation, so qflx_ev_h2osfc is unpinned; the traced columns have no h2osfc ponding), [kg/kg]"
     },
     "dqgdT": {
      "type": "parameter",
@@ -187,7 +187,7 @@
      ],
      "units": "1/K",
      "default": 0.0001,
-     "description": "derivative of ground specific humidity with respect to ground temperature (F90:441), [1/K]"
+     "description": "derivative of ground specific humidity with respect to ground temperature (F90:449), [1/K]"
     },
     "t_soisno_top": {
      "type": "parameter",
@@ -196,7 +196,7 @@
      ],
      "units": "K",
      "default": 290.0,
-     "description": "temperature of the top snow layer t_soisno(c, snl+1) (F90:452; the dumped j = -8 entry), [K]"
+     "description": "temperature of the top snow layer t_soisno(c, snl+1) (F90:463; the dumped j = -8 entry), [K]"
     },
     "t_soisno_soil": {
      "type": "parameter",
@@ -205,7 +205,7 @@
      ],
      "units": "K",
      "default": 290.0,
-     "description": "temperature of the top soil layer t_soisno(c, 1) (F90:453; the dumped j = 1 entry), [K]"
+     "description": "temperature of the top soil layer t_soisno(c, 1) (F90:464; the dumped j = 1 entry), [K]"
     },
     "t_h2osfc": {
      "type": "parameter",
@@ -214,7 +214,7 @@
      ],
      "units": "K",
      "default": 290.0,
-     "description": "temperature of the h2osfc surface (F90:454; not dumped; equals t_soisno(c, 1) on every traced row, so the tests bind it to t_soisno_soil), [K]"
+     "description": "temperature of the h2osfc surface (F90:465; not dumped; equals t_soisno(c, 1) on every traced row, so the tests bind it to t_soisno_soil), [K]"
     },
     "htvp": {
      "type": "parameter",
@@ -222,8 +222,8 @@
       "patch"
      ],
      "units": "J/kg",
-     "default": 2501000.0,
-     "description": "latent heat of vaporization/sublimation for the cgrnd derivative (F90:444, htvp = hvap = 2.501e6 J/kg for the liquid-water ground of the traced rows; not dumped, so cgrnd is unpinned), [J/kg]"
+     "default": 2834700.0,
+     "description": "column latent heat for the cgrnd derivative (BareGroundFluxesMod.F90:450): htvp_col of BiogeophysPreFluxCalcsMod.F90:353-357, hsub = SHR_CONST_LATSUB = 2.8347e6 J/kg (latent heat of sublimation, LATICE + LATVAP) when the top layer snl+1 has h2osoi_liq <= 0 and h2osoi_ice > 0, else hvap = SHR_CONST_LATVAP = 2.501e6 J/kg. The default is hsub because every traced row has a dry snow top layer (the dumped htvp is 2834700 on all 192 rows), [J/kg]"
     },
     "soilresis": {
      "type": "parameter",
@@ -232,7 +232,7 @@
      ],
      "units": "s/m",
      "default": 0.0,
-     "description": "Swenson & Lawrence 2014 soil resistance (F90:435; soil_resis_method = 1 in the traced run but the sl14 branch is inactive on the pinned rows because they are all dew rows with dqh > 0), [s/m]"
+     "description": "Swenson & Lawrence 2014 soil resistance (F90:440; soil_resis_method = 1 in the traced run but the sl14 branch is inactive on the pinned rows because they are all dew rows with dqh > 0), [s/m]"
     },
     "soilbeta": {
      "type": "parameter",
@@ -241,7 +241,7 @@
      ],
      "units": "1",
      "default": 1.0,
-     "description": "Lee & Pielke 1992 wetness coefficient (F90:432; dumped column, inactive on the pinned rows because do_soilevap_beta is false in the traced run), [-]"
+     "description": "Lee & Pielke 1992 wetness coefficient (F90:435; dumped column, inactive on the pinned rows because do_soilevap_beta is false in the traced run), [-]"
     },
     "frac_sno_albedo": {
      "type": "parameter",
@@ -277,7 +277,7 @@
      ],
      "units": "m/s",
      "default": 1.0,
-     "description": "minimum wind speed (F90:325, wind_min = 1.0 m/s from the parameter file), [m/s]"
+     "description": "minimum wind speed (F90:318, wind_min = 1.0 m/s from the parameter file), [m/s]"
     },
     "grav": {
      "type": "parameter",
@@ -295,7 +295,7 @@
      ],
      "units": "J/kg/K",
      "default": 1004.64,
-     "description": "specific heat of dry air (F90:400, clm_varcon.F90:59), [J/kg/K]"
+     "description": "specific heat of dry air (F90:403, clm_varcon.F90:59), [J/kg/K]"
     },
     "tfrz": {
      "type": "parameter",
@@ -448,7 +448,7 @@
      ],
      "units": "1",
      "default": 1.0,
-     "description": "soil_resis_method = 1 selects the Swenson & Lawrence 2014 soil resistance (F90:434; the traced run has it active but the pinned rows never reach the dqh <= 0 branch), [-]"
+     "description": "soil_resis_method = 1 selects the Swenson & Lawrence 2014 soil resistance (F90:438-441; the traced run has it active but the pinned rows never reach the dqh <= 0 branch), [-]"
     },
     "use_soilevap_beta": {
      "type": "parameter",
@@ -457,7 +457,7 @@
      ],
      "units": "1",
      "default": 0.0,
-     "description": "do_soilevap_beta selects the Lee & Pielke 1992 beta evaporation (F90:427-433; inactive in the traced run), [-]"
+     "description": "do_soilevap_beta selects the Lee & Pielke 1992 beta evaporation (F90:430-437; inactive in the traced run), [-]"
     },
     "ur": {
      "type": "unknown",
@@ -465,7 +465,7 @@
       "patch"
      ],
      "units": "m/s",
-     "description": "wind speed at the forcing height ur = max(wind_min, sqrt(forc_u^2 + forc_v^2)) (F90:325), [m/s]"
+     "description": "wind speed at the forcing height ur = max(wind_min, sqrt(forc_u^2 + forc_v^2)) (F90:318), [m/s]"
     },
     "dth": {
      "type": "unknown",
@@ -473,7 +473,7 @@
       "patch"
      ],
      "units": "K",
-     "description": "temperature difference dth = thm - t_grnd (F90:326), [K]"
+     "description": "temperature difference dth = thm - t_grnd (F90:319), [K]"
     },
     "dqh": {
      "type": "unknown",
@@ -481,7 +481,7 @@
       "patch"
      ],
      "units": "kg/kg",
-     "description": "humidity difference dqh = forc_q - qg (F90:327), [kg/kg]"
+     "description": "humidity difference dqh = forc_q - qg (F90:320), [kg/kg]"
     },
     "dthv": {
      "type": "unknown",
@@ -489,7 +489,7 @@
       "patch"
      ],
      "units": "K",
-     "description": "virtual potential temperature difference dthv = dth*(1 + 0.61*forc_q) + 0.61*forc_th*dqh (F90:328), [K]"
+     "description": "virtual potential temperature difference dthv = dth*(1 + 0.61*forc_q) + 0.61*forc_th*dqh (F90:321), [K]"
     },
     "z0mg": {
      "type": "unknown",
@@ -505,7 +505,7 @@
       "patch"
      ],
      "units": "m",
-     "description": "iteration height zldis = forc_hgt_u + z0mg (F90:329), [m]"
+     "description": "iteration height zldis = forc_hgt_u + z0mg (F90:322), [m]"
     },
     "um_ini": {
      "type": "unknown",
@@ -585,7 +585,7 @@
       "patch"
      ],
      "units": "m",
-     "description": "exit scalar roughness over ground z0hg_patch (step3.z0h, Meier2022 branch of F90:365), [m]"
+     "description": "exit scalar roughness over ground z0hg_patch (step3.z0h, Meier2022 branch of F90:364), [m]"
     },
     "um": {
      "type": "unknown",
@@ -601,7 +601,7 @@
       "patch"
      ],
      "units": "s/m",
-     "description": "aerodynamic resistance to momentum ram = 1/(ustar^2/um) (F90:396), [s/m]"
+     "description": "aerodynamic resistance to momentum ram = 1/(ustar^2/um) (F90:400), [s/m]"
     },
     "rah": {
      "type": "unknown",
@@ -609,7 +609,7 @@
       "patch"
      ],
      "units": "s/m",
-     "description": "aerodynamic resistance to sensible heat rah = 1/(temp1*ustar) (F90:397), [s/m]"
+     "description": "aerodynamic resistance to sensible heat rah = 1/(temp1*ustar) (F90:401), [s/m]"
     },
     "raw": {
      "type": "unknown",
@@ -617,7 +617,7 @@
       "patch"
      ],
      "units": "s/m",
-     "description": "aerodynamic resistance to latent heat raw = 1/(temp2*ustar) (F90:398), [s/m]"
+     "description": "aerodynamic resistance to latent heat raw = 1/(temp2*ustar) (F90:402), [s/m]"
     },
     "raih": {
      "type": "unknown",
@@ -626,7 +626,7 @@
      ],
      "units": "W/m^2/K",
      "default": 0.0,
-     "description": "sensible heat conductance raih = forc_rho*cpair/rah (F90:400), [W/m^2/K]"
+     "description": "sensible heat conductance raih = forc_rho*cpair/rah (F90:403), [W/m^2/K]"
     },
     "forc_esat": {
      "type": "unknown",
@@ -634,7 +634,7 @@
       "patch"
      ],
      "units": "Pa",
-     "description": "saturation vapor pressure at the forcing height (QSat at forc_t, F90:410), [Pa]"
+     "description": "saturation vapor pressure at the forcing height (QSat at forc_t, F90:413), [Pa]"
     },
     "forc_e": {
      "type": "unknown",
@@ -642,7 +642,7 @@
       "patch"
      ],
      "units": "Pa",
-     "description": "vapor pressure at the forcing height, restricted to no less than the 1% relative humidity value (F90:413), [Pa]"
+     "description": "vapor pressure at the forcing height, restricted to no less than the 1% relative humidity value (F90:417), [Pa]"
     },
     "forc_dewpoint": {
      "type": "unknown",
@@ -650,7 +650,7 @@
       "patch"
      ],
      "units": "K",
-     "description": "dewpoint temperature at the forcing height (F90:415, the Magnus law of :548-578), [K]"
+     "description": "dewpoint temperature at the forcing height (F90:420, the Magnus law of :548-578), [K]"
     },
     "raiw": {
      "type": "unknown",
@@ -659,7 +659,7 @@
      ],
      "units": "kg/m^2/s",
      "default": 0.0,
-     "description": "latent heat exchange coefficient raiw (F90:423-438: the dqh > 0 dew branch raiw = forc_rho/raw with the t_grnd > forc_dewpoint no-dew gate, and the dqh <= 0 sl14/beta branches), [kg/m^2/s]"
+     "description": "latent heat exchange coefficient raiw (F90:423-442: the dqh > 0 dew branch raiw = forc_rho/raw with the t_grnd > forc_dewpoint no-dew gate, and the dqh <= 0 sl14/beta branches), [kg/m^2/s]"
     },
     "ram1": {
      "type": "unknown",
@@ -667,7 +667,7 @@
       "patch"
      ],
      "units": "s/m",
-     "description": "aerodynamical resistance (F90:439, the dumped ram1 column), [s/m]"
+     "description": "aerodynamical resistance (F90:444, the dumped ram1 column), [s/m]"
     },
     "cgrnds": {
      "type": "unknown",
@@ -675,7 +675,7 @@
       "patch"
      ],
      "units": "W/m^2/K",
-     "description": "derivative of the sensible heat flux with respect to ground temperature cgrnds = raih (F90:441), [W/m^2/K]"
+     "description": "derivative of the sensible heat flux with respect to ground temperature cgrnds = raih (F90:448), [W/m^2/K]"
     },
     "cgrndl": {
      "type": "unknown",
@@ -683,7 +683,7 @@
       "patch"
      ],
      "units": "kg/m^2/s/K",
-     "description": "derivative of the latent heat flux with respect to ground temperature cgrndl = raiw*dqgdT (F90:442), [kg/m^2/s/K]"
+     "description": "derivative of the latent heat flux with respect to ground temperature cgrndl = raiw*dqgdT (F90:449), [kg/m^2/s/K]"
     },
     "cgrnd": {
      "type": "unknown",
@@ -691,7 +691,7 @@
       "patch"
      ],
      "units": "W/m^2/K",
-     "description": "derivative of the total ground flux with respect to ground temperature cgrnd = cgrnds + htvp*cgrndl (F90:444; htvp not dumped, so cgrnd is unpinned), [W/m^2/K]"
+     "description": "derivative of the total ground flux with respect to ground temperature cgrnd = cgrnds + htvp*cgrndl (BareGroundFluxesMod.F90:450), pinned against the dumped cgrnd of the same run, [W/m^2/K]"
     },
     "taux": {
      "type": "unknown",
@@ -699,7 +699,7 @@
       "patch"
      ],
      "units": "kg/m/s^2",
-     "description": "zonal wind stress taux = -forc_rho*forc_u/ram (F90:447), [kg/m/s^2]"
+     "description": "zonal wind stress taux = -forc_rho*forc_u/ram (F90:457), [kg/m/s^2]"
     },
     "tauy": {
      "type": "unknown",
@@ -707,7 +707,7 @@
       "patch"
      ],
      "units": "kg/m/s^2",
-     "description": "meridional wind stress tauy = -forc_rho*forc_v/ram (F90:448), [kg/m/s^2]"
+     "description": "meridional wind stress tauy = -forc_rho*forc_v/ram (F90:458), [kg/m/s^2]"
     },
     "eflx_sh_grnd": {
      "type": "unknown",
@@ -715,7 +715,7 @@
       "patch"
      ],
      "units": "W/m^2",
-     "description": "sensible heat flux from the ground eflx_sh_grnd = -raih*dth (F90:449), [W/m^2]"
+     "description": "sensible heat flux from the ground eflx_sh_grnd = -raih*dth (F90:459), [W/m^2]"
     },
     "eflx_sh_snow": {
      "type": "unknown",
@@ -723,7 +723,7 @@
       "patch"
      ],
      "units": "W/m^2",
-     "description": "sensible heat flux from the snow surface eflx_sh_snow = -raih*(thm - t_soisno_top) (F90:452), [W/m^2]"
+     "description": "sensible heat flux from the snow surface eflx_sh_snow = -raih*(thm - t_soisno_top) (F90:463), [W/m^2]"
     },
     "eflx_sh_soil": {
      "type": "unknown",
@@ -731,7 +731,7 @@
       "patch"
      ],
      "units": "W/m^2",
-     "description": "sensible heat flux from the soil surface eflx_sh_soil = -raih*(thm - t_soisno_soil) (F90:453), [W/m^2]"
+     "description": "sensible heat flux from the soil surface eflx_sh_soil = -raih*(thm - t_soisno_soil) (F90:464), [W/m^2]"
     },
     "eflx_sh_h2osfc": {
      "type": "unknown",
@@ -739,7 +739,7 @@
       "patch"
      ],
      "units": "W/m^2",
-     "description": "sensible heat flux from the h2osfc surface eflx_sh_h2osfc = -raih*(thm - t_h2osfc) (F90:454), [W/m^2]"
+     "description": "sensible heat flux from the h2osfc surface eflx_sh_h2osfc = -raih*(thm - t_h2osfc) (F90:465), [W/m^2]"
     },
     "qflx_evap_soi": {
      "type": "unknown",
@@ -747,7 +747,7 @@
       "patch"
      ],
      "units": "kg/m^2/s",
-     "description": "soil evaporation qflx_evap_soi = -raiw*dqh (F90:460), [kg/m^2/s]"
+     "description": "soil evaporation qflx_evap_soi = -raiw*dqh (F90:470), [kg/m^2/s]"
     },
     "qflx_ev_snow": {
      "type": "unknown",
@@ -755,7 +755,7 @@
       "patch"
      ],
      "units": "kg/m^2/s",
-     "description": "evaporation flux from snow qflx_ev_snow = -raiw*(forc_q - qg_snow) (F90:465), [kg/m^2/s]"
+     "description": "evaporation flux from snow qflx_ev_snow = -raiw*(forc_q - qg_snow) (F90:474), [kg/m^2/s]"
     },
     "qflx_ev_soil": {
      "type": "unknown",
@@ -763,7 +763,7 @@
       "patch"
      ],
      "units": "kg/m^2/s",
-     "description": "evaporation flux from soil qflx_ev_soil = -raiw*(forc_q - qg_soil) (F90:466), [kg/m^2/s]"
+     "description": "evaporation flux from soil qflx_ev_soil = -raiw*(forc_q - qg_soil) (F90:475), [kg/m^2/s]"
     },
     "qflx_ev_h2osfc": {
      "type": "unknown",
@@ -771,7 +771,7 @@
       "patch"
      ],
      "units": "kg/m^2/s",
-     "description": "evaporation flux from h2osfc qflx_ev_h2osfc = -raiw*(forc_q - qg_h2osfc) (F90:467; qg_h2osfc not dumped, so unpinned), [kg/m^2/s]"
+     "description": "evaporation flux from h2osfc qflx_ev_h2osfc = -raiw*(forc_q - qg_h2osfc) (F90:476; qg_h2osfc not dumped, so unpinned), [kg/m^2/s]"
     },
     "t_ref2m": {
      "type": "unknown",
@@ -779,7 +779,7 @@
       "patch"
      ],
      "units": "K",
-     "description": "2 m height air temperature t_ref2m = thm + temp1*dth*(1/temp12m - 1/temp1) (F90:470), [K]"
+     "description": "2 m height air temperature t_ref2m = thm + temp1*dth*(1/temp12m - 1/temp1) (F90:479), [K]"
     },
     "q_ref2m": {
      "type": "unknown",
@@ -787,7 +787,7 @@
       "patch"
      ],
      "units": "kg/kg",
-     "description": "2 m height specific humidity q_ref2m = forc_q + temp2*dqh*(1/temp22m - 1/temp2) (F90:473), [kg/kg]"
+     "description": "2 m height specific humidity q_ref2m = forc_q + temp2*dqh*(1/temp22m - 1/temp2) (F90:482), [kg/kg]"
     },
     "e_ref2m": {
      "type": "unknown",
@@ -795,7 +795,7 @@
       "patch"
      ],
      "units": "Pa",
-     "description": "saturation vapor pressure at 2 m (QSat at t_ref2m, F90:476-477), [Pa]"
+     "description": "saturation vapor pressure at 2 m (QSat at t_ref2m, F90:485-486), [Pa]"
     },
     "qsat_ref2m": {
      "type": "unknown",
@@ -803,15 +803,15 @@
       "patch"
      ],
      "units": "kg/kg",
-     "description": "saturation specific humidity at 2 m (F90:476-477), [kg/kg]"
+     "description": "saturation specific humidity at 2 m (F90:485-486), [kg/kg]"
     },
     "rh_ref2m": {
      "type": "unknown",
      "shape": [
       "patch"
      ],
-     "units": "1",
-     "description": "2 m relative humidity rh_ref2m = min(100, q_ref2m/qsat_ref2m*100) (F90:479, in %; not dumped, so unpinned), [%]"
+     "units": "%",
+     "description": "2 m relative humidity in percent, rh_ref2m = min(100, q_ref2m/qsat_ref2m*100) (BareGroundFluxesMod.F90:488; not dumped, so unpinned), [%]"
     },
     "kbm1": {
      "type": "unknown",
@@ -819,7 +819,7 @@
       "patch"
      ],
      "units": "1",
-     "description": "natural logarithm of z0mg/z0hg kbm1 = log(z0mg/z0h) (F90:498; not dumped, so unpinned), [-]"
+     "description": "natural logarithm of z0mg/z0hg kbm1 = log(z0mg/z0h) (F90:495; not dumped, so unpinned), [-]"
     }
    },
    "equations": [
@@ -1472,7 +1472,7 @@
         "op": "const",
         "args": [],
         "value": 100.0,
-        "units": "1"
+        "units": "%"
        },
        {
         "op": "*",
@@ -1481,7 +1481,7 @@
           "op": "const",
           "args": [],
           "value": 100.0,
-          "units": "1"
+          "units": "%"
          },
          {
           "op": "/",
@@ -1514,7 +1514,7 @@
    "tests": [
     {
      "id": "row_1_1",
-     "description": "Instantaneous pin of the BareGroundFluxes chain (BareGroundFluxesMod.F90, Meier2022 config) from stage1/dumps/clm/clm_bareground.csv row (step 1, p 1, c 1): a traced bare-ground patch on step 1 of 12. All traced rows are stable with the iteration zeta clamped at 2.0 and in the dew branch (dqh > 0, t_grnd <= forc_dewpoint), so the pinned branches are the stable um = max(ur, 0.1), the zeta > 1 momentum/heat profiles, the zeta <= 1 2-m profiles, the Meier2022 z0hg and z0mg-snowmelt laws and the raiw = forc_rho/raw dew branch; the MoninObukIni initial zeta is unclamped on step 1 only. time_span {0,0} evaluates the pointwise laws at the dumped inputs; every dumped output column plus z0mg is asserted at full dump precision.",
+     "description": "Instantaneous pin of the BareGroundFluxes chain (BareGroundFluxesMod.F90, Meier2022 config) from the reference-run bare-ground dump (clm_bareground.csv) row (step 1, p 1, c 1): a traced bare-ground patch on step 1 of 12. All traced rows are stable with the iteration zeta clamped at 2.0 and in the dew branch (dqh > 0, t_grnd <= forc_dewpoint), so the pinned branches are the stable um = max(ur, 0.1), the zeta > 1 momentum/heat profiles, the zeta <= 1 2-m profiles, the Meier2022 z0hg and z0mg-snowmelt laws and the raiw = forc_rho/raw dew branch; the MoninObukIni initial zeta is unclamped on step 1 only. time_span {0,0} evaluates the pointwise laws at the dumped inputs; every dumped output column plus z0mg is asserted at full dump precision, and cgrnd = cgrnds + htvp*cgrndl against the dumped cgrnd of the ground-heat-flux dump (htvp = hsub = 2834700 J/kg, the dumped htvp: the top snow layer holds ice and no liquid).",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -1545,7 +1545,7 @@
       "use_soilevap_beta": 0.0,
       "soilbeta": 1.0,
       "qg_h2osfc": 0.00056337651511675,
-      "htvp": 2501000.0,
+      "htvp": 2834700.0,
       "soilresis": 0.0,
       "zii": 1000.0,
       "wind_min": 1.0,
@@ -1676,12 +1676,20 @@
        "coords": {
         "patch": 1
        }
+      },
+      {
+       "variable": "cgrnd",
+       "time": 0.0,
+       "expected": 2.2732707199925364,
+       "coords": {
+        "patch": 1
+       }
       }
      ]
     },
     {
      "id": "row_2_1",
-     "description": "Instantaneous pin of the BareGroundFluxes chain (BareGroundFluxesMod.F90, Meier2022 config) from stage1/dumps/clm/clm_bareground.csv row (step 2, p 1, c 1): a traced bare-ground patch on step 2 of 12. All traced rows are stable with the iteration zeta clamped at 2.0 and in the dew branch (dqh > 0, t_grnd <= forc_dewpoint), so the pinned branches are the stable um = max(ur, 0.1), the zeta > 1 momentum/heat profiles, the zeta <= 1 2-m profiles, the Meier2022 z0hg and z0mg-snowmelt laws and the raiw = forc_rho/raw dew branch; the MoninObukIni initial zeta is unclamped on step 1 only. time_span {0,0} evaluates the pointwise laws at the dumped inputs; every dumped output column plus z0mg is asserted at full dump precision.",
+     "description": "Instantaneous pin of the BareGroundFluxes chain (BareGroundFluxesMod.F90, Meier2022 config) from the reference-run bare-ground dump (clm_bareground.csv) row (step 2, p 1, c 1): a traced bare-ground patch on step 2 of 12. All traced rows are stable with the iteration zeta clamped at 2.0 and in the dew branch (dqh > 0, t_grnd <= forc_dewpoint), so the pinned branches are the stable um = max(ur, 0.1), the zeta > 1 momentum/heat profiles, the zeta <= 1 2-m profiles, the Meier2022 z0hg and z0mg-snowmelt laws and the raiw = forc_rho/raw dew branch; the MoninObukIni initial zeta is unclamped on step 1 only. time_span {0,0} evaluates the pointwise laws at the dumped inputs; every dumped output column plus z0mg is asserted at full dump precision, and cgrnd = cgrnds + htvp*cgrndl against the dumped cgrnd of the ground-heat-flux dump (htvp = hsub = 2834700 J/kg, the dumped htvp: the top snow layer holds ice and no liquid).",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -1712,7 +1720,7 @@
       "use_soilevap_beta": 0.0,
       "soilbeta": 1.0,
       "qg_h2osfc": 0.0005566248220109339,
-      "htvp": 2501000.0,
+      "htvp": 2834700.0,
       "soilresis": 0.0,
       "zii": 1000.0,
       "wind_min": 1.0,
@@ -1843,12 +1851,20 @@
        "coords": {
         "patch": 1
        }
+      },
+      {
+       "variable": "cgrnd",
+       "time": 0.0,
+       "expected": 1.8265194085180954,
+       "coords": {
+        "patch": 1
+       }
       }
      ]
     },
     {
      "id": "row_6_8",
-     "description": "Instantaneous pin of the BareGroundFluxes chain (BareGroundFluxesMod.F90, Meier2022 config) from stage1/dumps/clm/clm_bareground.csv row (step 6, p 8, c 8): a traced bare-ground patch on step 6 of 12. All traced rows are stable with the iteration zeta clamped at 2.0 and in the dew branch (dqh > 0, t_grnd <= forc_dewpoint), so the pinned branches are the stable um = max(ur, 0.1), the zeta > 1 momentum/heat profiles, the zeta <= 1 2-m profiles, the Meier2022 z0hg and z0mg-snowmelt laws and the raiw = forc_rho/raw dew branch; the MoninObukIni initial zeta is unclamped on step 1 only. time_span {0,0} evaluates the pointwise laws at the dumped inputs; every dumped output column plus z0mg is asserted at full dump precision.",
+     "description": "Instantaneous pin of the BareGroundFluxes chain (BareGroundFluxesMod.F90, Meier2022 config) from the reference-run bare-ground dump (clm_bareground.csv) row (step 6, p 8, c 8): a traced bare-ground patch on step 6 of 12. All traced rows are stable with the iteration zeta clamped at 2.0 and in the dew branch (dqh > 0, t_grnd <= forc_dewpoint), so the pinned branches are the stable um = max(ur, 0.1), the zeta > 1 momentum/heat profiles, the zeta <= 1 2-m profiles, the Meier2022 z0hg and z0mg-snowmelt laws and the raiw = forc_rho/raw dew branch; the MoninObukIni initial zeta is unclamped on step 1 only. time_span {0,0} evaluates the pointwise laws at the dumped inputs; every dumped output column plus z0mg is asserted at full dump precision, and cgrnd = cgrnds + htvp*cgrndl against the dumped cgrnd of the ground-heat-flux dump (htvp = hsub = 2834700 J/kg, the dumped htvp: the top snow layer holds ice and no liquid).",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -1879,7 +1895,7 @@
       "use_soilevap_beta": 0.0,
       "soilbeta": 1.0,
       "qg_h2osfc": 0.000310852505516747,
-      "htvp": 2501000.0,
+      "htvp": 2834700.0,
       "soilresis": 0.0,
       "zii": 1000.0,
       "wind_min": 1.0,
@@ -2010,12 +2026,20 @@
        "coords": {
         "patch": 1
        }
+      },
+      {
+       "variable": "cgrnd",
+       "time": 0.0,
+       "expected": 1.1422414371445961,
+       "coords": {
+        "patch": 1
+       }
       }
      ]
     },
     {
      "id": "row_9_4",
-     "description": "Instantaneous pin of the BareGroundFluxes chain (BareGroundFluxesMod.F90, Meier2022 config) from stage1/dumps/clm/clm_bareground.csv row (step 9, p 4, c 4): a traced bare-ground patch on step 9 of 12. All traced rows are stable with the iteration zeta clamped at 2.0 and in the dew branch (dqh > 0, t_grnd <= forc_dewpoint), so the pinned branches are the stable um = max(ur, 0.1), the zeta > 1 momentum/heat profiles, the zeta <= 1 2-m profiles, the Meier2022 z0hg and z0mg-snowmelt laws and the raiw = forc_rho/raw dew branch; the MoninObukIni initial zeta is unclamped on step 1 only. time_span {0,0} evaluates the pointwise laws at the dumped inputs; every dumped output column plus z0mg is asserted at full dump precision.",
+     "description": "Instantaneous pin of the BareGroundFluxes chain (BareGroundFluxesMod.F90, Meier2022 config) from the reference-run bare-ground dump (clm_bareground.csv) row (step 9, p 4, c 4): a traced bare-ground patch on step 9 of 12. All traced rows are stable with the iteration zeta clamped at 2.0 and in the dew branch (dqh > 0, t_grnd <= forc_dewpoint), so the pinned branches are the stable um = max(ur, 0.1), the zeta > 1 momentum/heat profiles, the zeta <= 1 2-m profiles, the Meier2022 z0hg and z0mg-snowmelt laws and the raiw = forc_rho/raw dew branch; the MoninObukIni initial zeta is unclamped on step 1 only. time_span {0,0} evaluates the pointwise laws at the dumped inputs; every dumped output column plus z0mg is asserted at full dump precision, and cgrnd = cgrnds + htvp*cgrndl against the dumped cgrnd of the ground-heat-flux dump (htvp = hsub = 2834700 J/kg, the dumped htvp: the top snow layer holds ice and no liquid).",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -2046,7 +2070,7 @@
       "use_soilevap_beta": 0.0,
       "soilbeta": 1.0,
       "qg_h2osfc": 0.000532298532171769,
-      "htvp": 2501000.0,
+      "htvp": 2834700.0,
       "soilresis": 0.0,
       "zii": 1000.0,
       "wind_min": 1.0,
@@ -2177,12 +2201,20 @@
        "coords": {
         "patch": 1
        }
+      },
+      {
+       "variable": "cgrnd",
+       "time": 0.0,
+       "expected": 0.8905438890814812,
+       "coords": {
+        "patch": 1
+       }
       }
      ]
     },
     {
      "id": "row_12_16",
-     "description": "Instantaneous pin of the BareGroundFluxes chain (BareGroundFluxesMod.F90, Meier2022 config) from stage1/dumps/clm/clm_bareground.csv row (step 12, p 16, c 16): a traced bare-ground patch on step 12 of 12. All traced rows are stable with the iteration zeta clamped at 2.0 and in the dew branch (dqh > 0, t_grnd <= forc_dewpoint), so the pinned branches are the stable um = max(ur, 0.1), the zeta > 1 momentum/heat profiles, the zeta <= 1 2-m profiles, the Meier2022 z0hg and z0mg-snowmelt laws and the raiw = forc_rho/raw dew branch; the MoninObukIni initial zeta is unclamped on step 1 only. time_span {0,0} evaluates the pointwise laws at the dumped inputs; every dumped output column plus z0mg is asserted at full dump precision.",
+     "description": "Instantaneous pin of the BareGroundFluxes chain (BareGroundFluxesMod.F90, Meier2022 config) from the reference-run bare-ground dump (clm_bareground.csv) row (step 12, p 16, c 16): a traced bare-ground patch on step 12 of 12. All traced rows are stable with the iteration zeta clamped at 2.0 and in the dew branch (dqh > 0, t_grnd <= forc_dewpoint), so the pinned branches are the stable um = max(ur, 0.1), the zeta > 1 momentum/heat profiles, the zeta <= 1 2-m profiles, the Meier2022 z0hg and z0mg-snowmelt laws and the raiw = forc_rho/raw dew branch; the MoninObukIni initial zeta is unclamped on step 1 only. time_span {0,0} evaluates the pointwise laws at the dumped inputs; every dumped output column plus z0mg is asserted at full dump precision, and cgrnd = cgrnds + htvp*cgrndl against the dumped cgrnd of the ground-heat-flux dump (htvp = hsub = 2834700 J/kg, the dumped htvp: the top snow layer holds ice and no liquid).",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -2213,7 +2245,7 @@
       "use_soilevap_beta": 0.0,
       "soilbeta": 1.0,
       "qg_h2osfc": 0.00022127811594841744,
-      "htvp": 2501000.0,
+      "htvp": 2834700.0,
       "soilresis": 0.0,
       "zii": 1000.0,
       "wind_min": 1.0,
@@ -2341,6 +2373,14 @@
        "variable": "z0mg",
        "time": 0.0,
        "expected": 8.134020505760161e-05,
+       "coords": {
+        "patch": 1
+       }
+      },
+      {
+       "variable": "cgrnd",
+       "time": 0.0,
+       "expected": 0.9795813106785033,
        "coords": {
         "patch": 1
        }
