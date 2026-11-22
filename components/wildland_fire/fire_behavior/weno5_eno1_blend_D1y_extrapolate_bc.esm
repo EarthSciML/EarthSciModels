@@ -1,0 +1,72 @@
+{
+  "esm": "2.0.0",
+  "metadata": {
+    "name": "weno5_eno1_blend_D1y_extrapolate_bc",
+    "description": "Per-axis derivative diff2y of NCAR fire_behavior's fire_upwinding = 10 (WENO5/ENO1 with a cosine blending zone; physics/level_set_mod.F90 Calc_tend_ls case 10) on EarthSciDiscretizations' cartesian_uniform_2d grid with the linear-extrapolation halo closure. The reference code blends the PER-AXIS derivative, diff2y = mask diff2y_weno + (1 - mask) diff2y_eno, and builds both |grad psi| = sqrt(diff2x^2 + diff2y^2) and the front normal nvy = diff2y/sqrt(|grad psi|^2 + eps) from it, so a consumer that lowers its norm with ESD's rules/weno5_eno1_blend_norm_D2_extrapolate_bc must lower its bare D(u, wrt: y) with the SAME blend, not with the hard-edged fire_upwinding = 9 rule rules/weno5_eno1_D1y_extrapolate_bc. ESD ships the blend only inside the compound norm rule; this rule is the missing per-axis sibling, written exactly as rules/weno5_eno1_D1y_extrapolate_bc with its interior stencil swapped: the body applies ESD's shared boundary frame rules/weno5_eno1_D1y_extrapolate_frame (ENO1 strips, guarded linear-extrapolation ghosts of Extrapol_var_at_bdys at the y walls) around ESD's stencils/weno5_eno1_blend_D1y_interior (mask = 1 for |u| <= B, 0.5 (1 + cos(pi (|u| - B)/B)) over B < |u| <= 2B, 0 beyond and in the bdy_eno1_cells wall band; B = weno_band_cells dy). Match D(u, wrt: y) at priority 10, scoped with where {u: {shape: [x, y]}} (esm-spec 9.6.1), the same pattern and priority as the fire_upwinding = 9 rule, so a component imports one or the other. Local to this repository because ESD has no per-axis blend rule. Free names (consumer scope): wind_u, wind_v, bdy_eno1_cells (>= 3), weno_band_cells, pi_blend, dx, dy. Requires NX, NY >= 7.",
+    "license": "MIT",
+    "tags": [
+      "discretization",
+      "grid:cartesian_uniform_2d",
+      "op:D",
+      "axis:y",
+      "bc:extrapolate_linear",
+      "fire_upwinding:10"
+    ],
+    "references": [
+      {
+        "citation": "Munoz-Esparza, D., Kosovic, B., Jimenez, P. A., & Coen, J. L. (2018). An accurate fire-spread algorithm in the Weather Research and Forecasting model using the level-set method. Journal of Advances in Modeling Earth Systems, 10(4), 908-926.",
+        "doi": "10.1002/2017MS001108"
+      },
+      {
+        "citation": "NCAR Community Fire Behavior Model (fire_behavior), physics/level_set_mod.F90: Calc_tend_ls (case 4 and case 10, the `use eno1 near domain boundaries` band test that precedes the select case), Select_eno, Select_weno5, Extrapol_var_at_bdys. Identical in WRF phys/fire_behavior/physics/level_set_mod.F90."
+      }
+    ]
+  },
+  "expression_template_imports": [
+    {
+      "ref": "${ESD_ROOT}/grids/cartesian_uniform_2d/rules/weno5_eno1_D1y_extrapolate_frame.esm"
+    },
+    {
+      "ref": "${ESD_ROOT}/grids/cartesian_uniform_2d/stencils/weno5_eno1_blend_D1y_interior.esm"
+    }
+  ],
+  "expression_templates": {
+    "weno5_eno1_blend_D1y_extrapolate_bc": {
+      "params": [
+        "u"
+      ],
+      "priority": 10,
+      "match": {
+        "op": "D",
+        "args": [
+          "u"
+        ],
+        "wrt": "y"
+      },
+      "where": {
+        "u": {
+          "shape": [
+            "x",
+            "y"
+          ]
+        }
+      },
+      "body": {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "weno5_eno1_D1y_extrapolate_frame",
+        "bindings": {
+          "u": "u",
+          "interior": {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "weno5_eno1_blend_D1y_interior",
+            "bindings": {
+              "u": "u"
+            }
+          }
+        }
+      }
+    }
+  }
+}
