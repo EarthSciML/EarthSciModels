@@ -1,0 +1,1858 @@
+{
+ "esm": "2.0.0",
+ "metadata": {
+  "name": "cism_diva_discretization",
+  "description": "Local EarthSciDiscretizations-format discretization rules for the CISM DIVA depth-integrated momentum balance on the 2-D vertex grid (stage 2 of the EqESM project; CISM = cismwrap_3_00_002 / cism_main_3.00.002 as built in CESM cesm3.0-alphabranch, glissade_velo_higher.F90 compute_element_matrix for which_ho_approx = HO_APPROX_DIVA = 4, F90:8171-8181, on the gris20 20 km grid of the reference run). The DIVA x-momentum balance D(2*etaH*(2*D(u,x)+D(v,y)),x) + D(etaH*(D(u,y)+D(v,x)),y) - beta_eff*u = rhoi*g*H*D(s,x) (Goldberg 2011 eq. 37 with the depth-integrated membrane viscosity etaH = H*int(efvs dsigma), the vertical average of the effective viscosity times the thickness, the h_qp*efvs_qp_vertavg coefficient the Fortran assembles at each quadrature point, F90:5400-5407) expands to four second-derivative terms: D(4*etaH*D(u,x),x) (the Kuu = 4*phi_x*phi_x + phi_y*phi_y block, F90:8178), D(2*etaH*D(v,y),x) (the Kuv = 2*phi_x*phi_y + phi_y*phi_x block, F90:8179), D(etaH*D(u,y),y) (the phi_y*phi_y part of Kuu) and D(etaH*D(v,x),y) (the phi_y*phi_x part of Kuv); the y-momentum balance is the mirror set. The rules lower each term to a staggered, conservative face-flux divergence at the vertices with the cell-centered coefficient etaH: the face of vertex (i,j) in the +x direction passes through the cell centers (i+1,j) and (i+1,j+1) (the east face of the vertex, midpoint of the east cell edge), so its flux coefficient is the mean k_E = (etaH(i+1,j) + etaH(i+1,j+1))/2, and likewise k_W = (etaH(i,j) + etaH(i,j+1))/2 for the west face, k_N = (etaH(i,j+1) + etaH(i+1,j+1))/2 for the north face and k_S = (etaH(i,j) + etaH(i+1,j))/2 for the south face; the flux difference is divided by dx^2 (or dy^2) for the repeated derivatives. The mixed terms D(k*D(psi,y),x) and D(k*D(psi,x),y) use the same face coefficients with the 4-point face-centered stencils of the inner derivative: D(psi,y) on the east face is (psi(i,j+1) + psi(i+1,j+1) - psi(i,j-1) - psi(i+1,j-1))/(4*dy) and on the west face (psi(i-1,j+1) + psi(i,j+1) - psi(i-1,j-1) - psi(i,j-1))/(4*dy), so the two mixed terms reduce to the standard centered DxDy = (psi(i+1,j+1) - psi(i+1,j-1) - psi(i-1,j+1) + psi(i-1,j-1))/(4*dx*dy) stencil when the coefficient is constant (probed: the Dx_Dy and Dy_Dx rules reduce exactly to that stencil for constant k). The rules are marked ESD PR candidates: the EarthSciDiscretizations library (${ESD_ROOT}) has no staggered variable-coefficient second-derivative rules on a vertex grid (its cartesian_uniform_2d rules cover cell-centered first/second derivatives of the C-grid dynamics, and cice_bgrid the B-grid stress integrals), so this file carries the four rules locally until they are reviewed upstream. Grid contract: the rules match D(k*D(psi,..),..) trees with psi a 2-D vertex field of THIS grid (shape [i,j] on the i/j index sets) and k ANY expression (probed: a where clause on the compound coefficient breaks the match, so the rules constrain only psi); the free names dx/dy (the grid spacings) and the metaparameters NX/NY (the vertex-grid dims) come from the consuming model. The etaH depth integral is lowered by the fifth rule: cism_sigma_integral_field matches integral(f, var: lev, lower: z_sfc, upper: z_top) with f a [lev,i,j] field and lowers it to the per-cell composite midpoint sum sum_l f[l,i,j]*dz[l] over the consumer's free-name layer measure dz (the sigma layer widths, cism_sigma_measure of ./cism_velo_discretization.esm), the exact vertical-average sum of F90:5366-5369. The ESD column_nonuniform_1d integral rules cannot lower this node (their where clause requires a [lev]-shaped integrand), which is why the field form lives here.",
+  "license": "MIT",
+  "tags": [
+   "esd:rule",
+   "family:finite_volume",
+   "grid:cism_vertex",
+   "op:derivative",
+   "op:integral",
+   "axes:i,j",
+   "order:2",
+   "stencil_width:1",
+   "bc:none",
+   "spec:9.6.8"
+  ],
+  "created": "2026-11-06T00:00:00Z",
+  "authors": [
+   "EqESM project contributors"
+  ],
+  "references": [
+   {
+    "citation": "CISM (Community Ice Sheet Model) cismwrap_3_00_002 / cism_main_3.00.002, as built in CESM cesm3.0-alphabranch (checkout stage1/cesm/components/cism, reference run T1850Gg/f09_g17_gris20): libglissade/glissade_basal_traction.F90, libglissade/glissade_therm.F90, libglissade/glissade_grid_operators.F90, libglissade/glissade_velo_higher.F90, libglissade/glissade_mass_balance.F90, libglissade/glissade_calving.F90, libglissade/glissade_masks.F90, libglissade/glissade_utils.F90, libglimmer/glimmer_physcon.F90, libglimmer/glimmer_utils.F90, libglide/glide_types.F90, libglide/glide_setup.F90, libglad/glad_main.F90, libglad/glad_timestep.F90, libglad/glad_output_states.F90, libglad/glad_output_fluxes.F90, drivers/cpl/nuopc/glc_import_export.F90 - the reference implementation these components are transcribed from.",
+    "url": "https://github.com/ESCOMP/CESM"
+   },
+   {
+    "citation": "CISM (Community Ice Sheet Model) cism_main_3.00.002, libglissade/glissade_velo_higher.F90 compute_element_matrix (F90:8171-8181) and the assembly loop (F90:5336-5407)."
+   },
+   {
+    "citation": "Goldberg, D. N. (2011). A variationally derived, depth-integrated approximation for a full-Stokes ice sheet model. Journal of Glaciology, 57(204), 717-728. Eq. 37 (the depth-integrated momentum balance) and eq. 40-41 (the effective basal friction)."
+   },
+   {
+    "citation": "LeVeque, R. J. (2007). Finite Difference Methods for Ordinary and Partial Differential Equations. SIAM. Section 2.13 (nonuniform grids and conservative flux forms)."
+   },
+   {
+    "citation": "EarthSciModels - the authoritative .esm corpus this component lives in.",
+    "url": "https://github.com/EarthSciML/EarthSciModels"
+   }
+  ]
+ },
+ "metaparameters": {
+  "NX": {
+   "type": "integer",
+   "default": 9,
+   "description": "Number of vertices along x of the 2-D vertex grid (the patch: dump_patch_n + 1 = 9 for the reference run)."
+  },
+  "NY": {
+   "type": "integer",
+   "default": 9,
+   "description": "Number of vertices along y of the 2-D vertex grid (dump_patch_n + 1 = 9)."
+  },
+  "NLAYERS": {
+   "type": "integer",
+   "default": 10,
+   "description": "Number of CISM sigma layers (upn - 1 = 10 for the reference run); the DIVA velocity levels number NLAYERS + 1 (k = 1 surface .. k = NLAYERS+1 bed: the CISM sigma interfaces, the dump's sigma_001..011)."
+  }
+ },
+ "index_sets": {
+  "i": {
+   "kind": "interval",
+   "size": "NX"
+  },
+  "j": {
+   "kind": "interval",
+   "size": "NY"
+  }
+ },
+ "expression_templates": {
+  "cism_stag_Dx_Dx": {
+   "description": "Staggered x-x second derivative with a cell-centered variable coefficient at the vertices: lowers D(k*D(psi,x),x) to the conservative face-flux difference (k_E*(psi(i+1,j) - psi(i,j)) - k_W*(psi(i,j) - psi(i-1,j)))/dx^2, with the east-face coefficient k_E = (k(i+1,j) + k(i+1,j+1))/2 and the west-face coefficient k_W = (k(i,j) + k(i,j+1))/2 - the two cell centers the face of vertex (i,j) passes between. The DIVA x-momentum term D(4*etaH*D(u,x),x) applies it with psi = u and k = 4*etaH. Interior vertices only (i,j in 2..NX-2, 2..NY-2, matching the guard `i <= NX-2 and j <= NY-2` in the rule body): the stencil needs the neighbor vertices and the east/west face cells, so it is not evaluated on the patch boundary. ESD PR candidate: no staggered variable-coefficient rule of this form exists in EarthSciDiscretizations.",
+   "params": [
+    "psi",
+    "k"
+   ],
+   "priority": 10,
+   "match": {
+    "op": "D",
+    "args": [
+     {
+      "op": "*",
+      "args": [
+       "k",
+       {
+        "op": "D",
+        "args": [
+         "psi"
+        ],
+        "wrt": "x"
+       }
+      ]
+     }
+    ],
+    "wrt": "x"
+   },
+   "where": {
+    "psi": {
+     "shape": [
+      "i",
+      "j"
+     ]
+    }
+   },
+   "body": {
+    "op": "faq",
+    "output_idx": [
+     "i",
+     "j"
+    ],
+    "args": [
+     "psi",
+     "k"
+    ],
+    "ranges": {
+     "i": [
+      1,
+      "NX"
+     ],
+     "j": [
+      1,
+      "NY"
+     ]
+    },
+    "expr": {
+     "op": "ifelse",
+     "args": [
+      {
+       "op": "and",
+       "args": [
+        {
+         "op": ">=",
+         "args": [
+          "i",
+          2
+         ]
+        },
+        {
+         "op": "<=",
+         "args": [
+          "i",
+          {
+           "op": "-",
+           "args": [
+            "NX",
+            2
+           ]
+          }
+         ]
+        },
+        {
+         "op": ">=",
+         "args": [
+          "j",
+          2
+         ]
+        },
+        {
+         "op": "<=",
+         "args": [
+          "j",
+          {
+           "op": "-",
+           "args": [
+            "NY",
+            2
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "op": "/",
+       "args": [
+        {
+         "op": "-",
+         "args": [
+          {
+           "op": "*",
+           "args": [
+            {
+             "op": "*",
+             "args": [
+              0.5,
+              {
+               "op": "+",
+               "args": [
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  {
+                   "op": "+",
+                   "args": [
+                    "i",
+                    1
+                   ]
+                  },
+                  "j"
+                 ]
+                },
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  {
+                   "op": "+",
+                   "args": [
+                    "i",
+                    1
+                   ]
+                  },
+                  {
+                   "op": "+",
+                   "args": [
+                    "j",
+                    1
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "op": "-",
+             "args": [
+              {
+               "op": "index",
+               "args": [
+                "psi",
+                {
+                 "op": "+",
+                 "args": [
+                  "i",
+                  1
+                 ]
+                },
+                "j"
+               ]
+              },
+              {
+               "op": "index",
+               "args": [
+                "psi",
+                "i",
+                "j"
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          {
+           "op": "*",
+           "args": [
+            {
+             "op": "*",
+             "args": [
+              0.5,
+              {
+               "op": "+",
+               "args": [
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  "i",
+                  "j"
+                 ]
+                },
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  "i",
+                  {
+                   "op": "+",
+                   "args": [
+                    "j",
+                    1
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "op": "-",
+             "args": [
+              {
+               "op": "index",
+               "args": [
+                "psi",
+                "i",
+                "j"
+               ]
+              },
+              {
+               "op": "index",
+               "args": [
+                "psi",
+                {
+                 "op": "-",
+                 "args": [
+                  "i",
+                  1
+                 ]
+                },
+                "j"
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "op": "*",
+         "args": [
+          "dx",
+          "dx"
+         ]
+        }
+       ]
+      },
+      0.0
+     ]
+    }
+   }
+  },
+  "cism_stag_Dy_Dy": {
+   "description": "Staggered y-y second derivative with a cell-centered variable coefficient at the vertices: lowers D(k*D(psi,y),y) to the conservative face-flux difference (k_N*(psi(i,j+1) - psi(i,j)) - k_S*(psi(i,j) - psi(i,j-1)))/dy^2, with the north-face coefficient k_N = (k(i,j+1) + k(i+1,j+1))/2 and the south-face coefficient k_S = (k(i,j) + k(i+1,j))/2. The DIVA x-momentum term D(etaH*D(u,y),y) applies it with psi = u and k = etaH (and the y-momentum term D(4*etaH*D(v,y),y) with psi = v, k = 4*etaH). Interior vertices only. ESD PR candidate (see cism_stag_Dx_Dx).",
+   "params": [
+    "psi",
+    "k"
+   ],
+   "priority": 10,
+   "match": {
+    "op": "D",
+    "args": [
+     {
+      "op": "*",
+      "args": [
+       "k",
+       {
+        "op": "D",
+        "args": [
+         "psi"
+        ],
+        "wrt": "y"
+       }
+      ]
+     }
+    ],
+    "wrt": "y"
+   },
+   "where": {
+    "psi": {
+     "shape": [
+      "i",
+      "j"
+     ]
+    }
+   },
+   "body": {
+    "op": "faq",
+    "output_idx": [
+     "i",
+     "j"
+    ],
+    "args": [
+     "psi",
+     "k"
+    ],
+    "ranges": {
+     "i": [
+      1,
+      "NX"
+     ],
+     "j": [
+      1,
+      "NY"
+     ]
+    },
+    "expr": {
+     "op": "ifelse",
+     "args": [
+      {
+       "op": "and",
+       "args": [
+        {
+         "op": ">=",
+         "args": [
+          "i",
+          2
+         ]
+        },
+        {
+         "op": "<=",
+         "args": [
+          "i",
+          {
+           "op": "-",
+           "args": [
+            "NX",
+            2
+           ]
+          }
+         ]
+        },
+        {
+         "op": ">=",
+         "args": [
+          "j",
+          2
+         ]
+        },
+        {
+         "op": "<=",
+         "args": [
+          "j",
+          {
+           "op": "-",
+           "args": [
+            "NY",
+            2
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "op": "/",
+       "args": [
+        {
+         "op": "-",
+         "args": [
+          {
+           "op": "*",
+           "args": [
+            {
+             "op": "*",
+             "args": [
+              0.5,
+              {
+               "op": "+",
+               "args": [
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  "i",
+                  {
+                   "op": "+",
+                   "args": [
+                    "j",
+                    1
+                   ]
+                  }
+                 ]
+                },
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  {
+                   "op": "+",
+                   "args": [
+                    "i",
+                    1
+                   ]
+                  },
+                  {
+                   "op": "+",
+                   "args": [
+                    "j",
+                    1
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "op": "-",
+             "args": [
+              {
+               "op": "index",
+               "args": [
+                "psi",
+                "i",
+                {
+                 "op": "+",
+                 "args": [
+                  "j",
+                  1
+                 ]
+                }
+               ]
+              },
+              {
+               "op": "index",
+               "args": [
+                "psi",
+                "i",
+                "j"
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          {
+           "op": "*",
+           "args": [
+            {
+             "op": "*",
+             "args": [
+              0.5,
+              {
+               "op": "+",
+               "args": [
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  "i",
+                  "j"
+                 ]
+                },
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  {
+                   "op": "+",
+                   "args": [
+                    "i",
+                    1
+                   ]
+                  },
+                  "j"
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "op": "-",
+             "args": [
+              {
+               "op": "index",
+               "args": [
+                "psi",
+                "i",
+                "j"
+               ]
+              },
+              {
+               "op": "index",
+               "args": [
+                "psi",
+                "i",
+                {
+                 "op": "-",
+                 "args": [
+                  "j",
+                  1
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "op": "*",
+         "args": [
+          "dy",
+          "dy"
+         ]
+        }
+       ]
+      },
+      0.0
+     ]
+    }
+   }
+  },
+  "cism_stag_Dx_Dy": {
+   "description": "Staggered x-of-y mixed second derivative with a cell-centered variable coefficient at the vertices: lowers D(k*D(psi,y),x) to the face-flux difference (k_E*D(psi,y)_E - k_W*D(psi,y)_W)/dx with the east/west face coefficients of cism_stag_Dx_Dx and the 4-point face-centered inner stencils D(psi,y)_E = (psi(i,j+1) + psi(i+1,j+1) - psi(i,j-1) - psi(i+1,j-1))/(4*dy) and D(psi,y)_W = (psi(i-1,j+1) + psi(i,j+1) - psi(i-1,j-1) - psi(i,j-1))/(4*dy). The DIVA x-momentum term D(2*etaH*D(v,y),x) applies it with psi = v and k = 2*etaH. For constant k the two face fluxes telescope to the standard centered stencil (psi(i+1,j+1) - psi(i+1,j-1) - psi(i-1,j+1) + psi(i-1,j-1))/(4*dx*dy) (probed at rel 1e-12). Interior vertices only. ESD PR candidate (see cism_stag_Dx_Dx).",
+   "params": [
+    "psi",
+    "k"
+   ],
+   "priority": 10,
+   "match": {
+    "op": "D",
+    "args": [
+     {
+      "op": "*",
+      "args": [
+       "k",
+       {
+        "op": "D",
+        "args": [
+         "psi"
+        ],
+        "wrt": "y"
+       }
+      ]
+     }
+    ],
+    "wrt": "x"
+   },
+   "where": {
+    "psi": {
+     "shape": [
+      "i",
+      "j"
+     ]
+    }
+   },
+   "body": {
+    "op": "faq",
+    "output_idx": [
+     "i",
+     "j"
+    ],
+    "args": [
+     "psi",
+     "k"
+    ],
+    "ranges": {
+     "i": [
+      1,
+      "NX"
+     ],
+     "j": [
+      1,
+      "NY"
+     ]
+    },
+    "expr": {
+     "op": "ifelse",
+     "args": [
+      {
+       "op": "and",
+       "args": [
+        {
+         "op": ">=",
+         "args": [
+          "i",
+          2
+         ]
+        },
+        {
+         "op": "<=",
+         "args": [
+          "i",
+          {
+           "op": "-",
+           "args": [
+            "NX",
+            2
+           ]
+          }
+         ]
+        },
+        {
+         "op": ">=",
+         "args": [
+          "j",
+          2
+         ]
+        },
+        {
+         "op": "<=",
+         "args": [
+          "j",
+          {
+           "op": "-",
+           "args": [
+            "NY",
+            2
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "op": "/",
+       "args": [
+        {
+         "op": "-",
+         "args": [
+          {
+           "op": "*",
+           "args": [
+            {
+             "op": "*",
+             "args": [
+              0.5,
+              {
+               "op": "+",
+               "args": [
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  {
+                   "op": "+",
+                   "args": [
+                    "i",
+                    1
+                   ]
+                  },
+                  "j"
+                 ]
+                },
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  {
+                   "op": "+",
+                   "args": [
+                    "i",
+                    1
+                   ]
+                  },
+                  {
+                   "op": "+",
+                   "args": [
+                    "j",
+                    1
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "op": "/",
+             "args": [
+              {
+               "op": "-",
+               "args": [
+                {
+                 "op": "+",
+                 "args": [
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    "i",
+                    {
+                     "op": "+",
+                     "args": [
+                      "j",
+                      1
+                     ]
+                    }
+                   ]
+                  },
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    {
+                     "op": "+",
+                     "args": [
+                      "i",
+                      1
+                     ]
+                    },
+                    {
+                     "op": "+",
+                     "args": [
+                      "j",
+                      1
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                },
+                {
+                 "op": "+",
+                 "args": [
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    "i",
+                    {
+                     "op": "-",
+                     "args": [
+                      "j",
+                      1
+                     ]
+                    }
+                   ]
+                  },
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    {
+                     "op": "+",
+                     "args": [
+                      "i",
+                      1
+                     ]
+                    },
+                    {
+                     "op": "-",
+                     "args": [
+                      "j",
+                      1
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              },
+              {
+               "op": "*",
+               "args": [
+                4,
+                "dy"
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          {
+           "op": "*",
+           "args": [
+            {
+             "op": "*",
+             "args": [
+              0.5,
+              {
+               "op": "+",
+               "args": [
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  "i",
+                  "j"
+                 ]
+                },
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  "i",
+                  {
+                   "op": "+",
+                   "args": [
+                    "j",
+                    1
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "op": "/",
+             "args": [
+              {
+               "op": "-",
+               "args": [
+                {
+                 "op": "+",
+                 "args": [
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    {
+                     "op": "-",
+                     "args": [
+                      "i",
+                      1
+                     ]
+                    },
+                    {
+                     "op": "+",
+                     "args": [
+                      "j",
+                      1
+                     ]
+                    }
+                   ]
+                  },
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    "i",
+                    {
+                     "op": "+",
+                     "args": [
+                      "j",
+                      1
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                },
+                {
+                 "op": "+",
+                 "args": [
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    {
+                     "op": "-",
+                     "args": [
+                      "i",
+                      1
+                     ]
+                    },
+                    {
+                     "op": "-",
+                     "args": [
+                      "j",
+                      1
+                     ]
+                    }
+                   ]
+                  },
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    "i",
+                    {
+                     "op": "-",
+                     "args": [
+                      "j",
+                      1
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              },
+              {
+               "op": "*",
+               "args": [
+                4,
+                "dy"
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        "dx"
+       ]
+      },
+      0.0
+     ]
+    }
+   }
+  },
+  "cism_stag_Dy_Dx": {
+   "description": "Staggered y-of-x mixed second derivative with a cell-centered variable coefficient at the vertices: lowers D(k*D(psi,x),y) to the face-flux difference (k_N*D(psi,x)_N - k_S*D(psi,x)_S)/dy with the north/south face coefficients of cism_stag_Dy_Dy and the 4-point face-centered inner stencils D(psi,x)_N = (psi(i+1,j) + psi(i+1,j+1) - psi(i-1,j) - psi(i-1,j+1))/(4*dx) and D(psi,x)_S = (psi(i+1,j-1) + psi(i+1,j) - psi(i-1,j-1) - psi(i-1,j))/(4*dx). The DIVA x-momentum term D(etaH*D(v,x),y) applies it with psi = v and k = etaH. For constant k the two face fluxes telescope to the standard centered stencil (psi(i+1,j+1) - psi(i+1,j-1) - psi(i-1,j+1) + psi(i-1,j-1))/(4*dx*dy) (probed at rel 1e-12). Interior vertices only. ESD PR candidate (see cism_stag_Dx_Dx).",
+   "params": [
+    "psi",
+    "k"
+   ],
+   "priority": 10,
+   "match": {
+    "op": "D",
+    "args": [
+     {
+      "op": "*",
+      "args": [
+       "k",
+       {
+        "op": "D",
+        "args": [
+         "psi"
+        ],
+        "wrt": "x"
+       }
+      ]
+     }
+    ],
+    "wrt": "y"
+   },
+   "where": {
+    "psi": {
+     "shape": [
+      "i",
+      "j"
+     ]
+    }
+   },
+   "body": {
+    "op": "faq",
+    "output_idx": [
+     "i",
+     "j"
+    ],
+    "args": [
+     "psi",
+     "k"
+    ],
+    "ranges": {
+     "i": [
+      1,
+      "NX"
+     ],
+     "j": [
+      1,
+      "NY"
+     ]
+    },
+    "expr": {
+     "op": "ifelse",
+     "args": [
+      {
+       "op": "and",
+       "args": [
+        {
+         "op": ">=",
+         "args": [
+          "i",
+          2
+         ]
+        },
+        {
+         "op": "<=",
+         "args": [
+          "i",
+          {
+           "op": "-",
+           "args": [
+            "NX",
+            2
+           ]
+          }
+         ]
+        },
+        {
+         "op": ">=",
+         "args": [
+          "j",
+          2
+         ]
+        },
+        {
+         "op": "<=",
+         "args": [
+          "j",
+          {
+           "op": "-",
+           "args": [
+            "NY",
+            2
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "op": "/",
+       "args": [
+        {
+         "op": "-",
+         "args": [
+          {
+           "op": "*",
+           "args": [
+            {
+             "op": "*",
+             "args": [
+              0.5,
+              {
+               "op": "+",
+               "args": [
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  "i",
+                  {
+                   "op": "+",
+                   "args": [
+                    "j",
+                    1
+                   ]
+                  }
+                 ]
+                },
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  {
+                   "op": "+",
+                   "args": [
+                    "i",
+                    1
+                   ]
+                  },
+                  {
+                   "op": "+",
+                   "args": [
+                    "j",
+                    1
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "op": "/",
+             "args": [
+              {
+               "op": "-",
+               "args": [
+                {
+                 "op": "+",
+                 "args": [
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    {
+                     "op": "+",
+                     "args": [
+                      "i",
+                      1
+                     ]
+                    },
+                    "j"
+                   ]
+                  },
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    {
+                     "op": "+",
+                     "args": [
+                      "i",
+                      1
+                     ]
+                    },
+                    {
+                     "op": "+",
+                     "args": [
+                      "j",
+                      1
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                },
+                {
+                 "op": "+",
+                 "args": [
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    {
+                     "op": "-",
+                     "args": [
+                      "i",
+                      1
+                     ]
+                    },
+                    "j"
+                   ]
+                  },
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    {
+                     "op": "-",
+                     "args": [
+                      "i",
+                      1
+                     ]
+                    },
+                    {
+                     "op": "+",
+                     "args": [
+                      "j",
+                      1
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              },
+              {
+               "op": "*",
+               "args": [
+                4,
+                "dx"
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          {
+           "op": "*",
+           "args": [
+            {
+             "op": "*",
+             "args": [
+              0.5,
+              {
+               "op": "+",
+               "args": [
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  "i",
+                  "j"
+                 ]
+                },
+                {
+                 "op": "index",
+                 "args": [
+                  "k",
+                  {
+                   "op": "+",
+                   "args": [
+                    "i",
+                    1
+                   ]
+                  },
+                  "j"
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "op": "/",
+             "args": [
+              {
+               "op": "-",
+               "args": [
+                {
+                 "op": "+",
+                 "args": [
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    {
+                     "op": "+",
+                     "args": [
+                      "i",
+                      1
+                     ]
+                    },
+                    {
+                     "op": "-",
+                     "args": [
+                      "j",
+                      1
+                     ]
+                    }
+                   ]
+                  },
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    {
+                     "op": "+",
+                     "args": [
+                      "i",
+                      1
+                     ]
+                    },
+                    "j"
+                   ]
+                  }
+                 ]
+                },
+                {
+                 "op": "+",
+                 "args": [
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    {
+                     "op": "-",
+                     "args": [
+                      "i",
+                      1
+                     ]
+                    },
+                    {
+                     "op": "-",
+                     "args": [
+                      "j",
+                      1
+                     ]
+                    }
+                   ]
+                  },
+                  {
+                   "op": "index",
+                   "args": [
+                    "psi",
+                    {
+                     "op": "-",
+                     "args": [
+                      "i",
+                      1
+                     ]
+                    },
+                    "j"
+                   ]
+                  }
+                 ]
+                }
+               ]
+              },
+              {
+               "op": "*",
+               "args": [
+                4,
+                "dx"
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        "dy"
+       ]
+      },
+      0.0
+     ]
+    }
+   }
+  },
+  "cism_sigma_integral_field": {
+   "description": "Whole-column sigma integral of a [lev,i,j] field at the cell centers: lowers integral(f, var: lev, lower: z_sfc, upper: z_top) with f a layer field of the 2-D vertex grid to the per-cell composite midpoint sum sum_l f[l,i,j]*dz[l] over the consumer's free-name layer measure dz (the dimensionless sigma layer widths dsigma[l] = sigma[l+1] - sigma[l], cism_sigma_measure of ./cism_velo_discretization.esm). This is the exact stencil of the Fortran vertical average of the effective viscosity at each quadrature point, efvs_qp_vertavg = sum_k efvs_qp(k,p)*(sigma(k+1) - sigma(k)) (glissade_velo_higher.F90:5366-5369, applied per cell to the quad-point-mean layer viscosities by the stage-2 DIVA model); the physical column integral carries the thickness factor in the model (etaH = thck*integral(efvs, ...)), not in the measure, matching the omega integrals of ./cism_velo_discretization.esm. The ESD column_nonuniform_1d integral rules cannot lower this node (their where clause requires a [lev]-shaped integrand; the ESD integral rules and the free-name bounds contract are otherwise identical - z_sfc/z_top and the dz measure), so the field form lives here. Implementation notes (probed): the per-cell reduce faq materializes its output over the halo and reads the const-array integrand at the ghost cells, so the body carries the explicit 1-based ranges on ALL axes (i, j and the reduce axis l, the ESD NLEV-style binding convention) and the in-range guard on i/j (a guarded read is not performed, esm-spec 5.5.5; the ghost cells then take the 0 of the guard's false branch, exactly the zero-ghost value the stencil needs). The reduce axis is spelled as the explicit range [1, NLAYERS], NOT the `from` index-set form (probed: the `from` form adds a spurious term in the per-cell reduce). ESD PR candidate: a [lev, i, j] whole-column integral rule for the cartesian grids.",
+   "params": [
+    "f",
+    "dz"
+   ],
+   "priority": 10,
+   "match": {
+    "op": "integral",
+    "args": [
+     "f"
+    ],
+    "var": "lev",
+    "lower": "z_sfc",
+    "upper": "z_top"
+   },
+   "where": {
+    "f": {
+     "shape": [
+      "lev",
+      "i",
+      "j"
+     ]
+    }
+   },
+   "body": {
+    "op": "faq",
+    "output_idx": [
+     "i",
+     "j"
+    ],
+    "reduce": "+",
+    "args": [
+     "f",
+     "dz"
+    ],
+    "ranges": {
+     "i": [
+      1,
+      "NX"
+     ],
+     "j": [
+      1,
+      "NY"
+     ],
+     "l": [
+      1,
+      "NLAYERS"
+     ]
+    },
+    "expr": {
+     "op": "ifelse",
+     "args": [
+      {
+       "op": "and",
+       "args": [
+        {
+         "op": ">=",
+         "args": [
+          "i",
+          1
+         ]
+        },
+        {
+         "op": "<=",
+         "args": [
+          "i",
+          "NX"
+         ]
+        },
+        {
+         "op": ">=",
+         "args": [
+          "j",
+          1
+         ]
+        },
+        {
+         "op": "<=",
+         "args": [
+          "j",
+          "NY"
+         ]
+        }
+       ]
+      },
+      {
+       "op": "*",
+       "args": [
+        {
+         "op": "index",
+         "args": [
+          "f",
+          "l",
+          "i",
+          "j"
+         ]
+        },
+        {
+         "op": "index",
+         "args": [
+          "dz",
+          "l"
+         ]
+        }
+       ]
+      },
+      0.0
+     ]
+    }
+   }
+  },
+  "cism_stag_vertex_gradient_x": {
+   "description": "CISM plain vertex gradient of a cell-centered field in x (glissade_grid_operators.F90 glissade_gradient with gradient_margin = 1, F90:309-468, as called by glissade_slope_angle_staggered F90:1414-1552): lowers cism_stag_vertex_gradient_x(f) to df_dx(i,j) = 0.5*((f(i+1,j+1) - f(i,j+1)) + (f(i+1,j) - f(i,j)))/dx - the average of the two east-west edge gradients bracketing vertex (i,j) (the NE-corner convention: cell (i,j) has its NE corner at vertex (i,j); the edge north of the vertex runs between cells (i,j+1) and (i+1,j+1), the edge south between (i,j) and (i+1,j)). With the slope_mask = 1 default of the DIVA call site (no slope_mask_in argument, glissade_velo_higher.F90:2174-2193) the masked branch reduces to the plain average. The stage-2 DIVA model applies it to z_mean = 0.5*(usrf + lsrf) = usrf - thck/2 for the grounded patch cells; the DivaGeometry pointwise law of cism_velo.esm is the same stencil on the 4-cell parameters. Interior vertices only. ESD PR candidate (no staggered vertex-gradient rule exists in EarthSciDiscretizations).",
+   "params": [
+    "f"
+   ],
+   "priority": 10,
+   "match": {
+    "op": "cism_stag_vertex_gradient_x",
+    "args": [
+     "f"
+    ]
+   },
+   "where": {
+    "f": {
+     "shape": [
+      "i",
+      "j"
+     ]
+    }
+   },
+   "body": {
+    "op": "faq",
+    "output_idx": [
+     "i",
+     "j"
+    ],
+    "args": [
+     "f"
+    ],
+    "ranges": {
+     "i": [
+      1,
+      "NX"
+     ],
+     "j": [
+      1,
+      "NY"
+     ]
+    },
+    "expr": {
+     "op": "ifelse",
+     "args": [
+      {
+       "op": "and",
+       "args": [
+        {
+         "op": ">=",
+         "args": [
+          "i",
+          2
+         ]
+        },
+        {
+         "op": "<=",
+         "args": [
+          "i",
+          {
+           "op": "-",
+           "args": [
+            "NX",
+            2
+           ]
+          }
+         ]
+        },
+        {
+         "op": ">=",
+         "args": [
+          "j",
+          2
+         ]
+        },
+        {
+         "op": "<=",
+         "args": [
+          "j",
+          {
+           "op": "-",
+           "args": [
+            "NY",
+            2
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "op": "/",
+       "args": [
+        {
+         "op": "*",
+         "args": [
+          0.5,
+          {
+           "op": "+",
+           "args": [
+            {
+             "op": "-",
+             "args": [
+              {
+               "op": "index",
+               "args": [
+                "f",
+                {
+                 "op": "+",
+                 "args": [
+                  "i",
+                  1
+                 ]
+                },
+                {
+                 "op": "+",
+                 "args": [
+                  "j",
+                  1
+                 ]
+                }
+               ]
+              },
+              {
+               "op": "index",
+               "args": [
+                "f",
+                "i",
+                {
+                 "op": "+",
+                 "args": [
+                  "j",
+                  1
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "op": "-",
+             "args": [
+              {
+               "op": "index",
+               "args": [
+                "f",
+                {
+                 "op": "+",
+                 "args": [
+                  "i",
+                  1
+                 ]
+                },
+                "j"
+               ]
+              },
+              {
+               "op": "index",
+               "args": [
+                "f",
+                "i",
+                "j"
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        "dx"
+       ]
+      },
+      0.0
+     ]
+    }
+   }
+  },
+  "cism_stag_vertex_gradient_y": {
+   "description": "CISM plain vertex gradient of a cell-centered field in y (glissade_gradient with gradient_margin = 1, F90:309-468, as called by glissade_slope_angle_staggered): lowers cism_stag_vertex_gradient_y(f) to df_dy(i,j) = 0.5*((f(i+1,j+1) - f(i+1,j)) + (f(i,j+1) - f(i,j)))/dy - the average of the two north-south edge gradients bracketing vertex (i,j) (the edge east of the vertex runs between cells (i+1,j) and (i+1,j+1), the edge west between (i,j) and (i,j+1)). See cism_stag_vertex_gradient_x for the call-site context and the ESD PR candidate note.",
+   "params": [
+    "f"
+   ],
+   "priority": 10,
+   "match": {
+    "op": "cism_stag_vertex_gradient_y",
+    "args": [
+     "f"
+    ]
+   },
+   "where": {
+    "f": {
+     "shape": [
+      "i",
+      "j"
+     ]
+    }
+   },
+   "body": {
+    "op": "faq",
+    "output_idx": [
+     "i",
+     "j"
+    ],
+    "args": [
+     "f"
+    ],
+    "ranges": {
+     "i": [
+      1,
+      "NX"
+     ],
+     "j": [
+      1,
+      "NY"
+     ]
+    },
+    "expr": {
+     "op": "ifelse",
+     "args": [
+      {
+       "op": "and",
+       "args": [
+        {
+         "op": ">=",
+         "args": [
+          "i",
+          2
+         ]
+        },
+        {
+         "op": "<=",
+         "args": [
+          "i",
+          {
+           "op": "-",
+           "args": [
+            "NX",
+            2
+           ]
+          }
+         ]
+        },
+        {
+         "op": ">=",
+         "args": [
+          "j",
+          2
+         ]
+        },
+        {
+         "op": "<=",
+         "args": [
+          "j",
+          {
+           "op": "-",
+           "args": [
+            "NY",
+            2
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "op": "/",
+       "args": [
+        {
+         "op": "*",
+         "args": [
+          0.5,
+          {
+           "op": "+",
+           "args": [
+            {
+             "op": "-",
+             "args": [
+              {
+               "op": "index",
+               "args": [
+                "f",
+                {
+                 "op": "+",
+                 "args": [
+                  "i",
+                  1
+                 ]
+                },
+                {
+                 "op": "+",
+                 "args": [
+                  "j",
+                  1
+                 ]
+                }
+               ]
+              },
+              {
+               "op": "index",
+               "args": [
+                "f",
+                {
+                 "op": "+",
+                 "args": [
+                  "i",
+                  1
+                 ]
+                },
+                "j"
+               ]
+              }
+             ]
+            },
+            {
+             "op": "-",
+             "args": [
+              {
+               "op": "index",
+               "args": [
+                "f",
+                "i",
+                {
+                 "op": "+",
+                 "args": [
+                  "j",
+                  1
+                 ]
+                }
+               ]
+              },
+              {
+               "op": "index",
+               "args": [
+                "f",
+                "i",
+                "j"
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        "dy"
+       ]
+      },
+      0.0
+     ]
+    }
+   }
+  }
+ }
+}
