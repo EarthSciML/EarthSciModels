@@ -302,6 +302,11 @@ def discover_esm_files(components_root: Path) -> list[Path]:
     return sorted(p for p in components_root.rglob("*.esm") if p.is_file())
 
 
+def _is_mount_stub(body: dict) -> bool:
+    """A top-level `{ref}` mount entry (esm-spec §4.7): a `ref` and no body of its own."""
+    return "ref" in body and not any(k in body for k in ("variables", "species", "equations", "reactions"))
+
+
 def parse_esm(path: Path, repo_root: Path) -> list[ComponentEntry]:
     """Parse one .esm file and emit one ComponentEntry per top-level component."""
     with path.open("r", encoding="utf-8") as fp:
@@ -316,6 +321,10 @@ def parse_esm(path: Path, repo_root: Path) -> list[ComponentEntry]:
             continue
         for name, body in block.items():
             if not isinstance(body, dict):
+                continue
+            if _is_mount_stub(body):
+                # A §4.7 `{ref}` mount: the component is documented on the
+                # page of the file that declares it, not again here.
                 continue
             entries.append(
                 ComponentEntry(

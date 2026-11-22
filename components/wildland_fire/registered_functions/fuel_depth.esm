@@ -1,5 +1,5 @@
 {
-    "esm": "1.0.0",
+    "esm": "2.0.0",
     "metadata": {
         "name": "FuelDepth",
         "description": "Anderson (1982) 13-fuel-model fuel-bed depth lookup: maps integer fuel model code (1–13) to fuel bed depth δ in metres, converted from the upstream ft values in ANDERSON_FUEL_DATA via δ_m = depth_ft × 0.3048. Out-of-range codes (including LANDFIRE non-burnable codes 91–99) return the fuel-model-1 default 1.0 × 0.3048 = 0.3048 m. Migrated from WildlandFire.jl src/coupling.jl:125 (`@register_symbolic fuel_depth`). Resolves the gt-p3ep blocking gap via ifelse + interp.linear over the integer axis [1..13].",
@@ -26,6 +26,14 @@
     },
     "models": {
         "FuelDepth": {
+            "expression_template_imports": [
+                {
+                    "ref": "esm:std/interp.esm",
+                    "only": [
+                        "linear"
+                    ]
+                }
+            ],
             "reference": {
                 "citation": "Anderson, H.E. (1982). Aids to determining fuel models for estimating fire behavior. USDA Forest Service Gen. Tech. Rep. INT-122.",
                 "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/coupling.jl:125\n\nUpstream `fuel_depth(code)` is a @register_symbolic Julia function:\n  const _FUEL_DEPTH = Dict(k => v.depth * 0.3048 for (k, v) in ANDERSON_FUEL_DATA)\n  fuel_depth(code) = _lookup_fuel(_FUEL_DEPTH, code, 1.0 * 0.3048)\n  @register_symbolic fuel_depth(code)\n\nwhere ANDERSON_FUEL_DATA.depth values (in ft) are (from Anderson 1982 / Mandel et al. 2011 Table 1):\n  codes 1, 2:    1.0  ft → 0.3048 m\n  code  3:       2.5  ft → 0.762  m\n  code  4:       6.0  ft → 1.8288 m\n  code  5:       2.0  ft → 0.6096 m\n  codes 6, 7:    2.5  ft → 0.762  m\n  codes 8, 9:    0.2  ft → 0.06096 m\n  codes 10, 11:  1.0  ft → 0.3048 m\n  code  12:      2.3  ft → 0.70104 m\n  code  13:      3.0  ft → 0.9144  m\n\nDefault for out-of-range codes: 1.0 ft * 0.3048 = 0.3048 m (fuel model 1). This matches the upstream _lookup_fuel fallback (default argument = 1.0 * 0.3048).\n\nNon-burnable LANDFIRE codes (91, 92, 93, 98, 99) are outside [1, 13] and return 0.3048 m. In practice, fire spread is zero for non-burnable codes regardless of depth because fuel_heat returns 0 for those codes, zeroing Rothermel Reaction Intensity and Rate of Spread.\n\ngt-p3ep resolution: ESM 0.4.0 §9.5 interp.linear supports continuous-axis interpolation. For discrete integer-keyed lookup with separate default, we compose ifelse(AND(code>=1, code<=13), interp.linear(...), default). interp.linear at an exact integer grid knot returns the stored value (blend weight 0 or 1 at the endpoints). Out-of-range codes return the default 0.3048 m exactly.\n\nTolerance: observed-only algebraic model (no ODE); tolerance={rel:1e-12} — interp.linear on float64 hardware at grid knots is exact for the default branch (literal constant); 1e-12 covers the one-ULP float64 rounding without admitting any physical imprecision."
@@ -72,10 +80,11 @@
                                 ]
                             },
                             {
-                                "op": "fn",
-                                "name": "interp.linear",
-                                "args": [
-                                    {
+                                "op": "apply_expression_template",
+                                "args": [],
+                                "name": "linear",
+                                "bindings": {
+                                    "table": {
                                         "op": "const",
                                         "value": [
                                             0.3048,
@@ -94,7 +103,7 @@
                                         ],
                                         "args": []
                                     },
-                                    {
+                                    "axis": {
                                         "op": "const",
                                         "value": [
                                             1.0,
@@ -113,10 +122,11 @@
                                         ],
                                         "args": []
                                     },
-                                    "code"
-                                ]
+                                    "x": "code",
+                                    "n": 13
+                                }
                             },
-                            0.3048
+                            {"op": "const", "args": [], "value": 0.3048, "units": "m"}
                         ]
                     }
                 }
