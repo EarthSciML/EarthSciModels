@@ -2,7 +2,7 @@
  "esm": "1.1.0",
  "metadata": {
   "name": "NoahSnowCover",
-  "description": "The snow-cover diagnostics of WRF's unified Noah land-surface model: SUBROUTINE SNFRAC (the fraction of the cell the pack covers), SUBROUTINE ALCALC (the albedo and emissivity that cover implies, including the ageing of fresh snow) and SUBROUTINE CSNOW (the thermal conductivity of the pack), all of phys/module_sf_noahlsm.F (WRF 4.8, sf_surface_physics = 2). These are the algebraic quantities that turn a snow water equivalent into what the radiation and the soil actually see. SNFRAC is the Anderson/Koren depletion curve sncovr = 1 - (exp(-salp rsnow) - rsnow exp(-salp)) with rsnow = sneqv/snup, saturating at 1 once the pack exceeds the vegetation type's snup; SFLX then CAPS the result at 0.98, so a fully buried cell still reports 2 % bare ground and sncovr = 1 is unreachable in practice -- which matters, because the 0.98 value is what selects the pure-snow conductivity branch at module_sf_noahlsm.F:627. ALBEDO ageing: fresh snow starts at snoalb1 = snoalb + lvcoef (0.85 - snoalb) and decays as snoalb1 snacca^((snotime1/86400)^snaccb), floored at the snow-free albedo; snotime1 is the time since the last snowfall, an accumulator that WRF resets to zero whenever it is snowing, so this component exposes its rate dsnotime1_dt rather than owning it. The cell albedo is then the cover-weighted blend alb + sncovr (snoalb2 - alb), clipped so it can never exceed the aged snow albedo itself. Emissivity blends the background against a fixed snow value the same way. CSNOW is Yen's exponential fit sncond = 2 unit 0.328 10^(2.25 dsnow), where dsnow is the pack DENSITY in g/cm^3 and unit = 0.11631 converts Yen's units. NOT TRANSCRIBED: the whole UA_PHYS canopy-burial branch of SNFRAC (fvb, gama, fbur, fgsn, and the leaf-area reduction it applies), which is off in every reference run and is a separate parameterization; and the snow-conductivity BLEND that SFLX applies around this routine, which belongs to the snow-pack energy balance rather than to the cover diagnostics. The component is algebraic in the consumer's state and owns nothing.",
+  "description": "The snow-cover diagnostics of WRF's unified Noah land-surface model: SUBROUTINE SNFRAC (the fraction of the cell the pack covers), SUBROUTINE ALCALC (the albedo and emissivity that cover implies, including the ageing of fresh snow) and SUBROUTINE CSNOW (the thermal conductivity of the pack), all of phys/module_sf_noahlsm.F (WRF 4.8, sf_surface_physics = 2). These are the algebraic quantities that turn a snow water equivalent into what the radiation and the soil actually see. SNFRAC is the Anderson/Koren depletion curve sncovr = 1 - (exp(-salp rsnow) - rsnow exp(-salp)) with rsnow = sneqv/snup, saturating at 1 once the pack exceeds the vegetation type's snup; SFLX then CAPS the result at 0.98, so a fully buried cell still reports 2 % bare ground and sncovr = 1 is unreachable in practice -- which matters, because the 0.98 value is what selects the pure-snow conductivity branch at module_sf_noahlsm.F:627. ALBEDO ageing: fresh snow starts at snoalb1 = snoalb + lvcoef (0.85 - snoalb) and decays as snoalb1 snacca^((snotime1/86400)^snaccb), floored at the snow-free albedo; snotime1 is the time since the last snowfall, an accumulator that WRF resets to zero whenever it is snowing, so this component exposes its rate dsnotime1_dt rather than owning it. The cell albedo is then the cover-weighted blend alb + sncovr (snoalb2 - alb), clipped so it can never exceed the aged snow albedo itself. Emissivity blends the background against a fixed snow value the same way. CSNOW is Yen's exponential fit sncond = 2 unit 0.328 10^(2.25 dsnow), where dsnow is the pack DENSITY in g/cm^3 and unit = 0.11631 converts Yen's units. NOT TRANSCRIBED: the whole UA_PHYS canopy-burial branch of SNFRAC (fvb, gama, fbur, fgsn, and the leaf-area reduction it applies), which is off in every reference run and is a separate parameterization; and the snow-conductivity BLEND that SFLX applies around this routine, which belongs to the snow-pack energy balance rather than to the cover diagnostics. THE NO-PACK CUTOFF. SFLX treats any pack of sneqv <= 1e-7 m as no pack at all (module_sf_noahlsm.F:503-507): it zeroes sneqv and snowh, sets sndens = 0 and sncond = 1.0 instead of calling CSNOW, and then, finding sneqv == 0, skips SNFRAC and ALCALC and reports sncovr = 0, albedo = alb, emissi = embrd. This component applies the same cutoff to its sneqv input, so a snow-free cell gives finite, WRF-equal diagnostics rather than 0/0. One ordering detail cannot be represented by an input-state component and is stated rather than hidden: SFLX applies the cutoff to the pack ENTERING the step and only then adds the step's new snowfall, so a step that snows onto a <= 1e-7 m pack diagnoses the cover of the new snow alone; in the dt -> 0 limit this component computes, that increment vanishes and the two coincide. The component is algebraic in the consumer's state and owns nothing.",
   "license": "MIT",
   "tags": [
    "wrf",
@@ -105,7 +105,7 @@
     "sncovr": {
      "type": "unknown",
      "units": "1",
-     "description": "Snow-cover fraction as the rest of SFLX sees it: the depletion curve CAPPED AT 0.98. The cap is not in SNFRAC; SFLX applies it immediately after the call, and it is what makes a completely buried cell still report 2 % bare ground."
+     "description": "Snow-cover fraction as the rest of SFLX sees it: the depletion curve CAPPED AT 0.98, and ZERO where sneqv <= 1e-7 m. The cap is not in SNFRAC; SFLX applies it immediately after the call, and it is what makes a completely buried cell still report 2 % bare ground. The zero is SFLX's 'IF (SNEQV <= 1.E-7) SNEQV = 0' cutoff (module_sf_noahlsm.F:503) followed by its 'IF (SNEQV == 0.0) SNCOVR = 0' branch (:563), which skips SNFRAC and ALCALC altogether; with the cover zero the blends below return albedo = alb and emissi = embrd, exactly what that branch assigns."
     },
     "snoalb1": {
      "type": "unknown",
@@ -130,12 +130,12 @@
     "sndens": {
      "type": "unknown",
      "units": "g/cm^3",
-     "description": "Bulk density of the pack in the units CSNOW expects, sneqv/snowh expressed in g/cm^3 (numerically the ratio itself, since a water-equivalent depth over a physical depth times 1000 kg/m^3 is that ratio in g/cm^3)."
+     "description": "Bulk density of the pack in the units CSNOW expects, sneqv/snowh expressed in g/cm^3 (numerically the ratio itself, since a water-equivalent depth over a physical depth times 1000 kg/m^3 is that ratio in g/cm^3). ZERO where sneqv <= 1e-7 m, SFLX's own assignment (module_sf_noahlsm.F:503-507), which is also what keeps a snow-free cell (sneqv = snowh = 0) from forming 0/0."
     },
     "sncond": {
      "type": "unknown",
      "units": "W/(m*K)",
-     "description": "Thermal conductivity of the pack, Yen's 2 unit 0.328 10^(2.25 sndens)."
+     "description": "Thermal conductivity of the pack, Yen's 2 unit 0.328 10^(2.25 sndens); 1.0 W/(m K) where sneqv <= 1e-7 m, the value SFLX assigns in place of calling CSNOW (module_sf_noahlsm.F:506)."
     },
     "dsnotime1_dt": {
      "type": "unknown",
@@ -226,10 +226,23 @@
     {
      "lhs": "sncovr",
      "rhs": {
-      "op": "min",
+      "op": "ifelse",
       "args": [
-       "sncovr_raw",
-       0.98
+       {
+        "op": "<=",
+        "args": [
+         "sneqv",
+         1e-07
+        ]
+       },
+       0.0,
+       {
+        "op": "min",
+        "args": [
+         "sncovr_raw",
+         0.98
+        ]
+       }
       ]
      }
     },
@@ -355,44 +368,70 @@
     {
      "lhs": "sndens",
      "rhs": {
-      "op": "/",
+      "op": "ifelse",
       "args": [
        {
-        "op": "*",
+        "op": "<=",
         "args": [
          "sneqv",
-         "par.rho_water_cgs"
+         1e-07
         ]
        },
-       "snowh"
+       0.0,
+       {
+        "op": "/",
+        "args": [
+         {
+          "op": "*",
+          "args": [
+           "sneqv",
+           "par.rho_water_cgs"
+          ]
+         },
+         "snowh"
+        ]
+       }
       ]
      }
     },
     {
      "lhs": "sncond",
      "rhs": {
-      "op": "*",
+      "op": "ifelse",
       "args": [
        {
-        "op": "*",
+        "op": "<=",
         "args": [
-         2.0,
-         0.11631
+         "sneqv",
+         1e-07
         ]
        },
+       1.0,
        {
         "op": "*",
         "args": [
-         0.328,
          {
-          "op": "^",
+          "op": "*",
           "args": [
-           10.0,
+           2.0,
+           0.11631
+          ]
+         },
+         {
+          "op": "*",
+          "args": [
+           0.328,
            {
-            "op": "*",
+            "op": "^",
             "args": [
-             2.25,
-             "sndens"
+             10.0,
+             {
+              "op": "*",
+              "args": [
+               2.25,
+               "sndens"
+              ]
+             }
             ]
            }
           ]
@@ -3901,6 +3940,132 @@
            "expected": 0.22348673836685715,
            "tolerance": {
              "rel": 1e-06
+           }
+         }
+       ]
+     },
+     {
+       "id": "nopack_zero",
+       "description": "Reference: the dumped SFLX arguments of cold-season case A step 101 (data/eqwefic/dumps/noahcold_wrf/caseA/esm_dump_noah_101.json) with sneqv = 0 m, snowh = 0 m and prcp = 0, replayed through the real64 kernels/noah_driver at ESM_DT = 1e-6 s (data/eqwefic/noah_pr58_fixes/r64_snow_zero.json, written by run_scenario.py there). A snow-free cell. SFLX's 'IF (SNEQV <= 1.E-7)' block (module_sf_noahlsm.F:503-507) zeroes the pack and assigns SNDENS = 0 and SNCOND = 1.0, then its 'IF (SNEQV == 0.0)' branch reports SNCOVR = 0, ALBEDO = ALB and EMISSI = EMBRD without calling SNFRAC or ALCALC: the replay returns sncovr = 0, sneqv_out = snowh_out = 0, and the albedo and emissivity asserted below. sndens and sncond are not published on this path (SNOPAC never runs), so those two expected values are SFLX's literal assignments. Before the cutoff was transcribed this state gave sndens = sncond = NaN.",
+       "parameter_overrides": {
+         "sneqv": 0.0,
+         "snowh": 0.0,
+         "snup": 0.03999999910593033,
+         "alb": 0.17000000178813934,
+         "snoalb": 0.0,
+         "embrd": 0.9850000143051147,
+         "snotime1": 0.0,
+         "snowing": 0.0
+       },
+       "time_span": {
+         "start": 0.0,
+         "end": 1.0
+       },
+       "assertions": [
+         {
+           "variable": "sncovr",
+           "time": 0.0,
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "albedo",
+           "time": 0.0,
+           "expected": 0.17000000178813934,
+           "tolerance": {
+             "rel": 1e-12
+           }
+         },
+         {
+           "variable": "emissi",
+           "time": 0.0,
+           "expected": 0.9850000143051147,
+           "tolerance": {
+             "rel": 1e-12
+           }
+         },
+         {
+           "variable": "sndens",
+           "time": 0.0,
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "sncond",
+           "time": 0.0,
+           "expected": 1.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         }
+       ]
+     },
+     {
+       "id": "nopack_below_cutoff",
+       "description": "Reference: the dumped SFLX arguments of cold-season case A step 101 (data/eqwefic/dumps/noahcold_wrf/caseA/esm_dump_noah_101.json) with sneqv = 5e-08 m, snowh = 5e-07 m and prcp = 0, replayed through the real64 kernels/noah_driver at ESM_DT = 1e-6 s (data/eqwefic/noah_pr58_fixes/r64_snow_tiny.json, written by run_scenario.py there). A pack BELOW the 1e-7 m cutoff, which the depletion curve alone would give a cover of ~3e-6. SFLX's 'IF (SNEQV <= 1.E-7)' block (module_sf_noahlsm.F:503-507) zeroes the pack and assigns SNDENS = 0 and SNCOND = 1.0, then its 'IF (SNEQV == 0.0)' branch reports SNCOVR = 0, ALBEDO = ALB and EMISSI = EMBRD without calling SNFRAC or ALCALC: the replay returns sncovr = 0, sneqv_out = snowh_out = 0, and the albedo and emissivity asserted below. sndens and sncond are not published on this path (SNOPAC never runs), so those two expected values are SFLX's literal assignments. Before the cutoff was transcribed this state gave sndens = sncond = NaN.",
+       "parameter_overrides": {
+         "sneqv": 5e-08,
+         "snowh": 5e-07,
+         "snup": 0.03999999910593033,
+         "alb": 0.17000000178813934,
+         "snoalb": 0.0,
+         "embrd": 0.9850000143051147,
+         "snotime1": 0.0,
+         "snowing": 0.0
+       },
+       "time_span": {
+         "start": 0.0,
+         "end": 1.0
+       },
+       "assertions": [
+         {
+           "variable": "sncovr",
+           "time": 0.0,
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "albedo",
+           "time": 0.0,
+           "expected": 0.17000000178813934,
+           "tolerance": {
+             "rel": 1e-12
+           }
+         },
+         {
+           "variable": "emissi",
+           "time": 0.0,
+           "expected": 0.9850000143051147,
+           "tolerance": {
+             "rel": 1e-12
+           }
+         },
+         {
+           "variable": "sndens",
+           "time": 0.0,
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "sncond",
+           "time": 0.0,
+           "expected": 1.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
            }
          }
        ]
