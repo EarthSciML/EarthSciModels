@@ -95,6 +95,15 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/EarthSciML/earthscidiscretizations.git /tmp/esd
           echo "ESD_ROOT=/tmp/esd" >> "$GITHUB_ENV"
+      # Synthetic data for the documents whose tests read data files. CI never
+      # downloads data: a test that reads a `data_sources` entry reads small
+      # files a generator writes here, git-ignored and closed-form, so the
+      # expected values are known (components/data_models/cdeps/README.md,
+      # "Synthetic data").
+      - name: Generate synthetic test data
+        run: |
+          python -m pip install numpy scipy
+          python tools/gen_synthetic_gswp3.py
       # The gate's own unit tests, first: they pin the one thing the gate can
       # get wrong on its own — reading a worker that DIED as a file with no
       # inline tests, which is how it once reported a vacuous run as green.
@@ -277,6 +286,19 @@ jobs:
           git clone --depth=1 https://github.com/EarthSciML/earthscidiscretizations.git /tmp/esd
           echo "ESD_ROOT=/tmp/esd" >> "$GITHUB_ENV"
 
+      # Synthetic data for the documents whose tests read data files. CI never
+      # downloads data: a test that reads a `data_sources` entry reads small
+      # files a generator writes here, git-ignored and closed-form, so the
+      # expected values are known (components/data_models/cdeps/README.md,
+      # "Synthetic data").
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Generate synthetic test data
+        run: |
+          python -m pip install numpy scipy
+          python tools/gen_synthetic_gswp3.py
+
       # The walk runs INSIDE `Pkg.test()` rather than as a second
       # `julia --project=.` call, because ModelingToolkit / Catalyst /
       # OrdinaryDiffEq are test-target deps and are not visible outside the test
@@ -348,9 +370,18 @@ jobs:
       # the workspace's `earthsci-ast-cli` member (`cli/`), not the root
       # library package, so it has to be named with `-p`; a bare `--bin esm`
       # finds no such target in the default-run package.
+      #
+      # `--features esio` links the data readers (netcdf, zarr, parquet), as
+      # the release binaries do; nothing to install (the readers are Rust, the
+      # compression codecs build from bundled sources). Without it the
+      # CLI refuses every document that declares `data_sources` with a
+      # "cannot ingest" ERROR row, test or no test; with it a document whose
+      # parameters are data-fed but that carries no inline test reads nothing
+      # (no download), and a test that reads data reads the synthetic files
+      # generated below.
       - name: Build the canonical `esm` CLI
         run: |
-          cargo build --release --locked -p earthsci-ast-cli --bin esm \
+          cargo build --release --locked -p earthsci-ast-cli --bin esm --features esio \
             --manifest-path "$ESS_RS/Cargo.toml"
           "$ESS_RS/target/release/esm" --version
 
@@ -363,6 +394,19 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/EarthSciML/earthscidiscretizations.git /tmp/esd
           echo "ESD_ROOT=/tmp/esd" >> "$GITHUB_ENV"
+
+      # Synthetic data for the documents whose tests read data files. CI never
+      # downloads data: a test that reads a `data_sources` entry reads small
+      # files a generator writes here, git-ignored and closed-form, so the
+      # expected values are known (components/data_models/cdeps/README.md,
+      # "Synthetic data").
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Generate synthetic test data
+        run: |
+          python -m pip install numpy scipy
+          python tools/gen_synthetic_gswp3.py
 
       - name: Rust inline-test sweep
         run: |
