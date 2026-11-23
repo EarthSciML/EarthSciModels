@@ -2,7 +2,7 @@
   "esm": "2.0.0",
   "metadata": {
     "name": "MadronichSolarGeometry",
-    "description": "Solar geometry of WRF-Chem's Madronich photolysis scheme (phot_opt = 1): SUBROUTINE calc_zenith (chem/module_phot_mad.F:2653-2759 of WRF v4.8.0) and the zenith post-processing of madronich1_driver (:1494-1499), which turns the zenith angle into the effective cosine `zenita` that photolysis_mad takes as its argument `a`.\n\nThis scheme has its OWN ephemeris and it is not the one the radiation schemes use. components/atmospheric_radiation/wrf_solar/wrf_solar_geometry.esm codes radconst + calc_coszen (single-sine declination, 23.5 deg obliquity, day 80 as the equinox); calc_zenith instead evaluates a seven-term Fourier equation of time with time-dependent perigee, eccentricity and obliquity polynomials, and takes its declination as atan(0.4336 sin(ra)). Neither is reusable for the other, and EarthSciModels' lib/solar.esm (Spencer / NOAA) is a third formula again. The two WRF ephemerides disagree by about 0.05 deg of zenith at the reference column, which is 3000 times the 1e-5 relative tolerance of these tests.\n\nTwo details carry most of the difference from a naive cos(sza) implementation and both are tested here. First, madronich1_driver calls calc_zenith with -xlong, so the ephemeris runs on WEST longitude. Second, and more important, `zenita` is NOT cos(zenith) beyond 75 degrees: it is 1/chap(zenith), the reciprocal Chapman function, interpolated linearly from a 22-point table on whole degrees. At the reference column's sunset that is a 4 to 40 percent difference from the cosine and it grows without bound toward 90 degrees -- at zenith 87.6 the cosine is 0.0419 while zenita is 0.0585, 40 percent larger. Nine of the thirteen test regimes here sit in that branch on purpose.\n\nThis component is algebraic and owns no state: julday, gmtp, xlat and xlong are parameters a consumer advances with the clock."
+    "description": "Solar geometry of WRF-Chem's Madronich photolysis scheme (phot_opt = 1): SUBROUTINE calc_zenith (chem/module_phot_mad.F:2653-2759 of WRF v4.8.0) and the zenith post-processing of madronich1_driver (:1494-1499), which turns the zenith angle into the effective cosine `zenita` that photolysis_mad takes as its argument `a`.\n\nThis scheme has its OWN ephemeris and it is not the one the radiation schemes use. components/atmospheric_radiation/wrf_solar/wrf_solar_geometry.esm codes radconst + calc_coszen (single-sine declination, 23.5 deg obliquity, day 80 as the equinox); calc_zenith instead evaluates a seven-term Fourier equation of time with time-dependent perigee, eccentricity and obliquity polynomials, and takes its declination as atan(0.4336 sin(ra)). Neither is reusable for the other, and EarthSciModels' lib/solar.esm (Spencer / NOAA) is a third formula again. The two WRF ephemerides disagree by about 0.05 deg of zenith at the reference column, which is 3000 times the 1e-5 relative tolerance of these tests.\n\nTwo details carry most of the difference from a naive cos(sza) implementation and both are tested here. First, madronich1_driver calls calc_zenith with -xlong, so the ephemeris runs on WEST longitude. Second, in daylight above 75 degrees, `zenita` is 1/chap(zenith), the reciprocal of the Chapman function interpolated linearly from a 22-point table on whole degrees. At zenith 87.6 degrees the cosine is 0.0419, while zenita is 0.0585, 40 percent larger. Nine of the thirteen daytime tests exercise that branch. At night WRF skips radiative transfer and leaves `zenita` at zero.\n\nThis component is algebraic and owns no state: julday, gmtp, xlat and xlong are parameters a consumer advances with the clock."
   },
   "models": {
     "MadronichSolarGeometry": {
@@ -252,7 +252,7 @@
         "zenita": {
           "type": "unknown",
           "units": "1",
-          "description": "The effective cosine of the solar zenith angle that madronich1_driver hands photolysis_mad as its argument `a`: cos(zenith) below 75 degrees, and the RECIPROCAL CHAPMAN FUNCTION 1/chap(zenith) above it. This is the scheme's slant-path measure, not a geometric cosine, and it is where a plain cos_sza implementation first goes wrong."
+          "description": "The effective cosine of the solar zenith angle that madronich1_driver hands photolysis_mad as its argument `a`. In daylight it uses cos(zenith) through 75 degrees and the reciprocal Chapman function 1/chap(zenith) above 75 degrees. At night it remains zero."
         }
       },
       "equations": [
@@ -1177,31 +1177,44 @@
             "op": "ifelse",
             "args": [
               {
-                "op": ">",
+                "op": "==",
                 "args": [
-                  "zenith_effective",
-                  "par.chap_threshold"
+                  "is_daylight",
+                  1
                 ]
               },
               {
-                "op": "/",
-                "args": [
-                  1,
-                  "chapman"
-                ]
-              },
-              {
-                "op": "cos",
+                "op": "ifelse",
                 "args": [
                   {
-                    "op": "*",
+                    "op": ">",
                     "args": [
                       "zenith_effective",
-                      "par.degrad_driver"
+                      "par.chap_threshold"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1,
+                      "chapman"
+                    ]
+                  },
+                  {
+                    "op": "cos",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          "zenith_effective",
+                          "par.degrad_driver"
+                        ]
+                      }
                     ]
                   }
                 ]
-              }
+              },
+              0
             ]
           }
         }
@@ -1864,6 +1877,38 @@
               "variable": "is_daylight",
               "time": 0.0,
               "expected": 1.0,
+              "tolerance": {
+                "abs": 0.0
+              }
+            }
+          ]
+        },
+        {
+          "id": "photmad_nighttime",
+          "description": "Regression for the madronich1_driver nighttime branch at the SCM reference column on day 294 at 07:00 UTC. WRF exits before computing an effective cosine and leaves zenita at its initialized zero.",
+          "parameter_overrides": {
+            "julday": 294.0,
+            "gmtp": 7.0,
+            "xlat": 37.599998474121094,
+            "xlong": -96.69999694824219
+          },
+          "time_span": {
+            "start": 0,
+            "end": 1
+          },
+          "assertions": [
+            {
+              "variable": "is_daylight",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "abs": 0.0
+              }
+            },
+            {
+              "variable": "zenita",
+              "time": 0.0,
+              "expected": 0.0,
               "tolerance": {
                 "abs": 0.0
               }
