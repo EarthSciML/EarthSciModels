@@ -41,8 +41,7 @@ Concrete things this rule forbids in this repo:
   the same question is the shadow-logic form of this anti-pattern: it drifts
   from the spec and from the other four bindings.
 
-If the official runner is missing a feature you need, file a bead against
-EarthSciAST or the relevant toolkit — do not work around it locally.
+If the official runner is missing a feature you need, flag the problem to the user — do not work around it locally.
 
 ## 2. ESM contract
 
