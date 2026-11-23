@@ -109,7 +109,7 @@
      "shape": [
       "wlev"
      ],
-     "description": "Height of mass level k above ground: (zw_k + zw_{k+1})/2 - zw_1 for k < NZW (the last entry repeats level NZW-1 and is never selected)."
+     "description": "Height of mass level k above ground: (zw_k + zw_{k+1})/2 - zw_1 for k < NZW; the last entry k = NZW, where the index k + 1 is clamped to NZW, is zw_NZW - zw_1 (the height of the top w-level, not a mass level). Only k <= kdmax = NZW - 2 is ever searched, which is all WRF computes (Interp_profile fills hgt(kfds:kdmax) of an array dimensioned kfds:kfde - 1 and leaves hgt(kfde - 1) unset); entries NZW - 1 and NZW are never selected."
     },
     "h_loc": {
      "type": "unknown",
@@ -172,12 +172,12 @@
     "w_first": {
      "type": "unknown",
      "units": "1",
-     "description": "Log-law weight of the first-layer branch, ln(h_loc/z0)/ln(hgt_1/z0) evaluated at kstar = 1 (1 when kstar > 1 to keep it finite)."
+     "description": "Log-law weight of the first-layer branch, ln(h_loc/z0)/ln(hgt_1/z0) evaluated at kstar = 1 (1 when kstar > 1). The denominator is replaced by 1 where hgt_hi <= z0, so the expression stays finite in the cases where this branch is not selected (kstar > 1, or h_loc <= z0 where u_interp is 0); whenever the branch is selected hgt_hi >= h_loc > z0, so the selected value is unchanged."
     },
     "w_interior": {
      "type": "unknown",
      "units": "1",
-     "description": "Log-linear interpolation weight ln(h_loc/hgt_lo)/ln(hgt_hi/hgt_lo) of the interior branch (0 when kstar = 1 to keep it finite)."
+     "description": "Log-linear interpolation weight ln(h_loc/hgt_lo)/ln(hgt_hi/hgt_lo) of the interior branch, as Interp_profile (loglast = log(hgt(k - 1))) -- 0 when the branch is not selected (kstar = 1 or kstar > kdmax). hgt_lo is replaced by 1 where it is 0 and the denominator by 1 unless hgt_hi > hgt_lo > 0, so the expression stays finite when not selected; whenever it is selected hgt_hi >= h_loc > hgt_lo > 0, so the selected value is unchanged."
     },
     "u_interp": {
      "type": "unknown",
@@ -773,21 +773,28 @@
           ]
          },
          {
-          "op": "log",
+          "op": "ifelse",
           "args": [
            {
-            "op": "/",
+            "op": ">",
+            "args": [
+             "hgt_hi",
+             "z0"
+            ]
+           },
+           {
+            "op": "log",
             "args": [
              {
-              "op": "max",
+              "op": "/",
               "args": [
                "hgt_hi",
                "z0"
               ]
-             },
-             "z0"
+             }
             ]
-           }
+           },
+           1.0
           ]
          }
         ]
@@ -831,10 +838,17 @@
             "args": [
              "h_loc",
              {
-              "op": "max",
+              "op": "ifelse",
               "args": [
+               {
+                "op": ">",
+                "args": [
+                 "hgt_lo",
+                 0.0
+                ]
+               },
                "hgt_lo",
-               "z0"
+               1.0
               ]
              }
             ]
@@ -842,27 +856,40 @@
           ]
          },
          {
-          "op": "log",
+          "op": "ifelse",
           "args": [
            {
-            "op": "/",
+            "op": "and",
             "args": [
              {
-              "op": "max",
+              "op": ">",
               "args": [
-               "hgt_hi",
-               "z0"
+               "hgt_lo",
+               0.0
               ]
              },
              {
-              "op": "max",
+              "op": ">",
               "args": [
-               "hgt_lo",
-               "z0"
+               "hgt_hi",
+               "hgt_lo"
               ]
              }
             ]
-           }
+           },
+           {
+            "op": "log",
+            "args": [
+             {
+              "op": "/",
+              "args": [
+               "hgt_hi",
+               "hgt_lo"
+              ]
+             }
+            ]
+           },
+           1.0
           ]
          }
         ]
