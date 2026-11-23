@@ -2,7 +2,7 @@
  "esm": "1.1.0",
  "metadata": {
   "name": "WRFPerturbationCoriolis",
-  "description": "WRF-ARW's perturbation Coriolis force (pert_coriolis = .true.), SUBROUTINE perturbation_coriolis of dyn_em/module_big_step_utilities_em.F:3854-4171, written as instantaneous decoupled tendencies of a single column on the EarthSciDiscretizations column_nonuniform_1d grid. The horizontal Coriolis terms act on the wind MINUS the base-state (initial-sounding) wind interpolated to the current layer height, so a base wind (u_b, v_b) is in geostrophic balance with an implied large-scale pressure gradient that the column never computes: du/dt = f (v - v_b) - e cos(alpha) w, dv/dt = -f (u - u_b) + e sin(alpha) w, and at the interior interfaces dw/dt = e (cos(alpha) u' - sin(alpha) v') with u' = u - u_b, v' = v - v_b carried onto the interface. In the em_scm_xy reference column (u_b, v_b) = (3, -9) m/s at every level, the geostrophic wind of the case; plain Coriolis on the total wind (pert_coriolis = .false.) gives a different trajectory. f = 2 Omega sin(lat) and e = 2 Omega cos(lat) are consumer-supplied, as are sin/cos of the grid rotation alpha. Discretization as in WRF for a horizontally uniform column: w enters the u and v equations as the arithmetic mean of the two bounding interfaces (0.25 times the four neighbouring rw), u' and v' enter the w equation through the linear-interpolation weights w_above/w_below (WRF fnm/fnp, eta-based; consumer-supplied geometry) and only on the interior interfaces 2..NLEV (kts+1..ktf) -- the surface and top interfaces get no Coriolis term. The base wind is interpolated between the base heights z_base with the clamping of WRF's three-point weights (min(1, max(0, ...))), which is interp.linear's clamping, written with lib/table_interp.esm (the bracket zc_bracket once, then interp_linear_bracketed for each wind component) because the base profile is a run-time table (esm-spec section 9.2 admits only literal const tables in the closed function). Decoupling: in the idealized Cartesian column every map factor is 1 and the hybrid coefficients are c1 = 1, c2 = 0 (hybrid_opt = 0), so the coupling masses of the u, v and w points are all the column dry mass and cancel; the general map-projection / hybrid form is NOT transcribed. Consumer-supplied column fields are rewrite-target ops input_<name>.",
+  "description": "WRF-ARW's perturbation Coriolis force (pert_coriolis = .true.), SUBROUTINE perturbation_coriolis of dyn_em/module_big_step_utilities_em.F:3854-4171, written as instantaneous decoupled tendencies of a single column on the EarthSciDiscretizations column_nonuniform_1d grid. The horizontal Coriolis terms act on the wind MINUS the base-state (initial-sounding) wind interpolated to the current layer height, so a base wind (u_b, v_b) is in geostrophic balance with an implied large-scale pressure gradient that the column never computes: du/dt = f (v - v_b) - e cos(alpha) w, dv/dt = -f (u - u_b) + e sin(alpha) w, and at the interior interfaces dw/dt = e (cos(alpha) u' - sin(alpha) v') with u' = u - u_b, v' = v - v_b carried onto the interface. In the em_scm_xy reference column (u_b, v_b) = (3, -9) m/s at every level, the geostrophic wind of the case; plain Coriolis on the total wind (pert_coriolis = .false.) gives a different trajectory. f = 2 Omega sin(lat) and e = 2 Omega cos(lat) are consumer-supplied, as are sin/cos of the grid rotation alpha. Discretization as in WRF for a horizontally uniform column: w enters the u and v equations as the arithmetic mean of the two bounding interfaces (0.25 times the four neighbouring rw), u' and v' enter the w equation through the linear-interpolation weights w_above/w_below (WRF fnm/fnp, eta-based; consumer-supplied geometry) and only on the interior interfaces 2..NLEV (kts+1..ktf) -- the surface and top interfaces get no Coriolis term. At each layer k, WRF interpolates the base wind between z_base[k] and the immediate base level in the direction of the displacement. With increasing base heights, at most one of WRF's two adjacent-level weights is nonzero. A displacement past the selected neighbor saturates at that neighbor's wind. At either boundary layer, an outward displacement leaves its base wind unchanged. Decoupling: in the idealized Cartesian column every map factor is 1 and the hybrid coefficients are c1 = 1, c2 = 0 (hybrid_opt = 0), so the coupling masses of the u, v and w points are all the column dry mass and cancel; the general map-projection / hybrid form is NOT transcribed. Consumer-supplied column fields are rewrite-target ops input_<name>.",
   "license": "MIT",
   "tags": ["wrf", "dynamics", "coriolis", "geostrophic", "column"],
   "references": [
@@ -11,10 +11,20 @@
   ]
  },
  "metaparameters": {
-  "NLEV": {"type": "integer", "default": 59, "description": "Number of model layers (WRF kde - 1). Bound into the column grid at the import edge; 59 is the em_scm_xy reference column."}
+  "NLEV": {"type": "integer", "default": 59, "description": "Number of model layers (WRF kde - 1, at least two for adjacent-level interpolation). Bound into the column grid at the import edge; 59 is the em_scm_xy reference column."}
  },
  "models": {
   "WRFPerturbationCoriolis": {
+   "expression_templates": {
+    "coriolis_base_wind": {
+     "params": ["wind", "i_lo", "weight"],
+     "description": "Blend the base wind at the selected pair of levels with the upper-level weight.",
+     "body": {"op": "+", "args": [
+      {"op": "*", "args": [{"op": "-", "args": [1, "weight"]}, {"op": "index", "args": ["wind", "i_lo"]}]},
+      {"op": "*", "args": ["weight", {"op": "index", "args": ["wind", {"op": "+", "args": ["i_lo", 1]}]}]}
+     ]}
+    }
+   },
    "expression_template_imports": [
     {"ref": "${ESD_ROOT}/grids/column_nonuniform_1d/grid.esm", "bindings": {"NLEV": "NLEV"}},
     {"ref": "./column_staggering.esm"},
@@ -37,11 +47,12 @@
     "w": {"type": "unknown", "units": "m/s", "shape": ["lev_nodes"], "description": "Vertical velocity on the interfaces, through `input_w`."},
     "u_base": {"type": "unknown", "units": "m/s", "shape": ["lev"], "description": "Base-state zonal wind on the base heights (WRF u_base), through `input_u_base`."},
     "v_base": {"type": "unknown", "units": "m/s", "shape": ["lev"], "description": "Base-state meridional wind (WRF v_base), through `input_v_base`."},
-    "z_base": {"type": "unknown", "units": "m", "shape": ["lev"], "description": "Base-state layer heights (WRF z_base), through `input_z_base`."},
+    "z_base": {"type": "unknown", "units": "m", "shape": ["lev"], "description": "Strictly increasing base-state layer heights (WRF z_base), through `input_z_base`."},
     "w_above": {"type": "unknown", "units": "1", "shape": ["lev_nodes"], "description": "Interpolation weight of the layer above each interior interface (WRF fnm), through `input_w_above`."},
     "w_below": {"type": "unknown", "units": "1", "shape": ["lev_nodes"], "description": "Interpolation weight of the layer below each interior interface (WRF fnp), through `input_w_below`."},
     "zc": {"type": "unknown", "units": "m", "shape": ["lev"], "description": "Current layer-centre heights."},
-    "zc_bracket": {"type": "unknown", "units": "1", "shape": ["lev"], "description": "Lower bracketing index of each current layer height on the base heights (the number of base heights at or below it, held to [1, NLEV-1]); shared by the u and v lookups."},
+    "zc_bracket": {"type": "unknown", "units": "1", "shape": ["lev"], "description": "Lower index of the base-level pair for layer k: k-1 for downward displacement, k for upward displacement, held to [1, NLEV-1]."},
+    "zc_weight": {"type": "unknown", "units": "1", "shape": ["lev"], "description": "Weight of the upper base level within the selected adjacent pair, held to [0, 1]."},
     "u_b": {"type": "unknown", "units": "m/s", "shape": ["lev"], "description": "Base-state zonal wind at the current layer heights."},
     "v_b": {"type": "unknown", "units": "m/s", "shape": ["lev"], "description": "Base-state meridional wind at the current layer heights."},
     "u_p": {"type": "unknown", "units": "m/s", "shape": ["lev"], "description": "Perturbation zonal wind u - u_b."},
@@ -65,11 +76,27 @@
     {"lhs": "w_below", "rhs": {"op": "input_w_below", "args": []}},
     {"lhs": "zc", "rhs": {"op": "apply_expression_template", "args": [], "name": "column_cell_center", "bindings": {"ze": "ze"}}},
     {"lhs": "zc_bracket", "rhs": {"op": "faq", "output_idx": ["k"], "args": [], "ranges": {"k": {"from": "lev"}},
-      "expr": {"op": "apply_expression_template", "args": [], "name": "bracket_index", "bindings": {"axis": "z_base", "x": {"op": "index", "args": ["zc", "k"]}, "n": "NLEV"}}}},
+      "expr": {"op": "min", "args": [
+        {"op": "max", "args": [1, {"op": "ifelse", "args": [
+          {"op": "<", "args": [{"op": "index", "args": ["zc", "k"]}, {"op": "index", "args": ["z_base", "k"]}]},
+          {"op": "-", "args": ["k", 1]}, "k"
+        ]}]},
+        {"op": "-", "args": ["NLEV", 1]}
+      ]}}},
+    {"lhs": "zc_weight", "rhs": {"op": "faq", "output_idx": ["k"], "args": [], "ranges": {"k": {"from": "lev"}},
+      "expr": {"op": "min", "args": [1, {"op": "max", "args": [0,
+        {"op": "apply_expression_template", "args": [], "name": "bracket_weight", "bindings": {
+          "axis": "z_base", "x": {"op": "index", "args": ["zc", "k"]}, "i_lo": {"op": "index", "args": ["zc_bracket", "k"]}
+        }}
+      ]}]}}},
     {"lhs": "u_b", "rhs": {"op": "faq", "output_idx": ["k"], "args": [], "ranges": {"k": {"from": "lev"}},
-      "expr": {"op": "apply_expression_template", "args": [], "name": "interp_linear_bracketed", "bindings": {"table": "u_base", "axis": "z_base", "x": {"op": "index", "args": ["zc", "k"]}, "i_lo": {"op": "index", "args": ["zc_bracket", "k"]}, "n": "NLEV"}}}},
+      "expr": {"op": "apply_expression_template", "args": [], "name": "coriolis_base_wind", "bindings": {
+        "wind": "u_base", "i_lo": {"op": "index", "args": ["zc_bracket", "k"]}, "weight": {"op": "index", "args": ["zc_weight", "k"]}
+      }}}},
     {"lhs": "v_b", "rhs": {"op": "faq", "output_idx": ["k"], "args": [], "ranges": {"k": {"from": "lev"}},
-      "expr": {"op": "apply_expression_template", "args": [], "name": "interp_linear_bracketed", "bindings": {"table": "v_base", "axis": "z_base", "x": {"op": "index", "args": ["zc", "k"]}, "i_lo": {"op": "index", "args": ["zc_bracket", "k"]}, "n": "NLEV"}}}},
+      "expr": {"op": "apply_expression_template", "args": [], "name": "coriolis_base_wind", "bindings": {
+        "wind": "v_base", "i_lo": {"op": "index", "args": ["zc_bracket", "k"]}, "weight": {"op": "index", "args": ["zc_weight", "k"]}
+      }}}},
     {"lhs": "u_p", "rhs": {"op": "-", "args": ["u", "u_b"]}},
     {"lhs": "v_p", "rhs": {"op": "-", "args": ["v", "v_b"]}},
     {"lhs": "w_c", "rhs": {"op": "apply_expression_template", "args": [], "name": "column_cell_center", "bindings": {"ze": "w"}}},
@@ -80,6 +107,26 @@
     {"lhs": "dw_dt", "rhs": {"op": "*", "args": ["e", {"op": "-", "args": [{"op": "*", "args": ["cosa", "u_p_w"]}, {"op": "*", "args": ["sina", "v_p_w"]}]}]}}
    ],
    "tests": [
+     {
+       "id": "coriolis_adjacent_base_wind",
+       "description": "Synthetic column with base heights z_base[k] = 100 k and current centers zc[k] = 260 + 90 k. Layers 5 and 45 cross beyond their immediate neighbors, so the base wind saturates at base levels 6 and 44. Layers 25 and 27 interpolate upward and downward within their adjacent pairs. Both boundary layers use only their available adjacent level.",
+       "parameter_overrides": {"f": 0.0001, "e": 0.0002, "sina": 0.0, "cosa": 1.0},
+       "expression_template_imports": [{"ref": "./tests/coriolis_adjacent_base_wind_inputs.esm"}],
+       "time_span": {"start": 0, "end": 1},
+       "tolerance": {"abs": 1e-12},
+       "assertions": [
+         {"variable": "u_b", "time": 0, "coords": {"lev": 1}, "expected": 4.0},
+         {"variable": "du_dt", "time": 0, "coords": {"lev": 5}, "expected": 0.0006},
+         {"variable": "dv_dt", "time": 0, "coords": {"lev": 5}, "expected": 0.0012},
+         {"variable": "dw_dt", "time": 0, "coords": {"lev_nodes": 5}, "expected": -0.0022},
+         {"variable": "u_b", "time": 0, "coords": {"lev": 25}, "expected": 50.2},
+         {"variable": "u_b", "time": 0, "coords": {"lev": 27}, "expected": 53.8},
+         {"variable": "du_dt", "time": 0, "coords": {"lev": 45}, "expected": 0.0044},
+         {"variable": "dv_dt", "time": 0, "coords": {"lev": 45}, "expected": 0.0088},
+         {"variable": "dw_dt", "time": 0, "coords": {"lev_nodes": 45}, "expected": -0.0174},
+         {"variable": "u_b", "time": 0, "coords": {"lev": 59}, "expected": 116.0}
+       ]
+     },
      {
        "id": "coriolis_step60",
        "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU gfortran 13.3 REAL*4 build, dt = 60 s, damp_opt = 2 dampcoef = 0.003 zdamp = 5000 m, pert_coriolis = .true., use_theta_m = 1, hybrid_opt = 0; data/eqwefic/scm_dyn, the scm_ref namelist re-run with the instrumented binary) dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented, commit 83347b2 (dyn_em/module_em.F rk_tendency, rk_step 1 of the step; module_esm_dump), merged with the same step's radiation subassembly dump and the wrfout eta grid by tools/merge_dumps.py into data/eqwefic/dumps/dyn_column/esm_dump_dyn_suite_<step>.json. The rebuilt binary reproduces the archived scm_ref radiation subassembly dumps bit for bit (all but the three B9 variables). The column is horizontally uniform (u, v identical in the two tile columns, ww = 0, all map factors 1, c1 = 1, c2 = 0). Expected tendencies are the dumped mass-coupled increments of the named routine divided by the coupling mass of their grid point (muu, muv, mut), i.e. the instantaneous decoupled rate at the time-level-n state; references are single precision, so tolerances follow the rel 1e-5 real32 convention, with absolute Linf bounds on whole profiles where values pass through zero. Routine: perturbation_coriolis (dyn_em/module_big_step_utilities_em.F:3854-4171). u_base = 3, v_base = -9 m/s at every level (the geostrophic wind of the case). The eta interpolation weights w_above/w_below are the dumped fnm/fnp. Measured residual over the three regimes (zero tolerance): Linf <= 1.2e-10 m/s^2 in du_dt (values <= 5.3e-4), <= 2.5e-11 in dv_dt (<= 2.1e-4), <= 3.1e-11 in dw_dt (<= 2.6e-4). Regime: step 60 (t = 1 h, early afternoon, convective boundary layer).",
