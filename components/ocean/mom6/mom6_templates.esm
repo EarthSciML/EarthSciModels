@@ -780,7 +780,7 @@
    }
   },
   "interface_entrainment": {
-   "description": "MOM6 interface entrainment of the implicit vertical tracer diffusion (MOM_diabatic_driver.F90:1728-1739: ent = dt * Kd / (dz_neglect + 0.5*(dz(k-1)+dz(k))), with ent = 0 on the two boundary faces). On the esd column (lev 1 = bottom, lev_nodes 1 = bottom face) the law is ent[nlev] = dt*Kd[nlev]/dz_int for 1 < nlev < nlev_max and 0 on the faces. The interface spacing is taken as 0.5*(ze[nlev+1]-ze[nlev-1]) rather than zc[nlev]-zc[nlev-1]: the cell-center form 0.5*(ze[nlev]+ze[nlev+1]) rounds at the column-depth magnitude of ze (~1e-13 m at 743 m depth) and spoils the deep ~1e-3 m spacings by ~1e-10 relative, while the ze-difference is an exact subtraction that reproduces the dumped ent to ~4e-16. 'zero' is a units-free scalar for the boundary branches (the cam idiom), and nlev_max = NLEV+1 must be supplied by the caller.",
+   "description": "MOM6 interface entrainment of the implicit vertical tracer diffusion (MOM_diabatic_driver.F90:1728-1739: ent = dt * Kd / (dz_neglect + 0.5*(dz(k-1)+dz(k))), with ent = 0 on the two boundary faces). On the esd column (lev 1 = bottom, lev_nodes 1 = bottom face) the law is ent[nlev] = dt*Kd[nlev]/dz_int for 1 < nlev < nlev_max and 0 on the faces. The interface spacing is taken as 0.5*(ze[nlev+1]-ze[nlev-1]) rather than zc[nlev]-zc[nlev-1]: the cell-center form 0.5*(ze[nlev]+ze[nlev+1]) rounds at the column-depth magnitude of ze (~1e-13 m at 743 m depth) and spoils the deep ~1e-3 m spacings by ~1e-10 relative, while the ze-difference is an exact subtraction that reproduces the dumped ent to ~4e-16. Neighbor indices are bounded before taking the difference so eager evaluation stays in range at both faces. 'zero' is a units-free scalar for the boundary branches (the cam idiom), and nlev_max = NLEV+1 must be supplied by the caller.",
    "params": [
     "Kd",
     "dt",
@@ -860,10 +860,16 @@
                "args": [
                 "ze",
                 {
-                 "op": "+",
+                 "op": "min",
                  "args": [
-                  "nlev",
-                  1
+                  {
+                   "op": "+",
+                   "args": [
+                    "nlev",
+                    1
+                   ]
+                  },
+                  "nlev_max"
                  ]
                 }
                ]
@@ -873,9 +879,15 @@
                "args": [
                 "ze",
                 {
-                 "op": "-",
+                 "op": "max",
                  "args": [
-                  "nlev",
+                  {
+                   "op": "-",
+                   "args": [
+                    "nlev",
+                    1
+                   ]
+                  },
                   1
                  ]
                 }
@@ -894,7 +906,7 @@
    }
   },
   "tridiagonal_residual": {
-   "description": "Residual of the MOM6 implicit vertical tracer diffusion tridiagonal system (MOM_tracer_diabatic.F90:384-413, the no-sink branch): h_k (u'_k - u_k) - ent_k (u'_{k-1} - u'_k) - ent_{k+1} (u'_{k+1} - u'_k) = 0, i.e. dz[nlev]*(u[nlev]-u0[nlev]) - ent[nlev]*(u[nlev-1]-u[nlev]) - ent[nlev+1]*(u[nlev+1]-u[nlev]) on the esd column, with the out-of-range boundary terms zeroed (ent is 0 on the faces anyway; the guards keep the neighbor indices in range). Units-polymorphic: pass a units-free 'zero' for the boundary branches; ent comes from interface_entrainment. nlev_max = NLEV+1 must be supplied by the caller.",
+   "description": "Residual of the MOM6 implicit vertical tracer diffusion tridiagonal system (MOM_tracer_diabatic.F90:384-413, the no-sink branch): h_k (u'_k - u_k) - ent_k (u'_{k-1} - u'_k) - ent_{k+1} (u'_{k+1} - u'_k) = 0, i.e. dz[nlev]*(u[nlev]-u0[nlev]) - ent[nlev]*(u[nlev-1]-u[nlev]) - ent[nlev+1]*(u[nlev+1]-u[nlev]) on the esd column, with the out-of-range boundary terms zeroed (the neighbor gathers are bounded for eager evaluation). Units-polymorphic: pass a units-free 'zero' for the boundary branches; ent comes from interface_entrainment. nlev_max = NLEV must be supplied by the caller.",
    "params": [
     "dz",
     "ent",
@@ -987,9 +999,15 @@
                "args": [
                 "u",
                 {
-                 "op": "-",
+                 "op": "max",
                  "args": [
-                  "nlev",
+                  {
+                   "op": "-",
+                   "args": [
+                    "nlev",
+                    1
+                   ]
+                  },
                   1
                  ]
                 }
@@ -1045,10 +1063,16 @@
              "args": [
               "u",
               {
-               "op": "+",
+               "op": "min",
                "args": [
-                "nlev",
-                1
+                {
+                 "op": "+",
+                 "args": [
+                  "nlev",
+                  1
+                 ]
+                },
+                "nlev_max"
                ]
               }
              ]
