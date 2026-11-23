@@ -34,7 +34,7 @@
     "NBIN": {
       "type": "integer",
       "default": 8,
-      "description": "Number of MOSAIC size sections (8 for chem_opt = 170)."
+      "description": "Number of MOSAIC size sections, at least two (8 for chem_opt = 170). Supply vb with NBIN + 1 edges when changing NBIN."
     },
     "NTRC": {
       "type": "integer",
@@ -105,7 +105,7 @@
             "bin_nodes"
           ],
           "default": [3.1208925632862246e-17, 2.4967140506289797e-16, 1.9973712405031837e-15, 1.597896992402547e-14, 1.2783175939220376e-13, 1.02265407513763e-12, 8.18123260110104e-12, 6.544986080880832e-11, 5.235988864704666e-10],
-          "description": "Section edge volumes, single-particle dry volume in cm3: MOSAIC's volumlo_sect(1..NBIN) then volumhi_sect(NBIN) (pi/6 d^3 of the section edge diameters, 0.039 to 10 um doubling, as WRF's real32 values). Consecutive sections share an edge (volumhi_sect(j) = volumlo_sect(j+1) bit for bit in the dump)."
+          "description": "Section edge volumes, single-particle dry volume in cm3: MOSAIC's volumlo_sect(1..NBIN) then volumhi_sect(NBIN) (pi/6 d^3 of the section edge diameters, 0.039 to 10 um doubling, as WRF's real32 values). Consecutive sections share an edge (volumhi_sect(j) = volumlo_sect(j+1) bit for bit in the dump). The nine default edges describe the WRF eight-section geometry. For another NBIN, supply NBIN + 1 strictly increasing edges."
         },
         "num": {
           "type": "parameter",
@@ -165,7 +165,7 @@
             "lev",
             "bin"
           ],
-          "description": "Section dry volume, drymass/drydens (cm3 of particle per mol of air): the second moment the size-space reconstruction reads."
+          "description": "Section dry volume, drymass/drydens (cm3 of particle per mol of air), with zero returned at zero density. It is the second moment the size-space reconstruction reads."
         },
         "lam": {
           "type": "unknown",
@@ -215,22 +215,42 @@
               }
             },
             "expr": {
-              "op": "/",
+              "op": "ifelse",
               "args": [
                 {
-                  "op": "index",
+                  "op": "==",
                   "args": [
-                    "drymass",
-                    "k",
-                    "j"
+                    {
+                      "op": "index",
+                      "args": [
+                        "drydens",
+                        "k",
+                        "j"
+                      ]
+                    },
+                    0.0
                   ]
                 },
+                0.0,
                 {
-                  "op": "index",
+                  "op": "/",
                   "args": [
-                    "drydens",
-                    "k",
-                    "j"
+                    {
+                      "op": "index",
+                      "args": [
+                        "drymass",
+                        "k",
+                        "j"
+                      ]
+                    },
+                    {
+                      "op": "index",
+                      "args": [
+                        "drydens",
+                        "k",
+                        "j"
+                      ]
+                    }
                   ]
                 }
               ]
@@ -382,6 +402,39 @@
         }
       ],
       "tests": [
+        {
+          "id": "zero_density_empty_section",
+          "description": "Zero density and dry mass give a finite zero dry volume and no flux from an empty distribution.",
+          "parameter_overrides": {
+            "drymass": 0.0,
+            "drydens": 0.0,
+            "num": 0.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 0.0
+          },
+          "assertions": [
+            {
+              "variable": "vdry[1,1]",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 0.0,
+                "abs": 0.0
+              }
+            },
+            {
+              "variable": "dnum_dt[1,1]",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 0.0,
+                "abs": 0.0
+              }
+            }
+          ]
+        },
         {
           "id": "movesect_s1",
           "description": "Model step 1, the whole 59-level column x 8 sections. Reference: the em_scm_xy chem_opt = 170 column (data/eqwefic/chem170_scm, reference namelist unchanged), move_sections capture dumps/chem170_mosaic_movesect (WRF fork earthsciml-instrumented-chem170 711bb56a; bit-identical to dumps/chem170_mosaic_coag on all 5216 shared fields). Inputs are move_sections' own entry state: the PRE-growth section number and the twelve volume-carried rows (rsub_in: the ten components, the hysteresis water, the water), the pre-growth dry mass and density (drymass_pregrow, drydens_pregrow) and the step's dry-volume growth rate dvdt = (drymass_aftgrow/drydens_aftgrow - drymass_pregrow/drydens_pregrow)/dtchem. Expected values: the dt -> 0 limit of WRF's own move_sections, from the REAL64 replay (wrf-chem170/kernels/movesect_driver, chem170_scm/movesect64) with the step's growth scaled to the fractions 1e-2 and 2e-2 and the rows held at their pre-growth values (ESM_MS_FREEZE=1), Richardson-extrapolated. Real64 because WRF's real32 call forms each transferred fraction as 1 minus a number close to 1 (FORTRAN_BUGS N125). Tolerance measured over all 16 capture steps (98,176 entries), not assumed: every entry within rel 1e-5 or 1e-6 of the largest rate of its quantity in the step (worst 0.13 of that bound); the bound is set by the replay's own round-off and O(delta^2) truncation, not by the operator.",
