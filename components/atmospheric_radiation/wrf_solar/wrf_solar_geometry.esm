@@ -2,7 +2,7 @@
  "esm": "1.2.0",
  "metadata": {
   "name": "WRFSolarGeometry",
-  "description": "WRF's solar geometry for the radiation schemes: the declination and eccentricity-corrected solar constant of SUBROUTINE radconst and the cosine of the solar zenith angle of SUBROUTINE calc_coszen (with the equation-of-time correction), phys/module_radiation_driver.F (WRF 4.8), as called by radiation_driver at xtime + radt/2. Algebraic in the model time: the only time dependence is through the parameters xtime and julian, which a consumer advances with the clock. It supplies DudhiaSW's csza (WRF coszen) and solcon in place of prescribed values. The EarthSciModels standard-library lib/solar.esm is NOT reused: it evaluates the Spencer declination series and a NOAA fractional-year angle, whereas radconst uses a single-sine declination with a 23.5 degree obliquity and day 80 as the equinox, and calc_coszen phases its equation of time on julian - 0.5; at the reference column's start (1999-10-22 19 UTC, 37.6 N 96.7 W) the two declinations differ by 0.022 rad and the cosines by 0.017, so WRF-derived tests could not be added to lib/solar.esm either. Not transcribed: the solar-eclipse obscuration (sw_eclipse, off by default) and the slope-radiation hour-angle use (slope_rad).",
+  "description": "WRF's solar geometry for the radiation schemes: the declination and eccentricity-corrected solar constant of SUBROUTINE radconst and the cosine of the solar zenith angle of SUBROUTINE calc_coszen (with the equation-of-time correction), phys/module_radiation_driver.F (WRF 4.8), as called by radiation_driver at xtime + radt/2. Algebraic in the model time: the only time dependence is through the parameters xtime and julian, which a consumer advances with the clock and MUST keep in step, julian = julian0 + xtime/1440 wrapped at 1 January (WRF resets both from its clock each step; julian drives the declination, eccentricity and equation of time, xtime + gmt the time of day). It supplies DudhiaSW's csza (WRF coszen) and solcon in place of prescribed values. The EarthSciModels standard-library lib/solar.esm is NOT reused: it evaluates the Spencer declination series and a NOAA fractional-year angle, whereas radconst uses a single-sine declination with a 23.5 degree obliquity and day 80 as the equinox, and calc_coszen phases its equation of time on julian - 0.5; at the reference column's start (1999-10-22 19 UTC, 37.6 N 96.7 W) the two declinations differ by 0.022 rad and the cosines by 0.017, so WRF-derived tests could not be added to lib/solar.esm either. Not transcribed: the solar-eclipse obscuration (sw_eclipse, off by default) and the slope-radiation hour-angle use (slope_rad).",
   "license": "MIT",
   "tags": [
    "wrf",
@@ -38,7 +38,7 @@
      "type": "parameter",
      "units": "min",
      "default": 0.0,
-     "description": "Model time since the start of the run, minutes (WRF grid%xtime)."
+     "description": "Model time since the start of the run, minutes (WRF grid%xtime, domain_clock_get minutesSinceSimulationStart). Sets only the time of day (with gmt and radt/2); it does NOT advance julian, which is a separate parameter: a coupler advancing xtime must also set julian to the matching day of year (see julian)."
     },
     "radt": {
      "type": "parameter",
@@ -56,7 +56,7 @@
      "type": "parameter",
      "units": "day",
      "default": 0.0,
-     "description": "Day of year at the current time, 0.0 at 00 UTC on 1 January (WRF grid%julian, domain_clock_get currentDayOfYearReal). It already advances with the model time; calc_coszen nevertheless takes the time of day from xtime and gmt, and julian only for the declination, eccentricity and equation of time."
+     "description": "Day of year at the current time (not at xtime + radt/2), 0.0 at 00 UTC on 1 January (WRF grid%julian). WRF does not integrate it: domain_clockadvance (frame/module_domain.F:2420-2421) resets both grid%xtime and grid%julian from the model clock every step, julian = REAL(dayOfYear_r8) - 1 (currentDayOfYearReal). This model reads it as an independent parameter and does not derive it from xtime, so a coupler MUST keep the two in step: julian = julian0 + xtime/1440, where julian0 is the start-time value (gmt/24 + start day of year - 1), wrapped to 0 at 00 UTC on 1 January as WRF's calendar does (365- or 366-day year). It is not derived here because julian0 + xtime/1440 does not wrap at the year boundary as WRF's clock does. calc_coszen takes the time of day from xtime and gmt, and julian only for the declination, eccentricity and equation of time, so an out-of-step julian shifts those three quantities but not the hour angle's clock time."
     },
     "xlat": {
      "type": "parameter",
@@ -113,7 +113,7 @@
     "minutes_of_day": {
      "type": "unknown",
      "units": "min",
-     "description": "Elapsed minutes modulo one day, MOD(xtime, 1440.) for the non-negative model time."
+     "description": "Elapsed minutes modulo one day with Fortran MOD semantics, MOD(xtime + radt/2, 1440.) = e - 1440 trunc(e/1440): the quotient is truncated toward zero, written sign(e) floor(|e|/1440) since the AST has no truncating mod. For a negative elapsed time the result is negative (e = -30 gives -30, as WRF does, not the floored 1410), so local_solar_time and hour_angle match WRF's tloctm and hrang for any sign of xtime."
     },
     "local_solar_time": {
      "type": "unknown",
@@ -429,12 +429,23 @@
         "args": [
          "par.minutes_per_day",
          {
+          "op": "sign",
+          "args": [
+           "elapsed_minutes"
+          ]
+         },
+         {
           "op": "floor",
           "args": [
            {
             "op": "/",
             "args": [
-             "elapsed_minutes",
+             {
+              "op": "abs",
+              "args": [
+               "elapsed_minutes"
+              ]
+             },
              "par.minutes_per_day"
             ]
            }
@@ -1460,6 +1471,67 @@
            "variable": "coszen",
            "time": 0.0,
            "expected": 0.3986789286136627,
+           "tolerance": {
+             "rel": 1e-05
+           }
+         }
+       ]
+     },
+     {
+       "id": "solar_kernel_negative_xtime",
+       "description": "Reference: WRF v4.8.0 SUBROUTINE radconst and SUBROUTINE calc_coszen (phys/module_radiation_driver.F:3469-3541), extracted verbatim at build time into kernels/build32/solar_kernels.F90 and driven by kernels/solar_driver.F90 of the ctessum-claude/WRF fork (branch earthsciml-instrumented, commit 1b4b556), GNU gfortran 13.3 REAL*4 build (WRF's default kinds; DEGRAD = piconst/180., DPD = 360./365. as share/module_model_constants.F:72-74). This regime is not in solar_driver.F90's list: it was evaluated by a one-off REAL*4 driver (gfortran 11.5) linked against that same gfortran-13.3-compiled kernels/build32/solar_kernels.o, calling radconst and calc_coszen exactly as solar_driver.F90 does (same DEGRAD, DPD and argument order); minutes_of_day's -30 is calc_coszen's MOD(xtime, 1440.) by the Fortran definition. Synthetic regime outside what WRF itself reaches: xtime -30 (a coupler evaluating 30 min before the run start), radt 0, gmt 19, julian 294.770843505859375 (REAL*4 of 294.77083), 37.6 N 96.7 W. Pins calc_coszen's Fortran MOD(xtime, 1440.) = -30 (truncated, not floored to 1410): with a floored mod the hour angle would be 2 pi larger. coszen is periodic in it and would not distinguish the two. Single-precision reference, rel 1e-5.",
+       "parameter_overrides": {
+         "xtime": -30.0,
+         "radt": 0.0,
+         "gmt": 19.0,
+         "julian": 294.7708435058594,
+         "xlat": 37.599998474121094,
+         "xlong": -96.69999694824219
+       },
+       "time_span": {
+         "start": 0,
+         "end": 1
+       },
+       "tolerance": {
+         "rel": 1e-05
+       },
+       "assertions": [
+         {
+           "variable": "declin",
+           "time": 0.0,
+           "expected": -0.21187500655651093,
+           "tolerance": {
+             "rel": 1e-05
+           }
+         },
+         {
+           "variable": "solcon",
+           "time": 0.0,
+           "expected": 1384.2996826171875,
+           "tolerance": {
+             "rel": 1e-05
+           }
+         },
+         {
+           "variable": "minutes_of_day",
+           "time": 0.0,
+           "expected": -30.0,
+           "tolerance": {
+             "rel": 1e-05
+           }
+         },
+         {
+           "variable": "hour_angle",
+           "time": 0.0,
+           "expected": 0.08241401612758636,
+           "tolerance": {
+             "rel": 1e-05
+           }
+         },
+         {
+           "variable": "coszen",
+           "time": 0.0,
+           "expected": 0.6436343193054199,
            "tolerance": {
              "rel": 1e-05
            }
