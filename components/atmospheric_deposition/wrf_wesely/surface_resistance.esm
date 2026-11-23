@@ -28,7 +28,7 @@
           "type": "parameter",
           "units": "1",
           "default": 1.0,
-          "description": "Mechanism row of wesely_data's per-gas tables: 1 = chem_opt 101 (RADM2 KPP, WRF's numbering of the gas slots under that mechanism), 2 = chem_opt 170 (CBMZ_MOSAIC_KPP). It selects only DATA -- the five per-gas constants and NH3's slot -- because dep_init fills those through the run-time species pointers; every resistance formula is the same under both."
+          "description": "Mechanism row of wesely_data's per-gas tables: 1 = chem_opt 101 (RADM2 KPP, WRF's numbering of the gas slots under that mechanism), 2 = chem_opt 170 (CBMZ_MOSAIC_KPP). It selects only DATA -- the five per-gas constants, NH3's slot and the gas-slot count numgas -- because dep_init fills those through the run-time species pointers; every resistance formula is the same under both."
         },
         "iland": {
           "type": "parameter",
@@ -436,16 +436,15 @@
         "srfres": {
           "type": "unknown",
           "units": "s/m",
-          "description": "Rc as wesely_driver passes it on: rcx, except that the last two gas slots (HO and HO2 for RADM2) are set to ZERO, so those two deposit at the aerodynamic limit 1/(Ra+Rb).",
+          "description": "Rc as wesely_driver passes it on: rcx, except that the last two gas slots, numgas-1 and numgas, are set to ZERO (module_dep_simple.F:242-247, `if( .not. chm_is_moz ) srfres(numgas-1:numgas) = 0.`), so those two deposit at the aerodynamic limit 1/(Ra+Rb). For RADM2 (chem_opt = 101) those slots are HO (43) and HO2 (44), which is the intent. WRF BEHAVIOR, reproduced as-is: for CBM-Z (chem_opt = 170, numgas = 65) the same code zeroes slots 64 and 65, LIM and ISOPO2, while HO (33) and HO2 (34) keep their computed Rc. WRF's own comment a few lines below (`wig: CBMZ does not have HO and HO2 last so need to copy all species`) acknowledges the ordering for ddvel but the srfres zeroing was not adjusted. Correct behavior would zero srfres at p_ho and p_ho2 (by species pointer) rather than at the last two slots, leaving LIM and ISOPO2 with their resistance-limited Rc.",
           "shape": [
             "spc"
           ]
         },
         "n_gas": {
-          "type": "parameter",
+          "type": "unknown",
           "units": "1",
-          "default": 44.0,
-          "description": "Number of gas slots, WRF's numgas (44 for chem_opt = 101). wesely_driver zeroes Rc for the LAST TWO slots, so this is what selects HO and HO2."
+          "description": "Number of gas slots under the selected mechanism, WRF's numgas = get_last_gas(chem_opt): 44 for chem_opt = 101, 65 for chem_opt = 170, from wesely_data's numgas_table so it follows `mech` like the per-gas data and p_nh3 do. wesely_driver zeroes Rc for the LAST TWO slots, so this is what selects which gases get srfres = 0."
         },
         "p_nh3": {
           "type": "unknown",
@@ -854,13 +853,19 @@
                 "op": "exp",
                 "args": [
                   {
-                    "op": "neg",
+                    "op": "-",
                     "args": [
                       {
-                        "op": "+",
+                        "op": "/",
                         "args": [
-                          "tc",
-                          "par.resice_b"
+                          {
+                            "op": "+",
+                            "args": [
+                              "tc",
+                              "par.resice_b"
+                            ]
+                          },
+                          "par.resice_tscale"
                         ]
                       }
                     ]
@@ -2457,6 +2462,16 @@
             "op": "index",
             "args": [
               "dat.p_nh3_table",
+              "mech"
+            ]
+          }
+        },
+        {
+          "lhs": "n_gas",
+          "rhs": {
+            "op": "index",
+            "args": [
+              "dat.numgas_table",
               "mech"
             ]
           }
@@ -27045,7 +27060,6 @@
             "rainflag": 1.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               2.0,
               3.0,
@@ -27322,7 +27336,6 @@
             "rainflag": 1.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               12.0,
               13.0,
@@ -27599,7 +27612,6 @@
             "rainflag": 1.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               22.0,
               23.0,
@@ -27876,7 +27888,6 @@
             "rainflag": 1.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               32.0,
               33.0,
@@ -28153,7 +28164,6 @@
             "rainflag": 1.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               42.0,
               43.0,
@@ -28430,7 +28440,6 @@
             "rainflag": 1.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               52.0,
               53.0,
@@ -28707,7 +28716,6 @@
             "rainflag": 1.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               56.0,
               57.0,
@@ -28984,7 +28992,6 @@
             "rainflag": 0.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               2.0,
               3.0,
@@ -29261,7 +29268,6 @@
             "rainflag": 0.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               12.0,
               13.0,
@@ -29538,7 +29544,6 @@
             "rainflag": 0.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               22.0,
               23.0,
@@ -29815,7 +29820,6 @@
             "rainflag": 0.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               32.0,
               33.0,
@@ -30092,7 +30096,6 @@
             "rainflag": 0.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               42.0,
               43.0,
@@ -30369,7 +30372,6 @@
             "rainflag": 0.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               52.0,
               53.0,
@@ -30646,7 +30648,6 @@
             "rainflag": 0.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               56.0,
               57.0,
@@ -30923,7 +30924,6 @@
             "rainflag": 1.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               2.0,
               3.0,
@@ -31200,7 +31200,6 @@
             "rainflag": 1.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               12.0,
               13.0,
@@ -31477,7 +31476,6 @@
             "rainflag": 1.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               22.0,
               23.0,
@@ -31754,7 +31752,6 @@
             "rainflag": 1.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               32.0,
               33.0,
@@ -32031,7 +32028,6 @@
             "rainflag": 1.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               42.0,
               43.0,
@@ -32308,7 +32304,6 @@
             "rainflag": 1.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               52.0,
               53.0,
@@ -32585,7 +32580,6 @@
             "rainflag": 1.0,
             "highnh3": 0.0,
             "mech": 2.0,
-            "n_gas": 65.0,
             "igas": [
               56.0,
               57.0,
