@@ -1,5 +1,5 @@
 {
-    "esm": "1.0.0",
+    "esm": "2.0.0",
     "metadata": {
         "name": "FuelLoad",
         "description": "Anderson (1982) 13-fuel-model total fine fuel load lookup: maps integer fuel model code (1–13) to oven-dry fuel load w₀ in kg/m², converted from the upstream lb/ft² values in ANDERSON_FUEL_DATA via w₀_kg_m2 = load_lb_ft2 × (0.45359237/0.09290304). Out-of-range codes (including LANDFIRE non-burnable codes 91–99) return the fuel-model-1 default 0.034 × (0.45359237/0.09290304) ≈ 0.1660 kg/m². Migrated from WildlandFire.jl src/coupling.jl:124 (`@register_symbolic fuel_load`). Resolves the gt-p3ep blocking gap via ifelse + interp.linear over the integer axis [1..13].",
@@ -26,6 +26,14 @@
     },
     "models": {
         "FuelLoad": {
+            "expression_template_imports": [
+                {
+                    "ref": "esm:std/interp.esm",
+                    "only": [
+                        "linear"
+                    ]
+                }
+            ],
             "reference": {
                 "citation": "Anderson, H.E. (1982). Aids to determining fuel models for estimating fire behavior. USDA Forest Service Gen. Tech. Rep. INT-122.",
                 "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/coupling.jl:124\n\nUpstream `fuel_load(code)` is a @register_symbolic Julia function:\n  const _FUEL_LOAD = Dict(k => v.load * (0.45359237 / 0.3048^2) for (k, v) in ANDERSON_FUEL_DATA)\n  fuel_load(code) = _lookup_fuel(_FUEL_LOAD, code, 0.034 * (0.45359237 / 0.3048^2))\n  @register_symbolic fuel_load(code)\n\nwhere ANDERSON_FUEL_DATA.load values (in lb/ft²) are (from Anderson 1982 / Mandel et al. 2011 Table 1):\n  code  1 (short grass):                 0.034 lb/ft² → 0.16600253963702372 kg/m²\n  code  2 (timber/grass/shrub):          0.092 lb/ft² → 0.44918334254724060 kg/m²\n  code  3 (tall grass):                  0.138 lb/ft² → 0.67377501382086100 kg/m²\n  code  4 (chaparral):                   0.230 lb/ft² → 1.12295835636810160 kg/m²\n  code  5 (brush):                       0.046 lb/ft² → 0.22459167127362030 kg/m²\n  code  6 (dormant brush/hardwood):      0.069 lb/ft² → 0.33688750691043050 kg/m²\n  code  7 (southern rough):              0.052 lb/ft² → 0.25388623709191860 kg/m²\n  code  8 (closed timber litter):        0.069 lb/ft² → 0.33688750691043050 kg/m²\n  code  9 (hardwood litter):             0.134 lb/ft² → 0.65424530327532870 kg/m²\n  code 10 (timber litter/understory):    0.138 lb/ft² → 0.67377501382086100 kg/m²\n  code 11 (light logging slash):         0.069 lb/ft² → 0.33688750691043050 kg/m²\n  code 12 (medium logging slash):        0.184 lb/ft² → 0.89836668509448130 kg/m²\n  code 13 (heavy logging slash):         0.322 lb/ft² → 1.57214169891534230 kg/m²\n\nDefault for out-of-range codes: 0.034 lb/ft² × (0.45359237/0.09290304) = 0.16600253963702372 kg/m²\n(fuel model 1). This matches the upstream _lookup_fuel fallback.\n\nNon-burnable LANDFIRE codes (91, 92, 93, 98, 99) are outside [1, 13] and\nreturn the FM1 default 0.166 kg/m². In practice, fire spread is zero for\nnon-burnable codes regardless of fuel load because fuel_heat returns 0 for\nthose codes, zeroing Rothermel Reaction Intensity and Rate of Spread.\n\ngt-p3ep resolution: ESM 0.4.0 §9.5 interp.linear supports continuous-axis\ninterpolation. For discrete integer-keyed lookup with separate default, we\ncompose ifelse(AND(code>=1, code<=13), interp.linear(...), default).\ninterp.linear at an exact integer grid knot returns the stored value\n(blend weight 0 or 1 at the endpoints). Out-of-range codes return the\ndefault 0.16600253963702372 kg/m² exactly.\n\nTolerance: observed-only algebraic model (no ODE); tolerance={rel:1e-12} —\ninterp.linear on float64 hardware at grid knots is exact for in-range codes;\n1e-12 covers the one-ULP float64 rounding without admitting any physical\nimprecision."
@@ -72,10 +80,11 @@
                                 ]
                             },
                             {
-                                "op": "fn",
-                                "name": "interp.linear",
-                                "args": [
-                                    {
+                                "op": "apply_expression_template",
+                                "args": [],
+                                "name": "linear",
+                                "bindings": {
+                                    "table": {
                                         "op": "const",
                                         "value": [
                                             0.16600253963702372,
@@ -94,7 +103,7 @@
                                         ],
                                         "args": []
                                     },
-                                    {
+                                    "axis": {
                                         "op": "const",
                                         "value": [
                                             1.0,
@@ -113,10 +122,11 @@
                                         ],
                                         "args": []
                                     },
-                                    "code"
-                                ]
+                                    "x": "code",
+                                    "n": 13
+                                }
                             },
-                            0.16600253963702372
+                            {"op": "const", "args": [], "value": 0.16600253963702372, "units": "kg/m^2"}
                         ]
                     }
                 }
