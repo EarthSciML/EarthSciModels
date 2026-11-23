@@ -2,7 +2,7 @@
   "esm": "1.2.0",
   "metadata": {
     "name": "WetDepLS",
-    "description": "WRF-Chem's large-scale (grid-scale) wet deposition of every scavenged species over one column, `wetdep_ls` in chem/module_wetdep_ls.F (WRF v4.8.0), the scheme `wetscav_onoff < 0` selects. It is the only wet-scavenging path reachable with this project's chem_opt = 170 physics suite (WSM6 + New Tiedtke): `wetscav_onoff = 1` is fatal for chem_opt 170 and for mp_physics 6 in chemics_init, and convective-transport scavenging (`chem_conv_tr`, `conv_tr_wetscav`) needs a Grell-family cumulus scheme (FORTRAN_BUGS.md N115; that path also carries two defects of its own, B23 and B24). The species loop is a mapping, not physics -- the scheme treats every species alike apart from its efficiency `alpha` and the burden gate -- so it is written as a species axis `spc` (NSPEC long) over which the column fields `c`, `removal`, `c_out` and `dc_dt` and the per-species `alpha`, `burden` and `active` are shaped, while the column inputs (qc, rho, w, ze, rain) and everything built only from them (the cloud-water integral, `frc`, `f`) are shared. The consumer puts on that axis the species the scheme scavenges: first the NGAS gases it scavenges at alpha = 1 (gas-phase sulfuric acid `sulf` for chem_opt = 170), then every aerosol species of the mechanism (nv > numgas: MOSAIC's mass, number AND water of all eight bins, 168 for chem_opt = 170, at alpha = 0.5) -- NSPEC = 169, NGAS = 1. Every other gas is untouched. (Until 2026-11-12 the component took ONE species and the consumer mounted it once per species; a coupling over all 169 would then have needed 169 generated mounts, since esm has no mount-per-element and §10.5 lifting applies to 0-D systems only.)\n\nThe scheme. With R = rain/dt the step's grid-scale rain rate (WRF's `rainncv`, mm per step), it forms the column-integrated upward cloud-water flux C = integral of max(0, qc rho w) dz, and a conversion factor frc = clamp(R/C, 1e-6, 0.005), the fraction of that flux that falls as rain. Each layer then loses alpha f/(1+f) of the species, with f = frc rho dz w, the scavenged value floored at 1e-16. The tendency a consumer integrating the column must add is the operator-split increment over the step, `dc_dt = (c_out - c)/dt` (CLAUDE.md, operator-split schemes): the Fortran is an in-place update with no rate inside it, and its removal fraction f/(1+f) is the implicit-Euler form of a first-order loss at rate f/dt, so the increment converges to that loss as the step shrinks.\n\nWhat the scheme does that its comments do not say, all reproduced here. (1) The removal argument f is DIMENSIONALLY INCONSISTENT: frc carries 1/m, so f is a mass flux in kg m-2 s-1 that the Fortran adds to 1; the component divides by a unit flux `F_unit` to reproduce WRF's number (FORTRAN_BUGS.md B22). (2) `w` is WRF's `w_2(i,k,j)`, the vertical velocity on the BOTTOM face of layer k, not the layer's own; the surface face has w = 0, so the lowest layer is never scavenged. (3) The column sum runs over layers 1..NLEV-1 and the removal over 1..NLEV-2 (`k=1,kte-1` and `k=kts,kte-2` with kte = NLEV), so the top layer is excluded from the integral and the top two from the removal. (4) The burden gate is a plain level sum of c rho with no layer thickness, compared with a bare 1e-10 in whatever unit the species is carried in. (5) The removal needs qc > 0 in the layer but is not proportional to it: a layer with a trace of cloud water and a large updraught loses as much as a saturated one.\n\nInputs are consumer-supplied column fields (parameters with shape `lev`), following the column convention: real geometry `ze` from the consumer, the layer count a metaparameter.\n\nWhat the tests pin and what they cannot. Nine tests, one model step each, each on a two-species axis -- `sulf` (alpha = 1) and one aerosol species (alpha = 0.5) -- from a capture that switches the scheme on (data/eqwefic/chem170_scm/run_wetscav.sh: the reference column with wetscav_onoff = -1 and cu_physics = 0, steps 1300-1480 spanning a dry step, the onset at 2.7e-9 mm of rain, the 0.45 mm/step peak and the tail). Each asserts the per-species activation flags exactly; the removal fraction of every layer and species at 1e-9 of its largest value (it is a fraction, so one scale serves species whose units differ by 18 orders of magnitude; it is not taped by the kernel and is read from the replay as 1 - c_out/c where a layer was scavenged, never floored in this capture); the scavenged columns at 1e-9 of the largest value on the axis (an aerosol mass or number, which sets the scale of that check); and the tendency, likewise at 1e-9 of its largest magnitude, all against the real64 replay of the dumped inputs through chem/module_wetdep_ls.F compiled unchanged. The in-model real32 result agrees with that replay to 5.7e-8 of the column maximum over all 101 dumped steps and all 233 species. The full 169-species axis is exercised by couplings/wetdep_ls_column.esm. Quirk (3) is NOT exercised: extending the removal to layer NLEV-1 or the integral to layer NLEV fails nothing, because the top layers of this 20 km column never carry cloud water. The intermediates cw_column, frc and f are unasserted; they are pinned through the outputs they feed.",
+    "description": "WRF-Chem's large-scale (grid-scale) wet deposition of every scavenged species over one column, `wetdep_ls` in chem/module_wetdep_ls.F (WRF v4.8.0), the scheme `wetscav_onoff < 0` selects. It is the only wet-scavenging path reachable with this project's chem_opt = 170 physics suite (WSM6 + New Tiedtke): `wetscav_onoff = 1` is fatal for chem_opt 170 and for mp_physics 6 in chemics_init, and convective-transport scavenging (`chem_conv_tr`, `conv_tr_wetscav`) needs a Grell-family cumulus scheme (FORTRAN_BUGS.md N115; that path also carries two defects of its own, B23 and B24). The species loop is a mapping, not physics -- the scheme treats every species alike apart from its efficiency `alpha` and the burden gate -- so it is written as a species axis `spc` (NSPEC long) over which the column fields `c`, `removal`, `c_out` and `dc_dt` and the per-species `alpha`, `burden` and `active` are shaped, while the column inputs (qc, rho, w, ze, rain) and everything built only from them (the cloud-water integral, `frc`, `f`) are shared. The consumer puts on that axis the species the scheme scavenges: first the NGAS gases it scavenges at alpha = 1 (gas-phase sulfuric acid `sulf` for chem_opt = 170), then every aerosol species of the mechanism (nv > numgas: MOSAIC's mass, number AND water of all eight bins, 168 for chem_opt = 170, at alpha = 0.5) -- NSPEC = 169, NGAS = 1. Every other gas is untouched. (Until 2026-11-12 the component took ONE species and the consumer mounted it once per species; a coupling over all 169 would then have needed 169 generated mounts, since esm has no mount-per-element and §10.5 lifting applies to 0-D systems only.)\n\nThe scheme. With R = rain/dt the step's grid-scale rain rate (WRF's `rainncv`, mm per step), it forms the column-integrated upward cloud-water flux C = integral of max(0, qc rho w) dz, and a conversion factor frc = clamp(R/C, 1e-6, 0.005), the fraction of that flux that falls as rain. Each layer then loses alpha f/(1+f) of the species, with f = frc rho dz w, the scavenged value floored at 1e-16. Use `c_out` to apply WRF's exact split update once per rain accumulation interval. The diagnostic `dc_dt = (c_out - c)/dt` is the average tendency over that interval. While the rain gate is active, subdividing the step at a fixed rain rate leaves the removal fraction unchanged, so integrating this diagnostic as a continuous loss changes the update.\n\nWhat the scheme does that its comments do not say, all reproduced here. (1) The removal argument f is DIMENSIONALLY INCONSISTENT: frc carries 1/m, so f is a mass flux in kg m-2 s-1 that the Fortran adds to 1; the component divides by a unit flux `F_unit` to reproduce WRF's number (FORTRAN_BUGS.md B22). (2) `w` is WRF's `w_2(i,k,j)`, the vertical velocity on the BOTTOM face of layer k, not the layer's own; the surface face has w = 0, so the lowest layer is never scavenged. (3) The column sum runs over layers 1..NLEV-1 and the removal over 1..NLEV-2 (`k=1,kte-1` and `k=kts,kte-2` with kte = NLEV), so the top layer is excluded from the integral and the top two from the removal. (4) The burden gate is a plain level sum of c rho with no layer thickness, compared with a bare 1e-10 in whatever unit the species is carried in. (5) The removal needs qc > 0 in the layer but is not proportional to it: a layer with a trace of cloud water and a large updraught loses as much as a saturated one.\n\nInputs are consumer-supplied column fields (parameters with shape `lev`), following the column convention: real geometry `ze` from the consumer, the layer count a metaparameter.\n\nWhat the tests pin and what they cannot. Nine tests, one model step each, each on a two-species axis -- `sulf` (alpha = 1) and one aerosol species (alpha = 0.5) -- from a capture that switches the scheme on (data/eqwefic/chem170_scm/run_wetscav.sh: the reference column with wetscav_onoff = -1 and cu_physics = 0, steps 1300-1480 spanning a dry step, the onset at 2.7e-9 mm of rain, the 0.45 mm/step peak and the tail). Each asserts the per-species activation flags exactly; the removal fraction of every layer and species at 1e-9 of its largest value (it is a fraction, so one scale serves species whose units differ by 18 orders of magnitude; it is not taped by the kernel and is read from the replay as 1 - c_out/c where a layer was scavenged, never floored in this capture); the scavenged columns at 1e-9 of the largest value on the axis (an aerosol mass or number, which sets the scale of that check); and the tendency, likewise at 1e-9 of its largest magnitude, all against the real64 replay of the dumped inputs through chem/module_wetdep_ls.F compiled unchanged. The in-model real32 result agrees with that replay to 5.7e-8 of the column maximum over all 101 dumped steps and all 233 species. The full 169-species axis is exercised by couplings/wetdep_ls_column.esm. Quirk (3) is NOT exercised: extending the removal to layer NLEV-1 or the integral to layer NLEV fails nothing, because the top layers of this 20 km column never carry cloud water. The intermediates cw_column, frc and f are unasserted; they are pinned through the outputs they feed.",
     "authors": [
       "EqWeFiC"
     ],
@@ -221,7 +221,7 @@
             "lev",
             "spc"
           ],
-          "description": "The operator-split tendency (c_out - c)/dt a consumer integrating the column adds."
+          "description": "The average tendency (c_out - c)/dt over the interval in which rain was accumulated. Use c_out for the exact split update."
         }
       },
       "equations": [
@@ -860,6 +860,91 @@
         }
       ],
       "tests": [
+        {
+          "id": "per_species_burden_gate",
+          "description": "A wet column with uniform cloud water, density and 100 m layers. The gas exceeds the density-weighted column burden threshold. The aerosol is above the per-cell concentration floor but below the column threshold. At level 2 the rain-rate clamp gives frc = 0.005, so f = 1 and the gas loses half its concentration.",
+          "parameter_overrides": {
+            "rain": 60,
+            "qc": 0.001,
+            "w": 2,
+            "ze": [
+              0, 100, 200, 300, 400, 500, 600, 700, 800, 900,
+              1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900,
+              2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900,
+              3000, 3100, 3200, 3300, 3400, 3500, 3600, 3700, 3800, 3900,
+              4000, 4100, 4200, 4300, 4400, 4500, 4600, 4700, 4800, 4900,
+              5000, 5100, 5200, 5300, 5400, 5500, 5600, 5700, 5800, 5900
+            ],
+            "c": [
+              [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14],
+              [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14],
+              [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14],
+              [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14],
+              [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14],
+              [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14],
+              [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14],
+              [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14],
+              [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14],
+              [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14], [1e-6, 1e-14]
+            ]
+          },
+          "time_span": {
+            "start": 0,
+            "end": 0
+          },
+          "assertions": [
+            {
+              "variable": "active",
+              "time": 0,
+              "coords": {
+                "spc": 1
+              },
+              "expected": 1,
+              "tolerance": {
+                "abs": 0,
+                "rel": 0
+              }
+            },
+            {
+              "variable": "active",
+              "time": 0,
+              "coords": {
+                "spc": 2
+              },
+              "expected": 0,
+              "tolerance": {
+                "abs": 0,
+                "rel": 0
+              }
+            },
+            {
+              "variable": "c_out",
+              "time": 0,
+              "coords": {
+                "lev": 2,
+                "spc": 1
+              },
+              "expected": 5e-07,
+              "tolerance": {
+                "abs": 1e-18,
+                "rel": 0
+              }
+            },
+            {
+              "variable": "c_out",
+              "time": 0,
+              "coords": {
+                "lev": 2,
+                "spc": 2
+              },
+              "expected": 1e-14,
+              "tolerance": {
+                "abs": 0,
+                "rel": 0
+              }
+            }
+          ]
+        },
         {
           "id": "chem170_wetscav_step1300_sulf_so4_a03",
           "description": "Reference: the chem_opt = 170 wet-scavenging capture of data/eqwefic/chem170_scm/run_wetscav.sh (the reference column with wetscav_onoff = -1 and cu_physics = 0, so WSM6 makes the rain; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, GNU gfortran real32), dumped by the `wetdep_ls` hook in chem_driver.F at model step 1300 (dt = 60 s), column (its, jts), on the species axis [sulf (chem index 3, alpha = par.alpha_sulf), so4_a03 (chem index 104, alpha = par.alpha_aerosol)]. Grid-scale rain this step 4.37977e-22 mm; 0 and 0 of 59 layers scavenged. Expected values from the real64 replay of the dumped inputs through chem/module_wetdep_ls.F compiled unchanged (kernels/wetdep_ls_driver), so the tolerance is 1e-9 of each field's largest magnitude; the in-model real32 result differs from the replay by 0 of the column maximum.",
