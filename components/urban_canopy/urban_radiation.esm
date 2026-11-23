@@ -1,5 +1,5 @@
 {
-    "esm": "1.0.0",
+    "esm": "2.0.0",
     "metadata": {
         "name": "UrbanRadiation",
         "description": "Urban albedos and radiative fluxes for the Community Land Model Urban (CLMU) parameterization, following Chapter 2 of Oleson et al. (2010). Computes view factors, incident direct beam and diffuse solar radiation, absorbed and reflected solar radiation (with closed-form multi-reflection solution for the urban canyon), incident longwave radiation, and absorbed/reflected/emitted longwave radiation for urban surfaces: roof, sunlit wall, shaded wall, and road. The urban canyon is represented as an infinitely long canyon of width W bordered by buildings of height H. The iterative multi-reflection scheme (Eqs. 2.63-2.85, 2.138-2.170) is solved in closed form using the matrix geometric series S_absorbed = (I - A) * (I - T*A)^{-1} * S_0, where A is the albedo matrix, T is the view-factor transport matrix, and S_0 is the initial incident radiation vector. Migrated from UrbanCanopy.jl@9200edd4 src/albedos_radiative_fluxes.jl:27 (`UrbanRadiation` @component). Parameterized as observed-only: H_W, W_roof, S_atm_*, L_atm_down, μ_zen, surface albedos α_*, emissivities ε_*, and surface temperatures T_* are inputs (parameters); 62 view factor, intermediate, absorbed-flux, and reflected-flux quantities are algebraic state outputs.",
@@ -34,7 +34,7 @@
     "models": {
         "UrbanRadiation": {
             "reference": {
-                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/albedos_radiative_fluxes.jl:27\nUpstream `UrbanRadiation` is an MTK `@component` with five `@constants` (σ_SB = 5.67e-8 W/(m²·K⁴), π_val = π dimensionless, one_rad = 1.0 rad, one_wm2 = 1.0 W/m², zero_wm2 = 0.0 W/m²), 31 `@parameters` (geometry H_W/W_roof, four atmospheric solar fluxes S_atm_*, atmospheric longwave L_atm_down, solar zenith μ_zen, twelve surface albedos α_*_*_* across roof/road/wall × dir/dif × vis/nir, three emissivities ε_*, four surface temperatures T_*), 62 time-indexed `@variables` (view factors Ψ_*, transport matrix T_rw/T_wr/T_ww, direct-beam factors θ_0/S_*_factor, incident/absorbed/reflected radiation S_*, canyon albedos α_uc_*, longwave fluxes L_*), and 62 algebraic equations (no derivatives). Identical equation structure preserved here.\n\nThe upstream component declares five `@constants`, all encoded here as parameters with the upstream defaults: σ_SB = 5.67e-8 W/(m²·K⁴) (Stefan-Boltzmann from Oleson Table 1.4); π_val = π (the Float64 value of Julia's π constant); one_rad = 1.0 rad (unit-balancer for the rad-dimensioned μ_zen and θ_0); one_wm2 = 1.0 W/m² (unit-balancer for the W/m² comparison in the canyon-albedo guard); zero_wm2 = 0.0 W/m² (unit-balancing zero for the canyon-albedo guard's else branch). Greek symbols (Ψ for view factors, α for albedos, ε for emissivities, σ for Stefan-Boltzmann, μ for solar zenith, π for pi, θ for canyon orientation, Δ-style underscored subscripts) are preserved verbatim from upstream — peer ESM files in this rig already use Greek letters in identifiers (e.g. urban_surface_thermal.esm uses λ_prescribed / c_prescribed, freezing_point_depression.esm uses ψ_sat / θ_sat / ρ_liq, snow_melt_no_layers.esm uses Δt), and Oleson Chapter 2 uses these Greek symbols extensively in its equations; keeping them preserves the direct equation-to-symbol correspondence that aids review against the technical note.\n\nMulti-reflection closed form: the upstream source contains a Julia `for` loop that generates 4 sets of 5 equations (one set per waveband × incidence-type: direct VIS, direct NIR, diffuse VIS, diffuse NIR) for the canyon solar multi-reflection. The loop body computes intermediate quantities b = a_w*T_rw, c = a_r*T_wr, d = a_w*T_ww (the M = I - T*A matrix off-diagonal products), then det = (1-d²) - 2bc(1+d) (the M-matrix determinant per the adjugate formula in the source's :240-:246 docstring), then the three M⁻¹*S_0 product components Q_road/Q_sw/Q_sh, and finally the absorbed-flux assignments S_net_* = (1-α)*Q and the reflected-to-sky energy-balance closure S_refl_sky = incident - absorbed. The migrated ESM encodes the 20 equations using v0.4.0 expression_templates (RFC docs/rfcs/ast-expression-templates.md): five templates `band_det`, `band_net_road`, `band_net_sw`, `band_net_sh`, `band_refl_sky` each take the per-waveband free variables (a_r, a_w, S_r, S_sw, S_sh, det_var, and for refl_sky additionally net_road/net_sw/net_sh) as parameter substitution slots; each template is invoked 4 times (once per waveband). At load time `apply_expression_template` nodes expand structurally, so the canonical AST a loader sees after parse-then-emit is the fully-inlined 20-equation form — bit-equivalent to writing the equations inline. The longwave multi-reflection block (Eqs. 2.138-2.170, source :355-:393) is structurally identical to the solar block with one invocation, but with substituted source terms (atmospheric LW + emitted LW from other surfaces) — encoded here as 4 inline equations (det_lw + 3 L_net_*) since the single-invocation site does not benefit from a template.\n\nUpstream `local` Julia variables b/c/d/Q_road/Q_sw/Q_sh are not user-visible MTK state variables (they're intermediate let-bindings, expanded by Julia's `local` into the right-hand-side AST of the resulting equations). The migrated ESM preserves this by inlining the same expressions into the template bodies — the canonical 62-equation form after expression-template expansion has 62 LHS state variables matching upstream's `length(unknowns(sys)) == 62` invariant.\n\nθ_0 unit balancing (Eq. 2.11): the upstream form `θ_0 = asin(min(1 / (H_W * tan(μ_zen / one_rad)), 1)) * one_rad` is preserved verbatim. The unit contract: μ_zen has dimension rad; dividing by one_rad makes it dimensionless for the `tan` and `min` operations; multiplying the dimensionless `asin` result by one_rad restores the rad dimension. The numeric value is identical to the unfused `asin(min(1/(H_W*tan(μ_zen)), 1))` because one_rad = 1.0 exactly, but the form is kept to mirror the upstream unit contract for any future ESS unit checker.\n\nCanyon albedo guard (Eqs. 2.93-2.94): the upstream guard uses `ifelse(incident > zero_wm2, refl/incident, 0.0)` to avoid divide-by-zero when there is no incident radiation in this waveband. Preserved verbatim. The bare `0.0` else branch is a dimensionless literal — matches upstream where canyon albedo is dimensionless. (Compare with snow_melt_no_layers.esm which uses a dimensioned `zero_m` else branch for its depth output.)\n\nObservability classification: this component is functionally observed-only — every output variable is given by a single algebraic equation in terms of the parameters and earlier-computed state variables (the `(t)` time index has no role since there are no derivatives). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (surface_energy_flux.esm, snow_melt_no_layers.esm, freezing_point_depression.esm).\n\nTolerance rationale (model-level rel=1e-8): observed-only algebraic system (no ODE integration); the most numerically delicate equations are the canyon multi-reflection ones (`det = (1-d²) - 2bc(1+d)` and the `Q/det` divisions for absorbed-flux and reflected-flux), which involve products and quotients of dimensionless quantities and can accumulate ~1e-13 rounding under the canonical test parameters (e.g. the residual `(S_r + ...) - (net_road + ...)` energy-balance closure for the reflected-flux equation evaluates to ~1e-13 W/m² in regimes where the closure should be exact). 1e-8 leaves comfortable headroom above this and matches the convention used by the most numerically rich peer (heat_flux.esm uses 1e-9 for a single-equation Fourier flux; surface_energy_flux.esm uses 1e-9 for additive flux balances — UrbanRadiation is one ULP-decade looser because of the canyon multi-reflection closed-form solution's higher polynomial degree). Tighter `abs: 1e-10` is asserted on outputs that are exactly zero by construction (e.g. zero albedos → zero reflected flux; equal-temperature blackbody → zero net LW for the symmetric canyon) so the assertion does not silently accept a stuck-at-1e-3 regression.\n\nUpstream tolerance reproduction: the upstream tests use rtol = 1.0e-10 for analytical view factor checks (e.g. Eqs. 2.22-2.28 against manually computed reference values), rtol = 1.0e-8 for energy-conservation closures, and rtol = 1.0e-6 for canyon LW blackbody asymptotics. Per-assertion tolerances are set to match — 1e-10 for view-factor analytics, 1e-8 for energy conservation, 1e-6 for the blackbody LW reference."
+                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/albedos_radiative_fluxes.jl:27\nUpstream `UrbanRadiation` is an MTK `@component` with five `@constants` (σ_SB = 5.67e-8 W/(m²·K⁴), π_val = π dimensionless, one_rad = 1.0 rad, one_wm2 = 1.0 W/m², zero_wm2 = 0.0 W/m²), 31 `@parameters` (geometry H_W/W_roof, four atmospheric solar fluxes S_atm_*, atmospheric longwave L_atm_down, solar zenith μ_zen, twelve surface albedos α_*_*_* across roof/road/wall × dir/dif × vis/nir, three emissivities ε_*, four surface temperatures T_*), 62 time-indexed `@variables` (view factors Ψ_*, transport matrix T_rw/T_wr/T_ww, direct-beam factors θ_0/S_*_factor, incident/absorbed/reflected radiation S_*, canyon albedos α_uc_*, longwave fluxes L_*), and 62 algebraic equations (no derivatives). Identical equation structure preserved here.\n\nThe upstream component declares five `@constants`, all encoded here as parameters with the upstream defaults: σ_SB = 5.67e-8 W/(m²·K⁴) (Stefan-Boltzmann from Oleson Table 1.4); π_val = π (the Float64 value of Julia's π constant); one_rad = 1.0 rad (unit-balancer that makes the rad-dimensioned μ_zen dimensionless inside `tan`); one_wm2 = 1.0 W/m² (unit-balancer for the W/m² comparison in the canyon-albedo guard); zero_wm2 = 0.0 W/m² (unit-balancing zero for the canyon-albedo guard's else branch). Greek symbols (Ψ for view factors, α for albedos, ε for emissivities, σ for Stefan-Boltzmann, μ for solar zenith, π for pi, θ for canyon orientation, Δ-style underscored subscripts) are preserved verbatim from upstream — peer ESM files in this rig already use Greek letters in identifiers (e.g. urban_surface_thermal.esm uses λ_prescribed / c_prescribed, freezing_point_depression.esm uses ψ_sat / θ_sat / ρ_liq, snow_melt_no_layers.esm uses Δt), and Oleson Chapter 2 uses these Greek symbols extensively in its equations; keeping them preserves the direct equation-to-symbol correspondence that aids review against the technical note.\n\nMulti-reflection closed form: the upstream source contains a Julia `for` loop that generates 4 sets of 5 equations (one set per waveband × incidence-type: direct VIS, direct NIR, diffuse VIS, diffuse NIR) for the canyon solar multi-reflection. The loop body computes intermediate quantities b = a_w*T_rw, c = a_r*T_wr, d = a_w*T_ww (the M = I - T*A matrix off-diagonal products), then det = (1-d²) - 2bc(1+d) (the M-matrix determinant per the adjugate formula in the source's :240-:246 docstring), then the three M⁻¹*S_0 product components Q_road/Q_sw/Q_sh, and finally the absorbed-flux assignments S_net_* = (1-α)*Q and the reflected-to-sky energy-balance closure S_refl_sky = incident - absorbed. The migrated ESM encodes the 20 equations using v0.4.0 expression_templates (RFC docs/rfcs/ast-expression-templates.md): five templates `band_det`, `band_net_road`, `band_net_sw`, `band_net_sh`, `band_refl_sky` each take the per-waveband free variables (a_r, a_w, S_r, S_sw, S_sh, det_var, and for refl_sky additionally net_road/net_sw/net_sh) as parameter substitution slots; each template is invoked 4 times (once per waveband). At load time `apply_expression_template` nodes expand structurally, so the canonical AST a loader sees after parse-then-emit is the fully-inlined 20-equation form — bit-equivalent to writing the equations inline. The longwave multi-reflection block (Eqs. 2.138-2.170, source :355-:393) is structurally identical to the solar block with one invocation, but with substituted source terms (atmospheric LW + emitted LW from other surfaces) — encoded here as 4 inline equations (det_lw + 3 L_net_*) since the single-invocation site does not benefit from a template.\n\nUpstream `local` Julia variables b/c/d/Q_road/Q_sw/Q_sh are not user-visible MTK state variables (they're intermediate let-bindings, expanded by Julia's `local` into the right-hand-side AST of the resulting equations). The migrated ESM preserves this by inlining the same expressions into the template bodies — the canonical 62-equation form after expression-template expansion has 62 LHS state variables matching upstream's `length(unknowns(sys)) == 62` invariant.\n\nθ_0 unit balancing (Eq. 2.11): θ_0 is the critical canyon-orientation angle (CLM UrbanAlbedoMod.F90:640 theta0), not the solar zenith angle. Upstream writes `θ_0 = asin(min(1 / (H_W * tan(μ_zen / one_rad)), 1)) * one_rad`; that trailing `* one_rad` is NOT preserved here. The `asin` operator already returns an angle in rad, so multiplying by one_rad gave θ_0 the dimension rad². The encoded form is `θ_0 = asin(min(1 / (H_W * tan(μ_zen / one_rad)), 1))`: dividing μ_zen by one_rad still makes the `tan` argument dimensionless, and the `asin` result carries rad directly. This is a units-only cleanup: because one_rad = 1.0 exactly, the numeric value of θ_0 is unchanged.\n\nCanyon albedo guard (Eqs. 2.93-2.94): the upstream guard uses `ifelse(incident > zero_wm2, refl/incident, 0.0)` to avoid divide-by-zero when there is no incident radiation in this waveband. Preserved verbatim. The bare `0.0` else branch is a dimensionless literal — matches upstream where canyon albedo is dimensionless. (Compare with snow_melt_no_layers.esm which uses a dimensioned `zero_m` else branch for its depth output.)\n\nObservability classification: this component is functionally observed-only — every output variable is given by a single algebraic equation in terms of the parameters and earlier-computed state variables (the `(t)` time index has no role since there are no derivatives). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (surface_energy_flux.esm, snow_melt_no_layers.esm, freezing_point_depression.esm).\n\nTolerance rationale (model-level rel=1e-8): observed-only algebraic system (no ODE integration); the most numerically delicate equations are the canyon multi-reflection ones (`det = (1-d²) - 2bc(1+d)` and the `Q/det` divisions for absorbed-flux and reflected-flux), which involve products and quotients of dimensionless quantities and can accumulate ~1e-13 rounding under the canonical test parameters (e.g. the residual `(S_r + ...) - (net_road + ...)` energy-balance closure for the reflected-flux equation evaluates to ~1e-13 W/m² in regimes where the closure should be exact). 1e-8 leaves comfortable headroom above this and matches the convention used by the most numerically rich peer (heat_flux.esm uses 1e-9 for a single-equation Fourier flux; surface_energy_flux.esm uses 1e-9 for additive flux balances — UrbanRadiation is one ULP-decade looser because of the canyon multi-reflection closed-form solution's higher polynomial degree). Tighter `abs: 1e-10` is asserted on outputs that are exactly zero by construction (e.g. zero albedos → zero reflected flux; equal-temperature blackbody → zero net LW for the symmetric canyon) so the assertion does not silently accept a stuck-at-1e-3 regression.\n\nUpstream tolerance reproduction: the upstream tests use rtol = 1.0e-10 for analytical view factor checks (e.g. Eqs. 2.22-2.28 against manually computed reference values), rtol = 1.0e-8 for energy-conservation closures, and rtol = 1.0e-6 for canyon LW blackbody asymptotics. Per-assertion tolerances are set to match — 1e-10 for view-factor analytics, 1e-8 for energy conservation, 1e-6 for the blackbody LW reference."
             },
             "tolerance": {
                 "rel": 1e-08
@@ -583,7 +583,7 @@
                     "type": "parameter",
                     "units": "rad",
                     "default": 1.0,
-                    "description": "Unit-angle reference (1 rad) — upstream `@constants` one_rad; used in `μ_zen / one_rad` to make the argument of `tan` dimensionless and in `asin(...) * one_rad` to restore rad dimension on θ_0 (Eq. 2.11). Value is exactly 1.0 by construction; numerically a no-op."
+                    "description": "Unit-angle reference (1 rad) — upstream `@constants` one_rad; used in `μ_zen / one_rad` to make the argument of `tan` dimensionless in Eq. 2.11. The upstream trailing `asin(...) * one_rad` factor is dropped here, because `asin` already returns rad and the extra factor gave θ_0 the dimension rad². Value is exactly 1.0 by construction; numerically a no-op."
                 },
                 "one_wm2": {
                     "type": "parameter",
@@ -1214,44 +1214,38 @@
                 {
                     "lhs": "θ_0",
                     "rhs": {
-                        "op": "*",
+                        "op": "asin",
                         "args": [
                             {
-                                "op": "asin",
+                                "op": "min",
                                 "args": [
                                     {
-                                        "op": "min",
+                                        "op": "/",
                                         "args": [
+                                            1.0,
                                             {
-                                                "op": "/",
+                                                "op": "*",
                                                 "args": [
-                                                    1.0,
+                                                    "H_W",
                                                     {
-                                                        "op": "*",
+                                                        "op": "tan",
                                                         "args": [
-                                                            "H_W",
                                                             {
-                                                                "op": "tan",
+                                                                "op": "/",
                                                                 "args": [
-                                                                    {
-                                                                        "op": "/",
-                                                                        "args": [
-                                                                            "μ_zen",
-                                                                            "one_rad"
-                                                                        ]
-                                                                    }
+                                                                    "μ_zen",
+                                                                    "one_rad"
                                                                 ]
                                                             }
                                                         ]
                                                     }
                                                 ]
-                                            },
-                                            1.0
+                                            }
                                         ]
-                                    }
+                                    },
+                                    1.0
                                 ]
-                            },
-                            "one_rad"
+                            }
                         ]
                     }
                 },
@@ -3689,6 +3683,564 @@
                             "expected": 126.59579139375,
                             "tolerance": {
                                 "rel": 1e-10
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "cesm_dump_view_factors_hwr4p8",
+                    "description": "CESM CLM ground truth: stage1/dumps/clm/clm_urbalb.csv (landunit 252/253/254, all traced steps, coszen<0). At night CLM UrbanAlbedoMod.F90:443-462 maps each urban column's ground albedo to the view-factor initialisation, so the dumped albgrd_vis for walls equals vf_sw = view factor of sky for one wall (UrbanParamsType.F90:298 = 0.093431218699529167) and for road equals vf_sr = view factor of sky for road (UrbanParamsType.F90:292 = 0.103060264843338518), both evaluated at the dumped canyon_hwr = 4.8000001907348633. Asserts the .esm view-factor laws (Oleson Eqs. 2.24-2.28) reproduce the dumped values exactly; the asserted closure quantities Psi_road_wall (road-to-wall view factor = 0.5*(1 - Psi_road_sky), UrbanParamsType.F90:293 vf_wr) and Psi_wall_wall (= 1 - 2*Psi_wall_sky, using wall-road = wall-sky from UrbanParamsType.F90:299 vf_rw = vf_sw; UrbanParamsType.F90:300) follow. Fortran reference: UrbanParamsType.F90:292-300.",
+                    "parameter_overrides": {
+                        "H_W": 4.8000001907348633
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Ψ_wall_sky",
+                            "time": 0.0,
+                            "expected": 0.093431218699529167,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "Ψ_sky_wall",
+                            "time": 0.0,
+                            "expected": 0.093431218699529167,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "Ψ_road_sky",
+                            "time": 0.0,
+                            "expected": 0.103060264843338518,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "Ψ_sky_road",
+                            "time": 0.0,
+                            "expected": 0.103060264843338518,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "Ψ_road_wall",
+                            "time": 0.0,
+                            "expected": 0.448469867578330738,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "Ψ_wall_wall",
+                            "time": 0.0,
+                            "expected": 0.813137562600941615,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "cesm_dump_roof_shortwave_daytime",
+                    "description": "CESM CLM ground truth: stage1/dumps/clm/clm_urban_rad.csv (patch of column 267, ctype 71 roof, step 1, ymd 20000101, tod 1800). Incident solar is the dumped forc_solad/forc_solai (vis,nir); the roof albedos are the dumped albgrd/albgri of the same roof column in clm_urbalb.csv (all four bands 0.14). CLM UrbanAlbedoMod.F90:1309-1312 gives sabs_roof = sdir - sref_roof = (1-alpha_roof)*sdir with sdir=1 per band, and UrbanRadiationMod.F90:267-270 gives sabg(roof) = sum_band sabs_roof*(forc_solad,forc_solai). The dumped sabg (= fsa = fsa_u) is the reference. Asserts the .esm S_net_roof (Eqs. 2.34-2.35) equals it.",
+                    "parameter_overrides": {
+                        "S_atm_dir_vis": 91.960706521583646,
+                        "S_atm_dir_nir": 122.38771686326231,
+                        "S_atm_dif_vis": 65.644879522583452,
+                        "S_atm_dif_nir": 35.217869180904785,
+                        "α_roof_dir_vis": 0.14,
+                        "α_roof_dir_nir": 0.14,
+                        "α_roof_dif_vis": 0.14,
+                        "α_roof_dif_nir": 0.14
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "S_net_roof",
+                            "time": 0.0,
+                            "expected": 271.081607808086915,
+                            "tolerance": {
+                                "rel": 1e-06
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "cesm_dump_canyon_shortwave_daytime",
+                    "description": "CESM CLM ground truth: stage1/dumps/clm/clm_urbalb.csv (landunit 255, step 2, ymd 20000101, tod 3600; all 5 ctypes of the daytime urban landunit). Direct-beam VIS only: the dumped sabs_*_dir are solar absorbed per unit incident direct flux in band 1 (vis) with sdir = 1 (UrbanAlbedoMod.F90:1309-1312; see dump description), so the .esm is run with S_atm_dir_vis = 1 and all other incident fluxes 0. Intrinsic surface albedos come from the surfdata file surfdata_1.9x2.5_hist_2000_78pfts_c251022.nc for the l=255 group (CANYON_HWR = 1.4, WTROAD_PERV = 0.5): ALB_ROOF_DIR = 0.14, ALB_WALL_DIR = 0.2166, ALB_IMPROAD_DIR = 0.13, ALB_PERROAD_DIR = 0.08. The pervious/impervious road split reduces exactly to a single effective road of albedo wt_imp*0.13 + wt_perv*0.08 = 0.105 (the CLM two-road iteration absorbs identically; combined-road vs single-road difference ~2e-16). The dumped albd_vis roof row (0.14000000059604645 = float32(0.14)) independently confirms ALB_ROOF_DIR. Reference: CLM UrbanAlbedoMod.F90:624-726, 801-1190 (net_solar/incident_direct); the dumped albd_vis of the canyon columns combine (0.5*albd_75 + 0.5*albd_74 + H_W*(albd_72 + albd_73)) into the canyon reflected radiation sref_canyon, which the .esm S_refl_sky_dir_vis / α_uc_dir_vis reproduce. Expected values are the dumped sabs_*: roof/sunwall/shadewall rows directly, road = 0.5*sabs_improad + 0.5*sabs_perroad. Sun position: coszen = 0.91580348106827802, μ_zen = acos(coszen); at this high sun θ_0 saturates at π/2 (fully sunlit canyon). Tolerance: roof rel 1e-12 (no iteration; sabs_roof = 1 - albd_roof exactly); canyon surfaces rel 3e-5 because CLM solves the canyon reflection iteratively (errcrit = 1e-5, n = 50, UrbanAlbedoMod.F90:794-1190) and stops at its convergence cutoff, so the dumped values carry iteration truncation: up to ~3.2e-7 absolute, which is a relative deviation of up to ~5.4e-6 on the small shaded-wall absorption (measured across this test and cesm_dump_canyon_shortwave_low_sun). The .esm is the exact closed form of the same linear system. rel 3e-5 gives about 5x headroom over that truncation, while a transcription error would still show up at the 1e-3 level or above.",
+                    "parameter_overrides": {
+                        "H_W": 1.3999999761581421,
+                        "μ_zen": 0.4132923801417499,
+                        "S_atm_dir_vis": 1.0,
+                        "S_atm_dir_nir": 0.0,
+                        "S_atm_dif_vis": 0.0,
+                        "S_atm_dif_nir": 0.0,
+                        "α_roof_dir_vis": 0.14000000059604645,
+                        "α_road_dir_vis": 0.10499999672174454,
+                        "α_wall_dir_vis": 0.21660000085830688
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "S_net_roof",
+                            "time": 0.0,
+                            "expected": 0.85999999940395355,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "S_net_road_dir_vis",
+                            "time": 0.0,
+                            "expected": 0.56826924657606892,
+                            "tolerance": {
+                                "rel": 3e-05
+                            }
+                        },
+                        {
+                            "variable": "S_net_sunwall_dir_vis",
+                            "time": 0.0,
+                            "expected": 0.23573463830488886,
+                            "tolerance": {
+                                "rel": 3e-05
+                            }
+                        },
+                        {
+                            "variable": "S_net_shdwall_dir_vis",
+                            "time": 0.0,
+                            "expected": 0.038951552943095949,
+                            "tolerance": {
+                                "rel": 3e-05
+                            }
+                        },
+                        {
+                            "variable": "S_refl_sky_dir_vis",
+                            "time": 0.0,
+                            "expected": 0.047169295831654495,
+                            "tolerance": {
+                                "rel": 3e-05
+                            }
+                        },
+                        {
+                            "variable": "α_uc_dir_vis",
+                            "time": 0.0,
+                            "expected": 0.047169295831654495,
+                            "tolerance": {
+                                "rel": 3e-05
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "cesm_dump_canyon_shortwave_low_sun",
+                    "description": "CESM CLM ground truth: stage1/dumps/clm/clm_urbalb.csv (landunit 255, step 12, ymd 20000101, tod 21600; all 5 ctypes). Same dump, method, surfdata albedos, and tolerances as cesm_dump_canyon_shortwave_daytime, at the low-sun position coszen = 0.39402549836194734 (μ_zen = acos(coszen) = 1.1657889957273508). At this sun angle the canyon is only partially sunlit: θ_0 = 0.31121988851515503 < π/2, so the road direct-beam factor drops to 0.098257 while the sunlit wall factor rises to 0.644102 (Oleson Eqs. 2.16-2.17), and the sunlit wall becomes the dominant absorber. Expected values are the dumped sabs_* (roof row; road = 0.5*sabs_improad + 0.5*sabs_perroad); sref_canyon from the dumped albd_vis combination as in the daytime test.",
+                    "parameter_overrides": {
+                        "H_W": 1.3999999761581421,
+                        "μ_zen": 1.1657889957273508,
+                        "S_atm_dir_vis": 1.0,
+                        "S_atm_dir_nir": 0.0,
+                        "S_atm_dif_vis": 0.0,
+                        "S_atm_dif_nir": 0.0,
+                        "α_roof_dir_vis": 0.14000000059604645,
+                        "α_road_dir_vis": 0.10499999672174454,
+                        "α_wall_dir_vis": 0.21660000085830688
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "S_net_roof",
+                            "time": 0.0,
+                            "expected": 0.85999999940395355,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "S_net_road_dir_vis",
+                            "time": 0.0,
+                            "expected": 0.13626164028510857,
+                            "tolerance": {
+                                "rel": 3e-05
+                            }
+                        },
+                        {
+                            "variable": "S_net_sunwall_dir_vis",
+                            "time": 0.0,
+                            "expected": 0.51435832692959083,
+                            "tolerance": {
+                                "rel": 3e-05
+                            }
+                        },
+                        {
+                            "variable": "S_net_shdwall_dir_vis",
+                            "time": 0.0,
+                            "expected": 0.060372639493391042,
+                            "tolerance": {
+                                "rel": 3e-05
+                            }
+                        },
+                        {
+                            "variable": "S_refl_sky_dir_vis",
+                            "time": 0.0,
+                            "expected": 0.059113943980595794,
+                            "tolerance": {
+                                "rel": 3e-05
+                            }
+                        },
+                        {
+                            "variable": "α_uc_dir_vis",
+                            "time": 0.0,
+                            "expected": 0.059113943980595794,
+                            "tolerance": {
+                                "rel": 3e-05
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "cesm_dump_roof_longwave",
+                    "description": "CESM CLM ground truth: stage1/dumps/clm/clm_urban_lw.csv (landunit 255, step 1, ymd 20000101, tod 1800). Dumped inputs: canyon_hwr = 1.3999999761581421, lwdown = 349.41365597825893, t_roof = 293.6982740643449. The roof emissivity is recovered exactly from the same dumped row via CLM UrbanRadiationMod.F90:707 (lwup_roof = em_roof*sb*T^4 + (1-em_roof)*lwdown) giving em_roof = 0.91. CLM UrbanRadiationMod.F90:707-708 defines lwup_roof and lwnet_roof = lwup_roof - lwdown; the .esm L_up_roof (Eq. 2.102) and L_net_roof (Eq. 2.101) are asserted against the dumped lwup_roof / lwnet_roof.",
+                    "parameter_overrides": {
+                        "H_W": 1.3999999761581421,
+                        "L_atm_down": 349.41365597825893,
+                        "T_roof": 293.6982740643449,
+                        "ε_roof": 0.91
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L_up_roof",
+                            "time": 0.0,
+                            "expected": 415.357764897868320,
+                            "tolerance": {
+                                "rel": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "L_net_roof",
+                            "time": 0.0,
+                            "expected": 65.944108919609391,
+                            "tolerance": {
+                                "rel": 1e-06
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "cesm_dump_canyon_longwave_hwr1p4",
+                    "description": "CESM CLM ground truth: stage1/dumps/clm/clm_urban_lw.csv (landunit 255, step 1). Dumped inputs: canyon_hwr = 1.3999999761581421, lwdown = 349.41365597825893, t_sunwall = 291.1239470036042, t_shadewall = 288.64988638670417; the dumped road surfaces (t_improad = 290.14010701428936, em_improad = 0.91, t_perroad = 290.76809373081602, em_perroad = 0.95, wtroad_perv = 0.5) are combined into CLM's effective single road (em_road = 0.93, t_road = 290.46136181403102) exactly as CLM's per-road absorption/reflection/emission aggregates. em_improad/em_perroad are recovered by inverting the CLM net_longwave law of UrbanRadiationMod.F90:320-713 against the same dumped row (residual < 1e-13); em_wall = 0.9008. The .esm L_net_sunwall, L_net_shdwall, L_net_uc (Eqs. 2.111-2.113, 2.172) are asserted against the dumped lwnet_sunwall, lwnet_shadewall, lwnet_canyon, and L_net_road against the wtroad-weighted dumped lwnet_improad/lwnet_perroad. This pins the shallow-canyon (H/W=1.4) multiple re-emission solution. Tolerance is absolute 0.001 W/m2, not machine precision: CLM's net_longwave is a fixed-point iteration (UrbanRadiationMod.F90:596-674, n=50) that stops once the per-iteration absorbed flux falls below 0.001 W/m2, so the dumped values carry up to ~1e-4 W/m2 of iteration truncation. The .esm band solution is the exact closed form of the same linear system; re-running the CLM reference with the convergence tolerance tightened to 1e-12 reproduces the .esm values to <1e-14 (relative).",
+                    "parameter_overrides": {
+                        "H_W": 1.3999999761581421,
+                        "L_atm_down": 349.41365597825893,
+                        "T_road": 290.46136181403102,
+                        "T_sunwall": 291.1239470036042,
+                        "T_shdwall": 288.64988638670417,
+                        "ε_road": 0.93,
+                        "ε_wall": 0.9008
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L_net_sunwall",
+                            "time": 0.0,
+                            "expected": 20.233798199927172,
+                            "tolerance": {
+                                "abs": 0.001
+                            }
+                        },
+                        {
+                            "variable": "L_net_shdwall",
+                            "time": 0.0,
+                            "expected": 2.4896492566541535,
+                            "tolerance": {
+                                "abs": 0.001
+                            }
+                        },
+                        {
+                            "variable": "L_net_road",
+                            "time": 0.0,
+                            "expected": 18.920037896832191,
+                            "tolerance": {
+                                "abs": 0.001
+                            }
+                        },
+                        {
+                            "variable": "L_net_uc",
+                            "time": 0.0,
+                            "expected": 50.732863794276838,
+                            "tolerance": {
+                                "abs": 0.001
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "cesm_dump_canyon_longwave_hwr4p8",
+                    "description": "CESM CLM ground truth: stage1/dumps/clm/clm_urban_lw.csv (landunit 252, step 1). Dumped inputs: canyon_hwr = 4.8000001907348633, lwdown = 421.49193045587674, t_sunwall = 302.66592092104372, t_shadewall = 302.27818062314356; the dumped road surfaces (t_improad = 303.60535154616957, em_improad = 0.88, t_perroad = 300.22453241001068, em_perroad = 0.95, wtroad_perv = 1/6) reduce to CLM's effective single road (em_road = 0.89166666666666672, t_road = 303.01324261051303). Same method and same CLM reference (UrbanRadiationMod.F90:320-713, net_longwave) as cesm_dump_canyon_longwave_hwr1p4; this row pins the deep-canyon (H/W=4.8) multiple re-emission solution, where wall-to-wall trapping dominates. Tolerance is absolute 0.001 W/m2 because of CLM's 0.001 W/m2 iteration cutoff (UrbanRadiationMod.F90:668); the .esm is the exact closed-form solution of the same linear system.",
+                    "parameter_overrides": {
+                        "H_W": 4.8000001907348633,
+                        "L_atm_down": 421.49193045587674,
+                        "T_road": 303.01324261051303,
+                        "T_sunwall": 302.66592092104372,
+                        "T_shdwall": 302.27818062314356,
+                        "ε_road": 0.89166666666666672,
+                        "ε_wall": 0.9008
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L_net_sunwall",
+                            "time": 0.0,
+                            "expected": 6.4815606143640752,
+                            "tolerance": {
+                                "abs": 0.001
+                            }
+                        },
+                        {
+                            "variable": "L_net_shdwall",
+                            "time": 0.0,
+                            "expected": 2.8035865029239804,
+                            "tolerance": {
+                                "abs": 0.001
+                            }
+                        },
+                        {
+                            "variable": "L_net_road",
+                            "time": 0.0,
+                            "expected": 8.3248041257084715,
+                            "tolerance": {
+                                "abs": 0.001
+                            }
+                        },
+                        {
+                            "variable": "L_net_uc",
+                            "time": 0.0,
+                            "expected": 52.893505692881078,
+                            "tolerance": {
+                                "abs": 0.001
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "cesm_dump_canyon_longwave_hwr0p8",
+                    "description": "CESM CLM ground truth: stage1/dumps/clm/clm_urban_lw.csv (landunit 267, step 1, ymd 20000101, tod 1800). Dumped inputs: canyon_hwr = 0.80000001192092896, lwdown = 399.28746646928073, t_sunwall = 299.79753577189859, t_shadewall = 299.60285670920297. Landunit 267 has an all-pervious road (wtroad_perv = 1.0, recovered exactly from the wtroad-weighted lwnet_canyon = wt_imp*lwnet_improad + wt_perv*lwnet_perroad + hwr*(lwnet_sunwall + lwnet_shadewall) combination of the same dumped row), so the road reduces to the pervious road alone: t_road = t_perroad = 298.65981788257596, em_road = em_perroad = 0.95 (float32). em_wall = 0.9008 (surfdata ALB group, cross-checked against the l=255 dumps and confirmed here: a single em_wall reproduces all three canyon surfaces to the iteration-truncation level); em_roof is recovered exactly from the same dumped row via CLM UrbanRadiationMod.F90:707 (lwup_roof = em_roof*sb*T^4 + (1-em_roof)*lwdown), giving em_roof = float32(0.9) = 0.8999999761581421. The .esm L_net_sunwall, L_net_shdwall, L_net_road, L_net_uc (Eqs. 2.111-2.113, 2.172) are asserted against the dumped lwnet_sunwall, lwnet_shadewall, lwnet_perroad, lwnet_canyon, and L_up_roof/L_net_roof (Eqs. 2.101-2.102) against lwup_roof/lwnet_roof. This pins the shallow-canyon (H/W=0.8) multiple re-emission solution, the opposite extreme of cesm_dump_canyon_longwave_hwr4p8. Tolerance is absolute 0.001 W/m2 for canyon surfaces because of CLM's 0.001 W/m2 iteration cutoff (UrbanRadiationMod.F90:668; measured truncation ~5e-6); the roof values are single-pass exact formulas, asserted at rel 1e-12.",
+                    "parameter_overrides": {
+                        "H_W": 0.80000001192092896,
+                        "L_atm_down": 399.28746646928073,
+                        "T_roof": 297.07227481032965,
+                        "T_road": 298.65981788257596,
+                        "T_sunwall": 299.79753577189859,
+                        "T_shdwall": 299.60285670920297,
+                        "ε_road": 0.949999988079071,
+                        "ε_wall": 0.9007999897003174,
+                        "ε_roof": 0.8999999761581421
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L_net_sunwall",
+                            "time": 0.0,
+                            "expected": 20.574469008552477,
+                            "tolerance": {
+                                "abs": 0.001
+                            }
+                        },
+                        {
+                            "variable": "L_net_shdwall",
+                            "time": 0.0,
+                            "expected": 19.176873822606279,
+                            "tolerance": {
+                                "abs": 0.001
+                            }
+                        },
+                        {
+                            "variable": "L_net_road",
+                            "time": 0.0,
+                            "expected": 21.627630629027855,
+                            "tolerance": {
+                                "abs": 0.001
+                            }
+                        },
+                        {
+                            "variable": "L_net_uc",
+                            "time": 0.0,
+                            "expected": 53.428705367827789,
+                            "tolerance": {
+                                "abs": 0.001
+                            }
+                        },
+                        {
+                            "variable": "L_up_roof",
+                            "time": 0.0,
+                            "expected": 437.37101651152346,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "L_net_roof",
+                            "time": 0.0,
+                            "expected": 38.083550042242734,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "cesm_law_direct_beam_factors",
+                    "description": "Closed-form regression test, not a dump pin: the expected values are recomputed from the CLM Fortran closed form, with inputs taken from the CESM-dumped geometry and sun position in stage1/dumps/clm/clm_urbalb.csv (landunit 255, step 12: canyon_hwr = 1.3999999761581421, coszen = 0.39402549836194734); the same row's full absorbed-flux solution is asserted in cesm_dump_canyon_shortwave_low_sun. This test isolates the intermediate direct-beam factors: CLM UrbanAlbedoMod.F90:640 sets theta0 = asin(min(1/(hwr*tan(zen)), 1)) and UrbanAlbedoMod.F90:652-655 is the analytical integration (Masson 2000) of the direct beam onto road and sunlit wall; zen = acos(coszen) = 1.1657889957273508. Asserts the .esm theta_0 (Eq. 2.11) and direct-beam factors S_road_factor (Eq. 2.17) and S_sunwall_factor (Eq. 2.16); conservation Eq. 2.18 holds automatically (S_road_factor + H/W*S_sunwall_factor = 1).",
+                    "parameter_overrides": {
+                        "H_W": 1.3999999761581421,
+                        "μ_zen": 1.1657889957273508
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "θ_0",
+                            "time": 0.0,
+                            "expected": 0.31121988851515503,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "S_road_factor",
+                            "time": 0.0,
+                            "expected": 0.098256949368326532,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "S_sunwall_factor",
+                            "time": 0.0,
+                            "expected": 0.64410218999161883,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "cesm_forcing_canyon_shortwave_multi_reflection",
+                    "description": "Closed-form regression test, not a dump pin: the expected values are recomputed from the CLM Fortran closed form using CESM-dumped forcing and geometry together with the .esm default surface albedos, and are not dumped CLM outputs. Inputs: stage1/dumps/clm/clm_urban_rad.csv (patch of column 267, step 2: forc_solad_vis = 93.26208084478405017, forc_solad_nir = 123.956746999629956, forc_solai_vis = 65.9080376251691717, forc_solai_nir = 35.2133714703232741) and the dumped geometry/sun position of landunit 255 (canyon_hwr = 1.3999999761581421; coszen = 0.91580348106827802). This is the full 4-band version of the cesm_dump_canyon_shortwave_daytime test, exercising the diffuse and NIR bands that the unit-incident dump test does not cover; it uses the .esm default surface albedos (road 0.08, wall 0.25) because the dumped daytime albedo rows of clm_urbalb.csv are already asserted at full precision in the two dump tests. Reference: CLM UrbanAlbedoMod.F90:794-1319 net_solar; because CLM solves the canyon reflection iteratively (errcrit = 1e-5, n = 50), the reference here is the exact linear-system solution of the same equations, which the .esm band_net_road / band_net_sw / band_net_sh / band_refl_sky templates reproduce. Asserts per-band absorbed fluxes and the canyon albedo (Oleson Eqs. 2.63-2.95).",
+                    "parameter_overrides": {
+                        "H_W": 1.3999999761581421,
+                        "μ_zen": 0.4132923801417499,
+                        "S_atm_dir_vis": 93.26208084478405017,
+                        "S_atm_dir_nir": 123.956746999629956,
+                        "S_atm_dif_vis": 65.9080376251691717,
+                        "S_atm_dif_nir": 35.2133714703232741,
+                        "α_road_dir_vis": 0.08,
+                        "α_road_dir_nir": 0.08,
+                        "α_road_dif_vis": 0.08,
+                        "α_road_dif_nir": 0.08,
+                        "α_wall_dir_vis": 0.25,
+                        "α_wall_dir_nir": 0.25,
+                        "α_wall_dif_vis": 0.25,
+                        "α_wall_dif_nir": 0.25
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "S_net_road_dir_vis",
+                            "time": 0.0,
+                            "expected": 54.807002948803742,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        },
+                        {
+                            "variable": "S_net_sunwall_dir_vis",
+                            "time": 0.0,
+                            "expected": 20.852626981371756,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        },
+                        {
+                            "variable": "S_net_shdwall_dir_vis",
+                            "time": 0.0,
+                            "expected": 3.5502512926208505,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        },
+                        {
+                            "variable": "S_refl_sky_dir_vis",
+                            "time": 0.0,
+                            "expected": 4.291048894200614,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        },
+                        {
+                            "variable": "α_uc_dir_vis",
+                            "time": 0.0,
+                            "expected": 0.046010649294242111,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        },
+                        {
+                            "variable": "S_net_road_dif_vis",
+                            "time": 0.0,
+                            "expected": 22.385332902697819,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        },
+                        {
+                            "variable": "S_net_sunwall_dif_vis",
+                            "time": 0.0,
+                            "expected": 14.174372650066481,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        },
+                        {
+                            "variable": "S_net_shdwall_dif_vis",
+                            "time": 0.0,
+                            "expected": 14.174372650066477,
+                            "tolerance": {
+                                "rel": 1e-08
                             }
                         }
                     ]
