@@ -2,7 +2,7 @@
  "esm": "1.0.0",
  "metadata": {
   "name": "FuelFractionCellWRFFire",
-  "description": "Fuel fraction remaining and burning area fraction of one fire-grid cell as computed by fire_behavior's Calc_fuel_left (physics/level_set_mod.F90): the cell is split into a 2x2 submesh (fuel_left_irl = fuel_left_jrl = 2); at the four corners of every subcell the level-set function and the ignition time are bilinearly interpolated from the 3x3 node neighbourhood of the cell (the node values are the cell-centred lfn and tign_g of the cell and its eight neighbours; subcell (1,1) uses nodes (i-1..i, j-1..j) at fractions 1/2..1, subcell (2,1) nodes (i..i+1, j-1..j) at fractions 0..1/2 and so on); each subcell's burning area is the level-set sign fraction (1 - sum lfn/sum|lfn|)/2 (Mandel et al. 2011 Sect. 3.2) and its remaining fuel is area exp(-(time_now - tign_mean)/fuel_time) + (1 - area) with the mean of the four corner times since ignition (zero for unburnt or not-yet-ignited corners); the cell values are the subcell means. The per-step burnt fraction fuel_frac_before - fuel_frac feeds Calc_fire_fluxes. For a cell that is entirely burning with uniform ignition time this is the exact solution of dF/dt = -F/fuel_time (EarthSciModels level_set/fuel_consumption.esm, Mandel eq. 3), exposed as dfuel_frac_dt_burning; for partly burning cells the subgrid integration has no single-ODE equivalent, which is why this component is transcribed rather than reusing FuelConsumption. Tests: cells of the instrumented test7 run at step 20 (real32), rel 1e-5 (abs 1e-7 where a subcell fraction is exactly 0 or 1).",
+  "description": "Fuel fraction remaining and burning area fraction of one fire-grid cell as computed by fire_behavior's Calc_fuel_left (physics/level_set_mod.F90): the cell is split into a 2x2 submesh (fuel_left_irl = fuel_left_jrl = 2); at the four corners of every subcell the level-set function and the ignition time are bilinearly interpolated from the 3x3 node neighbourhood of the cell (the node values are the cell-centred lfn and tign_g of the cell and its eight neighbours; subcell (1,1) uses nodes (i-1..i, j-1..j) at fractions 1/2..1, subcell (2,1) nodes (i..i+1, j-1..j) at fractions 0..1/2 and so on); each subcell's burning area is the level-set sign fraction (1 - sum lfn/sum|lfn|)/2 (Mandel et al. 2011 Sect. 3.2) and its remaining fuel is area exp(-(time_now - tign_mean)/fuel_time) + (1 - area) with the mean of the four corner times since ignition (zero for unburnt or not-yet-ignited corners); the cell values are the subcell means. The per-step burnt fraction fuel_frac_before - fuel_frac feeds Calc_fire_fluxes. For a cell that is entirely burning with uniform ignition time this is the exact solution of dF/dt = -F/fuel_time (EarthSciModels level_set/fuel_consumption.esm, Mandel eq. 3), exposed as dfuel_frac_dt_burning (= dF/dt <= 0); the step-averaged consumption rate the flux computation uses, fuel_frac_burnt_dt/dt_fire >= 0 (dt_fire must equal the fire step), is fuel_burn_rate, FireHeatFlux's input; for partly burning cells the subgrid integration has no single-ODE equivalent, which is why this component is transcribed rather than reusing FuelConsumption. Tests: cells of the instrumented test7 run at step 20 (real32), rel 1e-5 (abs 1e-7 where a subcell fraction is exactly 0 or 1).",
   "license": "MIT",
   "tags": [
    "wildland_fire",
@@ -493,6 +493,17 @@
      "type": "unknown",
      "units": "1/s",
      "description": "Continuous rate form for a fully burning cell: -fuel_frac/fuel_time, i.e. Mandel et al. (2011) eq. 3 dF/dt = -F/T_f, which the subcell exponentials integrate exactly. Where fire_area < 1 the cell rate is not a single exponential, so this is a diagnostic of the fully-burning limit only."
+    },
+    "dt_fire": {
+     "type": "parameter",
+     "units": "s",
+     "default": 0.5,
+     "description": "Length of the fire step over which fuel_frac_burnt_dt is taken (fire_behavior grid%dt). The component has no step-start time to derive it from (time_now is the step END, and fuel_frac_before is a value, not a time), so it is an independent input that the consumer MUST set equal to the step that produced fuel_frac_before, i.e. dt_fire = time_now - (time of fuel_frac_before); nothing checks this, and a mismatched value silently rescales fuel_burn_rate. The default 0.5 s is fire_behavior test7's dt, the step of every inline test here. A parameter of the RATE, not an integrator step."
+    },
+    "fuel_burn_rate": {
+     "type": "unknown",
+     "units": "1/s",
+     "description": "Fuel consumption rate of the cell, fuel_frac_burnt_dt / dt_fire >= 0: the step-averaged -dF/dt (positive while fuel is consumed; opposite in sign to dfuel_frac_dt_burning, which is dF/dt). This is exactly the rate Calc_fire_fluxes forms (dmass = fuel_load_g fuel_frac_burnt_dt, flux = dmass/dt ...), and it has the sign and meaning of FireHeatFlux's fuel_burn_rate input (EarthSciModels level_set/fire_heat_flux.esm, -dF/dt), which it drives in a coupled document. Unlike dfuel_frac_dt_burning it is valid for a partially burning cell, and it carries the scheme's subcell quadrature at finite dt_fire; for a fully burning cell with uniform ignition time it converges to -dfuel_frac_dt_burning = fuel_frac/fuel_time as dt_fire -> 0."
     }
    },
    "equations": [
@@ -1470,6 +1481,7 @@
       ]
      }
     },
+    {"lhs": "fuel_burn_rate", "rhs": {"op": "/", "args": ["fuel_frac_burnt_dt", "dt_fire"]}},
     {
      "lhs": "dfuel_frac_dt_burning",
      "rhs": {
@@ -1489,7 +1501,7 @@
    "tests": [
     {
      "id": "step20_front_cell_area_0p19",
-     "description": "Reference: NCAR fire_behavior (develop @ eb77580, default real32 build, gfortran 13.3 -O2 in the EqWeFiC container) running its test7 case (80x80 fire cells of 25 m, dt = 0.5 s, num_tiles = 1), dumped in-model by the ctessum-claude/fire_behavior fork (branch earthsciml-instrumented, commit c9dda02, based on NCAR fire_behavior eb77580, three commits before v1.0.0; -DESM_DUMP=ON; summary output bit-identical to the uninstrumented build). Single-precision source: rel 1e-5 (the tolerance contract for a single-precision reference), abs 1e-7 where a value is exactly 0 or 1. Regime: cell (i,j) = (16, 60) at the end of step 20 (time_now = 10.5 s), a cell the front has just entered (fire_area 0.19, fuel_frac 0.9916, all ignition within the last steps); inputs are the 3x3 node neighbourhood of lfn and tign_g and the cell's fuel_time and previous fuel fraction from the fuel_left dump.",
+     "description": "Reference: NCAR fire_behavior (develop @ eb77580, default real32 build, gfortran 13.3 -O2 in the EqWeFiC container) running its test7 case (80x80 fire cells of 25 m, dt = 0.5 s, num_tiles = 1), dumped in-model by the ctessum-claude/fire_behavior fork (branch earthsciml-instrumented, commit c9dda02, based on NCAR fire_behavior eb77580, three commits before v1.0.0; -DESM_DUMP=ON; summary output bit-identical to the uninstrumented build). Single-precision source: rel 1e-5 (the tolerance contract for a single-precision reference), abs 1e-7 where a value is exactly 0 or 1. Regime: cell (i,j) = (16, 60) at the end of step 20 (time_now = 10.5 s), a cell the front has just entered (fire_area 0.19, fuel_frac 0.9916, all ignition within the last steps); inputs are the 3x3 node neighbourhood of lfn and tign_g and the cell's fuel_time and previous fuel fraction from the fuel_left dump. fuel_burn_rate is asserted as the dumped fuel_frac_burnt_dt divided by the run's fire step dt = 0.5 s (dt_fire set explicitly), the rate Calc_fire_fluxes forms from it.",
      "parameter_overrides": {
       "lfn_mm": 35.504486083984375,
       "lfn_m0": 30.6441650390625,
@@ -1511,7 +1523,8 @@
       "tign_pp": 8.85060977935791,
       "time_now": 10.5,
       "fuel_time": 8.235294342041016,
-      "fuel_frac_before": 1.0
+      "fuel_frac_before": 1.0,
+      "dt_fire": 0.5
      },
      "expression_template_imports": [
       {
@@ -1551,12 +1564,21 @@
         "rel": 2e-05,
         "abs": 1e-07
        }
+      },
+      {
+       "variable": "fuel_burn_rate",
+       "time": 0.0,
+       "expected": 0.016796350479125977,
+       "tolerance": {
+        "rel": 2e-05,
+        "abs": 2e-07
+       }
       }
      ]
     },
     {
      "id": "step20_mostly_burning_area_0p93",
-     "description": "Reference: NCAR fire_behavior (develop @ eb77580, default real32 build, gfortran 13.3 -O2 in the EqWeFiC container) running its test7 case (80x80 fire cells of 25 m, dt = 0.5 s, num_tiles = 1), dumped in-model by the ctessum-claude/fire_behavior fork (branch earthsciml-instrumented, commit c9dda02, based on NCAR fire_behavior eb77580, three commits before v1.0.0; -DESM_DUMP=ON; summary output bit-identical to the uninstrumented build). Single-precision source: rel 1e-5 (the tolerance contract for a single-precision reference), abs 1e-7 where a value is exactly 0 or 1. Regime: cell (i,j) = (17, 59) at the end of step 20 (time_now = 10.5 s), a nearly engulfed cell (fire_area 0.93, fuel_frac_before 0.947 already below 1); inputs are the 3x3 node neighbourhood of lfn and tign_g and the cell's fuel_time and previous fuel fraction from the fuel_left dump.",
+     "description": "Reference: NCAR fire_behavior (develop @ eb77580, default real32 build, gfortran 13.3 -O2 in the EqWeFiC container) running its test7 case (80x80 fire cells of 25 m, dt = 0.5 s, num_tiles = 1), dumped in-model by the ctessum-claude/fire_behavior fork (branch earthsciml-instrumented, commit c9dda02, based on NCAR fire_behavior eb77580, three commits before v1.0.0; -DESM_DUMP=ON; summary output bit-identical to the uninstrumented build). Single-precision source: rel 1e-5 (the tolerance contract for a single-precision reference), abs 1e-7 where a value is exactly 0 or 1. Regime: cell (i,j) = (17, 59) at the end of step 20 (time_now = 10.5 s), a nearly engulfed cell (fire_area 0.93, fuel_frac_before 0.947 already below 1); inputs are the 3x3 node neighbourhood of lfn and tign_g and the cell's fuel_time and previous fuel fraction from the fuel_left dump. fuel_burn_rate is asserted as the dumped fuel_frac_burnt_dt divided by the run's fire step dt = 0.5 s (dt_fire set explicitly), the rate Calc_fire_fluxes forms from it.",
      "parameter_overrides": {
       "lfn_mm": 22.531967163085938,
       "lfn_m0": 12.986724853515625,
@@ -1578,7 +1600,8 @@
       "tign_pp": 6.953971862792969,
       "time_now": 10.5,
       "fuel_time": 8.235294342041016,
-      "fuel_frac_before": 0.946826159954071
+      "fuel_frac_before": 0.946826159954071,
+      "dt_fire": 0.5
      },
      "expression_template_imports": [
       {
@@ -1618,12 +1641,21 @@
         "rel": 2e-05,
         "abs": 1e-07
        }
+      },
+      {
+       "variable": "fuel_burn_rate",
+       "time": 0.0,
+       "expected": 0.09368264675140381,
+       "tolerance": {
+        "rel": 2e-05,
+        "abs": 2e-07
+       }
       }
      ]
     },
     {
      "id": "step20_fully_burning_nonuniform_tign",
-     "description": "Reference: NCAR fire_behavior (develop @ eb77580, default real32 build, gfortran 13.3 -O2 in the EqWeFiC container) running its test7 case (80x80 fire cells of 25 m, dt = 0.5 s, num_tiles = 1), dumped in-model by the ctessum-claude/fire_behavior fork (branch earthsciml-instrumented, commit c9dda02, based on NCAR fire_behavior eb77580, three commits before v1.0.0; -DESM_DUMP=ON; summary output bit-identical to the uninstrumented build). Single-precision source: rel 1e-5 (the tolerance contract for a single-precision reference), abs 1e-7 where a value is exactly 0 or 1. Regime: cell (i,j) = (17, 60) at the end of step 20 (time_now = 10.5 s), a fully burning cell (fire_area 1) whose nine node ignition times differ (6.8 .. 10.5 s), so the cell fuel fraction 0.832 is the mean of four different exponentials -- the case FuelConsumption's single ODE cannot represent; inputs are the 3x3 node neighbourhood of lfn and tign_g and the cell's fuel_time and previous fuel fraction from the fuel_left dump.",
+     "description": "Reference: NCAR fire_behavior (develop @ eb77580, default real32 build, gfortran 13.3 -O2 in the EqWeFiC container) running its test7 case (80x80 fire cells of 25 m, dt = 0.5 s, num_tiles = 1), dumped in-model by the ctessum-claude/fire_behavior fork (branch earthsciml-instrumented, commit c9dda02, based on NCAR fire_behavior eb77580, three commits before v1.0.0; -DESM_DUMP=ON; summary output bit-identical to the uninstrumented build). Single-precision source: rel 1e-5 (the tolerance contract for a single-precision reference), abs 1e-7 where a value is exactly 0 or 1. Regime: cell (i,j) = (17, 60) at the end of step 20 (time_now = 10.5 s), a fully burning cell (fire_area 1) whose nine node ignition times differ (6.8 .. 10.5 s), so the cell fuel fraction 0.832 is the mean of four different exponentials -- the case FuelConsumption's single ODE cannot represent; inputs are the 3x3 node neighbourhood of lfn and tign_g and the cell's fuel_time and previous fuel fraction from the fuel_left dump. fuel_burn_rate is asserted as the dumped fuel_frac_burnt_dt divided by the run's fire step dt = 0.5 s (dt_fire set explicitly), the rate Calc_fire_fluxes forms from it.",
      "parameter_overrides": {
       "lfn_mm": 12.986724853515625,
       "lfn_m0": 7.3419189453125,
@@ -1645,7 +1677,8 @@
       "tign_pp": 6.772350788116455,
       "time_now": 10.5,
       "fuel_time": 8.235294342041016,
-      "fuel_frac_before": 0.8935697078704834
+      "fuel_frac_before": 0.8935697078704834,
+      "dt_fire": 0.5
      },
      "expression_template_imports": [
       {
@@ -1685,12 +1718,21 @@
         "rel": 2e-05,
         "abs": 1e-07
        }
+      },
+      {
+       "variable": "fuel_burn_rate",
+       "time": 0.0,
+       "expected": 0.12274706363677979,
+       "tolerance": {
+        "rel": 2e-05,
+        "abs": 2e-07
+       }
       }
      ]
     },
     {
      "id": "step20_barely_touched_area_0p02",
-     "description": "Reference: NCAR fire_behavior (develop @ eb77580, default real32 build, gfortran 13.3 -O2 in the EqWeFiC container) running its test7 case (80x80 fire cells of 25 m, dt = 0.5 s, num_tiles = 1), dumped in-model by the ctessum-claude/fire_behavior fork (branch earthsciml-instrumented, commit c9dda02, based on NCAR fire_behavior eb77580, three commits before v1.0.0; -DESM_DUMP=ON; summary output bit-identical to the uninstrumented build). Single-precision source: rel 1e-5 (the tolerance contract for a single-precision reference), abs 1e-7 where a value is exactly 0 or 1. Regime: cell (i,j) = (16, 59) at the end of step 20 (time_now = 10.5 s), a cell the front barely touches (fire_area 0.023); inputs are the 3x3 node neighbourhood of lfn and tign_g and the cell's fuel_time and previous fuel fraction from the fuel_left dump.",
+     "description": "Reference: NCAR fire_behavior (develop @ eb77580, default real32 build, gfortran 13.3 -O2 in the EqWeFiC container) running its test7 case (80x80 fire cells of 25 m, dt = 0.5 s, num_tiles = 1), dumped in-model by the ctessum-claude/fire_behavior fork (branch earthsciml-instrumented, commit c9dda02, based on NCAR fire_behavior eb77580, three commits before v1.0.0; -DESM_DUMP=ON; summary output bit-identical to the uninstrumented build). Single-precision source: rel 1e-5 (the tolerance contract for a single-precision reference), abs 1e-7 where a value is exactly 0 or 1. Regime: cell (i,j) = (16, 59) at the end of step 20 (time_now = 10.5 s), a cell the front barely touches (fire_area 0.023); inputs are the 3x3 node neighbourhood of lfn and tign_g and the cell's fuel_time and previous fuel fraction from the fuel_left dump. fuel_burn_rate is asserted as the dumped fuel_frac_burnt_dt divided by the run's fire step dt = 0.5 s (dt_fire set explicitly), the rate Calc_fire_fluxes forms from it.",
      "parameter_overrides": {
       "lfn_mm": 43.829986572265625,
       "lfn_m0": 35.504486083984375,
@@ -1712,7 +1754,8 @@
       "tign_pp": 8.99034309387207,
       "time_now": 10.5,
       "fuel_time": 8.235294342041016,
-      "fuel_frac_before": 1.0
+      "fuel_frac_before": 1.0,
+      "dt_fire": 0.5
      },
      "expression_template_imports": [
       {
@@ -1751,6 +1794,15 @@
        "tolerance": {
         "rel": 2e-05,
         "abs": 1e-07
+       }
+      },
+      {
+       "variable": "fuel_burn_rate",
+       "time": 0.0,
+       "expected": 0.0008412599563598633,
+       "tolerance": {
+        "rel": 2e-05,
+        "abs": 2e-07
        }
       }
      ]

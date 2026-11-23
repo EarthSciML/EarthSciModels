@@ -1,0 +1,469 @@
+{
+  "esm": "2.0.0",
+  "metadata": {
+    "name": "godunov_eno1_norm_D2_extrapolate_bc",
+    "description": "Gradient magnitude |grad u| of NCAR fire_behavior's fire_upwinding = 4 (classical Godunov discretization of the Hamiltonian; physics/level_set_mod.F90 Calc_tend_ls) on EarthSciDiscretizations' cartesian_uniform_2d grid with fire_behavior's own wall treatment. Calc_tend_ls tests `i < ids + BDY_ENO1 .or. i > ide - BDY_ENO1 .or. j < jds + BDY_ENO1 .or. j > jde - BDY_ENO1` BEFORE its `select case (fire_upwinding)`, so within bdy_eno1_cells (BDY_ENO1 = 10) of any wall grad = sqrt(Select_eno(difflx, diffrx)^2 + Select_eno(diffly, diffry)^2) for every scheme, case 4 included, with the wall cells' outer neighbour the guarded linear-extrapolation ghost of Extrapol_var_at_bdys; only away from the walls is grad the Rouy-Tourin Hamiltonian sqrt(max(D-x,0)^2 + min(D+x,0)^2 + max(D-y,0)^2 + min(D+y,0)^2). ESD's rules/godunov_norm_D2_dirichlet_bc applies the Hamiltonian everywhere and closes the walls with prescribed values, which is not what the reference does (with a zero wall value its wall |grad| is ~60 where fire_behavior's is ~1). COMPOUND MATCH (esm-spec 9.6.3): sqrt((D(u, wrt: x))^2 + (D(u, wrt: y))^2) at priority 20, scoped with where {u: {shape: [x, y]}}, the pattern and priority of ESD's other norm rules. BODY: sqrt(Gx^2 + Gy^2) with Gx, Gy ESD's per-axis boundary frames (rules/weno5_eno1_D1x_extrapolate_frame, rules/weno5_eno1_D1y_extrapolate_frame: ENO1 strips and one-cell guarded linear-extrapolation ghosts, shared by every hybrid scheme of the family, valid for bdy_eno1_cells >= 3) around this file's interior stencils godunov_eno1_D1x_magnitude_interior / _D1y_, which on the frame's doubly-interior block take the ENO1 minmod (ESD stencils/eno1_minmod_D1x, _D1y) inside the wall band (ESD stencils/eno1_wall_band) and the per-axis Godunov magnitude sqrt(max(D-,0)^2 + min(D+,0)^2) elsewhere, so Gx^2 + Gy^2 is the ENO1 grad^2 in the band and the Rouy-Tourin Hamiltonian outside it. The per-axis quantity diff2x = max(D-,0) - min(D+,0) of the case-4 front normal is lowered by ESD's rules/godunov_upwind_D1x/D1y_extrapolate_bc, which already carry the same wall band and halo. Local to this repository because ESD has no Godunov norm rule with the ENO1 wall band. Free names (consumer scope): bdy_eno1_cells (>= 3), dx, dy. Requires NX, NY >= 7.",
+    "license": "MIT",
+    "tags": [
+      "discretization",
+      "grid:cartesian_uniform_2d",
+      "op:norm_grad",
+      "bc:extrapolate_linear",
+      "fire_upwinding:4"
+    ],
+    "references": [
+      {
+        "citation": "Rouy, E., & Tourin, A. (1992). A viscosity solutions approach to shape-from-shading. SIAM Journal on Numerical Analysis, 29(3), 867-884.",
+        "doi": "10.1137/0729053"
+      },
+      {
+        "citation": "NCAR Community Fire Behavior Model (fire_behavior), physics/level_set_mod.F90: Calc_tend_ls (case 4 and case 10, the `use eno1 near domain boundaries` band test that precedes the select case), Select_eno, Select_weno5, Extrapol_var_at_bdys. Identical in WRF phys/fire_behavior/physics/level_set_mod.F90."
+      }
+    ]
+  },
+  "expression_template_imports": [
+    {
+      "ref": "${ESD_ROOT}/grids/cartesian_uniform_2d/rules/weno5_eno1_D1x_extrapolate_frame.esm"
+    },
+    {
+      "ref": "${ESD_ROOT}/grids/cartesian_uniform_2d/rules/weno5_eno1_D1y_extrapolate_frame.esm"
+    },
+    {
+      "ref": "${ESD_ROOT}/grids/cartesian_uniform_2d/stencils/eno1_wall_band.esm"
+    },
+    {
+      "ref": "${ESD_ROOT}/grids/cartesian_uniform_2d/stencils/eno1_minmod_D1x.esm"
+    },
+    {
+      "ref": "${ESD_ROOT}/grids/cartesian_uniform_2d/stencils/eno1_minmod_D1y.esm"
+    }
+  ],
+  "expression_templates": {
+    "godunov_eno1_D1x_magnitude_interior": {
+      "params": [
+        "u"
+      ],
+      "body": {
+        "op": "faq",
+        "output_idx": [
+          "i",
+          "j"
+        ],
+        "args": [
+          "u"
+        ],
+        "ranges": {
+          "i": [
+            4,
+            {
+              "op": "-",
+              "args": [
+                "NX",
+                3
+              ]
+            }
+          ],
+          "j": [
+            3,
+            {
+              "op": "-",
+              "args": [
+                "NY",
+                2
+              ]
+            }
+          ]
+        },
+        "expr": {
+          "op": "ifelse",
+          "args": [
+            {
+              "op": "apply_expression_template",
+              "args": [],
+              "name": "eno1_wall_band",
+              "bindings": {
+                "i": "i",
+                "j": "j"
+              }
+            },
+            {
+              "op": "apply_expression_template",
+              "args": [],
+              "name": "eno1_minmod_D1x",
+              "bindings": {
+                "u": "u",
+                "i": "i",
+                "j": "j"
+              }
+            },
+            {
+              "op": "sqrt",
+              "args": [
+                {
+                  "op": "+",
+                  "args": [
+                    {
+                      "op": "^",
+                      "args": [
+                        {
+                          "op": "max",
+                          "args": [
+                            {
+                              "op": "/",
+                              "args": [
+                                {
+                                  "op": "-",
+                                  "args": [
+                                    {
+                                      "op": "index",
+                                      "args": [
+                                        "u",
+                                        "i",
+                                        "j"
+                                      ]
+                                    },
+                                    {
+                                      "op": "index",
+                                      "args": [
+                                        "u",
+                                        {
+                                          "op": "-",
+                                          "args": [
+                                            "i",
+                                            1
+                                          ]
+                                        },
+                                        "j"
+                                      ]
+                                    }
+                                  ]
+                                },
+                                "dx"
+                              ]
+                            },
+                            0
+                          ]
+                        },
+                        2
+                      ]
+                    },
+                    {
+                      "op": "^",
+                      "args": [
+                        {
+                          "op": "min",
+                          "args": [
+                            {
+                              "op": "/",
+                              "args": [
+                                {
+                                  "op": "-",
+                                  "args": [
+                                    {
+                                      "op": "index",
+                                      "args": [
+                                        "u",
+                                        {
+                                          "op": "+",
+                                          "args": [
+                                            "i",
+                                            1
+                                          ]
+                                        },
+                                        "j"
+                                      ]
+                                    },
+                                    {
+                                      "op": "index",
+                                      "args": [
+                                        "u",
+                                        "i",
+                                        "j"
+                                      ]
+                                    }
+                                  ]
+                                },
+                                "dx"
+                              ]
+                            },
+                            0
+                          ]
+                        },
+                        2
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "godunov_eno1_D1y_magnitude_interior": {
+      "params": [
+        "u"
+      ],
+      "body": {
+        "op": "faq",
+        "output_idx": [
+          "i",
+          "j"
+        ],
+        "args": [
+          "u"
+        ],
+        "ranges": {
+          "i": [
+            3,
+            {
+              "op": "-",
+              "args": [
+                "NX",
+                2
+              ]
+            }
+          ],
+          "j": [
+            4,
+            {
+              "op": "-",
+              "args": [
+                "NY",
+                3
+              ]
+            }
+          ]
+        },
+        "expr": {
+          "op": "ifelse",
+          "args": [
+            {
+              "op": "apply_expression_template",
+              "args": [],
+              "name": "eno1_wall_band",
+              "bindings": {
+                "i": "i",
+                "j": "j"
+              }
+            },
+            {
+              "op": "apply_expression_template",
+              "args": [],
+              "name": "eno1_minmod_D1y",
+              "bindings": {
+                "u": "u",
+                "i": "i",
+                "j": "j"
+              }
+            },
+            {
+              "op": "sqrt",
+              "args": [
+                {
+                  "op": "+",
+                  "args": [
+                    {
+                      "op": "^",
+                      "args": [
+                        {
+                          "op": "max",
+                          "args": [
+                            {
+                              "op": "/",
+                              "args": [
+                                {
+                                  "op": "-",
+                                  "args": [
+                                    {
+                                      "op": "index",
+                                      "args": [
+                                        "u",
+                                        "i",
+                                        "j"
+                                      ]
+                                    },
+                                    {
+                                      "op": "index",
+                                      "args": [
+                                        "u",
+                                        "i",
+                                        {
+                                          "op": "-",
+                                          "args": [
+                                            "j",
+                                            1
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                "dy"
+                              ]
+                            },
+                            0
+                          ]
+                        },
+                        2
+                      ]
+                    },
+                    {
+                      "op": "^",
+                      "args": [
+                        {
+                          "op": "min",
+                          "args": [
+                            {
+                              "op": "/",
+                              "args": [
+                                {
+                                  "op": "-",
+                                  "args": [
+                                    {
+                                      "op": "index",
+                                      "args": [
+                                        "u",
+                                        "i",
+                                        {
+                                          "op": "+",
+                                          "args": [
+                                            "j",
+                                            1
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "op": "index",
+                                      "args": [
+                                        "u",
+                                        "i",
+                                        "j"
+                                      ]
+                                    }
+                                  ]
+                                },
+                                "dy"
+                              ]
+                            },
+                            0
+                          ]
+                        },
+                        2
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "godunov_eno1_norm_D2_extrapolate_bc": {
+      "params": [
+        "u"
+      ],
+      "priority": 20,
+      "match": {
+        "op": "sqrt",
+        "args": [
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "D",
+                    "args": [
+                      "u"
+                    ],
+                    "wrt": "x"
+                  },
+                  2
+                ]
+              },
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "D",
+                    "args": [
+                      "u"
+                    ],
+                    "wrt": "y"
+                  },
+                  2
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "where": {
+        "u": {
+          "shape": [
+            "x",
+            "y"
+          ]
+        }
+      },
+      "body": {
+        "op": "sqrt",
+        "args": [
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "apply_expression_template",
+                    "args": [],
+                    "name": "weno5_eno1_D1x_extrapolate_frame",
+                    "bindings": {
+                      "u": "u",
+                      "interior": {
+                        "op": "apply_expression_template",
+                        "args": [],
+                        "name": "godunov_eno1_D1x_magnitude_interior",
+                        "bindings": {
+                          "u": "u"
+                        }
+                      }
+                    }
+                  },
+                  2
+                ]
+              },
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "apply_expression_template",
+                    "args": [],
+                    "name": "weno5_eno1_D1y_extrapolate_frame",
+                    "bindings": {
+                      "u": "u",
+                      "interior": {
+                        "op": "apply_expression_template",
+                        "args": [],
+                        "name": "godunov_eno1_D1y_magnitude_interior",
+                        "bindings": {
+                          "u": "u"
+                        }
+                      }
+                    }
+                  },
+                  2
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

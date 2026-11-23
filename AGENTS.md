@@ -4,8 +4,7 @@
 
 > **A model is simulated through exactly one pathway: an official EarthSciAST runner.**
 
-EarthSciML defines one canonical simulation toolchain — the EarthSciAST
-(ESS) runners — across every supported language:
+EarthSciML defines one canonical simulation toolchain — the EarthSciAST runners — across every supported language:
 
 | Language | Official runner |
 | -------- | --------------- |
@@ -42,8 +41,7 @@ Concrete things this rule forbids in this repo:
   the same question is the shadow-logic form of this anti-pattern: it drifts
   from the spec and from the other four bindings.
 
-If the official runner is missing a feature you need, file a bead against
-EarthSciAST or the relevant toolkit — do not work around it locally.
+If the official runner is missing a feature you need, flag the problem to the user — do not work around it locally.
 
 ## 2. ESM contract
 
@@ -237,7 +235,7 @@ algebraic component, at each saved state for an ODE one. It keeps no
 resolution plan, classification or evaluator of its own. It replaced the
 Python renderer, whose LSODA integration of `gaschem/geoschem_fullchem.esm`
 alone took about five hours of every docs build. If the runner lacks a
-feature the docs build needs, file a bead against EarthSciAST rather than
+feature the docs build needs, flag that to the user rather than
 adding a side channel here.
 
 Both generators read the **esm 1.0.0** vocabulary. The page generator takes
