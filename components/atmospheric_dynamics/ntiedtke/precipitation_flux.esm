@@ -284,7 +284,7 @@
           "shape": [
             "lev"
           ],
-          "description": "Updraught generation with the evaporation folded in, which is what the scheme carries forward as the layer's net precipitation source."
+          "description": "Updraught generation with the evaporation folded in. When the downdraught sink and evaporation would make the outgoing flux negative, add back the excess as cuflxn does when it clamps that flux to zero."
         },
         "prain": {
           "type": "unknown",
@@ -1409,8 +1409,8 @@
               "liq_frac",
               "gen_up",
               "gen_dd",
-              "melt",
-              "tot_p"
+              "tot_p",
+              "snow_p"
             ],
             "ranges": {
               "m": {
@@ -1698,8 +1698,7 @@
               "k"
             ],
             "args": [
-              "tot_p",
-              "rain_p",
+              "snow_p",
               "melt_cap",
               "T",
               "neg_p"
@@ -1727,8 +1726,7 @@
               "k"
             ],
             "args": [
-              "tot_p",
-              "rain_p",
+              "snow_p",
               "melt_cap",
               "T",
               "pap",
@@ -1801,8 +1799,9 @@
             "args": [
               "tot_p",
               "gen_dd",
-              "evap",
-              "evap_dry"
+              "qs",
+              "q",
+              "paph"
             ],
             "ranges": {
               "m": {
@@ -1924,10 +1923,11 @@
               "rain_p",
               "liq_frac",
               "gen_dd",
-              "melt",
               "tot",
-              "evap",
-              "evap_dry"
+              "snow_p",
+              "qs",
+              "q",
+              "paph"
             ],
             "ranges": {
               "m": {
@@ -2131,7 +2131,10 @@
               "snow_p",
               "liq_frac",
               "gen_dd",
-              "tot"
+              "tot",
+              "qs",
+              "q",
+              "paph"
             ],
             "ranges": {
               "m": {
@@ -2458,7 +2461,9 @@
               "gen_up",
               "evap",
               "evap_dry",
-              "kcbot"
+              "kcbot",
+              "tot",
+              "gen_dd"
             ],
             "ranges": {
               "k": {
@@ -2498,12 +2503,11 @@
                           "op": "<=",
                           "args": [
                             {
-                              "op": "apply_expression_template",
-                              "args": [],
-                              "name": "evap_dry_at",
-                              "bindings": {
-                                "kz": "k"
-                              }
+                              "op": "index",
+                              "args": [
+                                "evap_dry",
+                                "k"
+                              ]
                             },
                             0.0
                           ]
@@ -2511,12 +2515,40 @@
                       ]
                     },
                     {
-                      "op": "apply_expression_template",
-                      "args": [],
-                      "name": "evap_at",
-                      "bindings": {
-                        "kz": "k"
-                      }
+                      "op": "max",
+                      "args": [
+                        {
+                          "op": "index",
+                          "args": [
+                            "evap",
+                            "k"
+                          ]
+                        },
+                        {
+                          "op": "-",
+                          "args": [
+                            {
+                              "op": "+",
+                              "args": [
+                                {
+                                  "op": "index",
+                                  "args": [
+                                    "tot",
+                                    "k"
+                                  ]
+                                },
+                                {
+                                  "op": "index",
+                                  "args": [
+                                    "gen_dd",
+                                    "k"
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
                     },
                     0.0
                   ]
@@ -2527,6 +2559,69 @@
         }
       ],
       "tests": [
+        {
+          "id": "evaporation_limited_by_remaining_precipitation",
+          "description": "A dry subcloud layer receives 1e-4 kg/(m^2 s) of precipitation. The downdraught consumes 7e-5 kg/(m^2 s), leaving at most 3e-5 kg/(m^2 s) for evaporation. With zero outgoing flux, conservation requires exactly that evaporation sink in gen_up_out.",
+          "expression_template_imports": [
+            {
+              "ref": "./tests/pf_evaporation_limit_inputs.esm"
+            }
+          ],
+          "time_span": {
+            "start": 0,
+            "end": 0
+          },
+          "assertions": [
+            {
+              "variable": "tot",
+              "time": 0,
+              "coords": {
+                "lev_nodes": 3
+              },
+              "expected": 0.0001,
+              "tolerance": {
+                "abs": 1e-12,
+                "rel": 0
+              }
+            },
+            {
+              "variable": "gen_dd",
+              "time": 0,
+              "coords": {
+                "lev": 3
+              },
+              "expected": -7e-05,
+              "tolerance": {
+                "abs": 1e-12,
+                "rel": 0
+              }
+            },
+            {
+              "variable": "tot",
+              "time": 0,
+              "coords": {
+                "lev_nodes": 4
+              },
+              "expected": 0.0,
+              "tolerance": {
+                "abs": 1e-12,
+                "rel": 0
+              }
+            },
+            {
+              "variable": "gen_up_out",
+              "time": 0,
+              "coords": {
+                "lev": 3
+              },
+              "expected": -3e-05,
+              "tolerance": {
+                "abs": 1e-12,
+                "rel": 0
+              }
+            }
+          ]
+        },
         {
           "id": "step1_col1_precipitation_flux",
           "description": "cuflxn's precipitation sweeps on the chem170 single-column reference, step 1, TILE COLUMN 1 of 2: cloud top at kernel level 5, base at 44, peak rain flux 0.00927 and peak snow flux 0.00789 kg/(m^2 s), peak melting rate 0.00154. The column is named because the two columns of the SCM tile reach different convective outcomes at the same step, so a regime table collapsing to one value per step would hide which was tested. Reference run: data/eqwefic/notes/chem170_scm_reference_run.md (em_scm_xy, Weisman-Klemp sounding over Kansas, dx = 20 km, 59 levels, dt = 60 s, cu_physics = 16). Reference build: the real64 replay through kernels/ntiedtke_driver of WRF fork branch earthsciml-instrumented-chem170, the seven constants cu_ntiedtke_init takes supplied at binary64 precision; the scheme's own literals stay at their binary32 roundings (FORTRAN_BUGS N109). **The values come from the `cx_*` tape, taken at cuflxn's OWN EXIT.** They are NOT the fluxes the next stage sees: cumastrn afterwards rescales the downdraught mass flux and adds the remainder back into the rain, then recomputes the precipitation generation as the flux difference (FORTRAN_BUGS N113). Pinning against the later state disagrees by up to 0.31 of the flux amplitude on exactly the columns whose downdraught was rescaled, and is bit-exact on the rest -- a split that reads as a transcription error and is a wrong reference. Algebraic observeds at t = 0 with no ODE state, so the empty time_span is one static evaluation. TOLERANCE, measured and traced, not chosen to pass. The three flux-derived assertions carry **2e-9 of the profile maximum against this project's 1e-9 baseline for a double-precision kernel reference**, and the factor of two is accounted for: the evaporation rate passes through (sqrt(p/p_sfc)/evap_c1 * F/zcucov)^0.5777 with evap_c1 = 5.09e-3, so a factor of about 196 enters the chain before the flux is reconstituted from it, and the .esm's association of that product differs from the Fortran's in the last bits. Measured over the ten regimes the worst relative residual is 1.8e-9 (step 364, whose peak flux is only 1.4e-5 so the absolute residual is 2.5e-14) and the worst absolute is 1.3e-12 (step 1, the strongest convective step, whose peak flux is 600 times larger). Neither is a fixed absolute floor nor a clean relative one -- the residual tracks the flux but not proportionally -- so the bound is stated as the measured relative worst, doubled. `qs` and the column-integrated generation do NOT pass through the power law and are pinned at 1e-9 of their own scale; `qs` is in fact EXACT. `gen_up_out` is bounded differently again, and for the reason that makes this whole paragraph necessary: it is the net precipitation SOURCE, of order 2e-6, but it is formed by adding an evaporation that is itself a cancelling difference of two fluxes of order 1e-5. Its attainable precision is therefore set by the FLUX it is differenced out of, not by its own magnitude, so its bound is 2e-9 of the total flux amplitude of the same column -- written as an absolute number per regime because the two quantities have different scales. Sizing it by its own profile maximum instead gives 5e-15, which is below the floor and fails on three of the ten regimes by less than a factor of two.",

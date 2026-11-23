@@ -2,7 +2,7 @@
   "esm": "1.2.0",
   "metadata": {
     "name": "NTiedtkeDeepDepartureScan",
-    "description": "The DEEP phase of `cutypen`, the convection trigger of WRF's New Tiedtke scheme (`phys/physics_mmm/cu_ntiedtke.F90:1517-1748`, WRF 4.8): a departure-level SCAN. After the shallow test parcel (shallow_ascent.esm), cutypen launches a second test parcel from each half level in turn, from klev-2 upward to klev/2+1 (28 departures on 59 levels), skipping departures more than 350 hPa above the surface, and ACCEPTS the first (lowest) whose parcel rises into a cloud at least 200 hPa deep. An accepted departure makes the column penetrative (`ktype = 1`), overriding the shallow verdict, and the scan stops.\n\nONE DEPARTURE. The parcel at departure level L leaves half level L+1 with the environment's dry static energy and humidity there -- or, within 60 hPa of the surface, with their pressure-weighted means over a mixed layer of up to three half levels (L+2, L+1, L, added while the layer is under 50 hPa) -- plus fixed excesses of 0.2 K and 1e-4 kg/kg, and kinetic energy 0.5 m^2/s^2. From there it rises exactly as the shallow parcel does, with the step shared through parcel_templates.esm (entrain by the EarthSciDiscretizations plume stencil, condense by cuadjtqn's kcall = 1 adjustment, refreeze, re-form, load, compare, advance the kinetic energy, locate the base), with three differences: the entrainment rate is 1.75e-3 times min(1, (q_sat[k]/q_sat[L])^3) rather than the shallow parcel's 0.8/z + 2e-4; the running condensate is HALVED at every level rather than capped; and the first step mixes the parcel against the departure air's own dry static energy at L+1 (the Fortran overwrites dhen(L+1) with it) but against the half-level humidity pqenh(L+1), which it does not overwrite.\n\nTHE SCAN IS A REDUCTION, NOT A LOOP. Every departure's ascent is independent of every other's; the only coupling is \"stop at the first success\". So the component computes all 28 ascents side by side on a (dep, lev) grid, judges each as if it were tried (`deep_if_tried`), and then marks a departure TRIED when it is inside the window and no lower departure in the window would have succeeded (`n_deep_below` = 0). The departures above the accepted one, which the Fortran never runs, are carried as zeros, as the tape records them.\n\nWHY EACH ASCENT IS FORCED FROM THE TAPE: the parcel's (s, q) is a recurrence over two distinct variables through the saturation adjustment, which esm-spec 4.3.1.1 does not admit (EarthSciAST #701, which proposes the recurrence group that would). The full argument is in shallow_ascent.esm's description; it applies unchanged. Each departure's levels are therefore stepped from that departure's TAPED state one level down (`T_tr`, `q_tr`, `dh_tr`: the dp_* tape, one column per departure), and every operation of the step is pinned; the condensate and the kinetic energy are genuine single-variable recurrences along `climb` with `dep` as a non-recurrence axis. A float64 reimplementation that closes the loop instead reproduces the same tape over all 16 steps x 2 tile columns x 28 departures with every departure's base, top, acceptance and tried flag identical, and the arrays to 5e-15 (T, q, dh) and 1.3e-12 (condensate, kinetic energy, buoyancy) of their maxima.\n\nCUTYPEN'S VERDICT IS PROVISIONAL, TWICE (measured on the chem170 reference, WRF fork commit cf3a2bdf, which tapes cutypen's own outputs as ty_*). The shallow verdict is overridden by this scan: at step 1730 the tape's one shallow cloud becomes deep (ty_ktype 1). And THIS verdict is overridden in turn after cutypen returns: the scheme's final ktype differs from cutypen's at 7 of the 16 steps -- 918, 1080, 1621, 2400 and 2521 end as mid-level convection (3, set later by cubasmcn, for columns cutypen called inactive), at 2134 column 1 likewise, and at 689 and 2134 column 2 the column cutypen called DEEP ends as SHALLOW (2) -- cumastrn reclassifies a deep cloud whose updraught (cuascn) proves too shallow. So `ktype` here is cutypen's output, not the scheme's, and a coupling must not read it as the convection type; the final type belongs to the components for cuascn, cubasmcn and the closure.\n\nThe tie to the shallow phase -- its verdict, base, top and cloud-base velocity -- comes in as four scalars (`*_shallow`) so that `ktype`, `cubot`, `cutop`, `kdpl` and `wbase` are cutypen's complete outputs; a mounting document supplies them from shallow_ascent.esm. The routine's copy of the accepted parcel into cutu/cuqu/culu/culab is not exposed: cuascn recomputes those arrays.\n\nConstants: the seven cu_ntiedtke_init arguments from lib/wrf_constants.esm at binary64; the scan's literals (0.2, 1e-4, 60e2, 50e2, 350e2, 1.75e-3, 0.5) in ntiedtke_parameters.esm at their binary32 roundings (FORTRAN_BUGS N109). The cloud-base comparison reads the condensation pressure truncated to whole pascals, as the Fortran stores it in an integer (FORTRAN_BUGS N114).",
+    "description": "The DEEP phase of `cutypen`, the convection trigger of WRF's New Tiedtke scheme (`phys/physics_mmm/cu_ntiedtke.F90:1517-1748`, WRF 4.8): a departure-level SCAN. After the shallow test parcel (shallow_ascent.esm), cutypen launches a second test parcel from each half level in turn, from klev-2 upward to klev/2+1 (28 departures on 59 levels), skipping departures more than 350 hPa above the surface, and ACCEPTS the first (lowest) whose parcel rises into a cloud at least 200 hPa deep. An accepted departure makes the column penetrative (`ktype = 1`), overriding the shallow verdict, and the scan stops.\n\nONE DEPARTURE. The parcel at departure level L leaves half level L+1 with the environment's dry static energy and humidity there -- or, within 60 hPa of the surface, with their pressure-weighted means over a mixed layer of up to three half levels (L+2, L+1, L, added while the layer is under 50 hPa) -- plus fixed excesses of 0.2 K and 1e-4 kg/kg, and kinetic energy 0.5 m^2/s^2. From there it rises exactly as the shallow parcel does, with the step shared through parcel_templates.esm (entrain by the EarthSciDiscretizations plume stencil, condense by cuadjtqn's kcall = 1 adjustment, refreeze, re-form, load, compare, advance the kinetic energy, locate the base), with three differences: the entrainment rate is 1.75e-3 times min(1, (q_sat[k]/q_sat[L])^3) rather than the shallow parcel's 0.8/z + 2e-4; the running condensate is HALVED at every level rather than capped; and the first step mixes the parcel against the departure air's own dry static energy at L+1 (the Fortran overwrites dhen(L+1) with it) but against the half-level humidity pqenh(L+1), which it does not overwrite.\n\nTHE SCAN IS A REDUCTION, NOT A LOOP. Every departure's ascent is independent of every other's; the only coupling is \"stop at the first success\". So the component computes all 28 ascents side by side on a (dep, lev) grid, judges each as if it were tried (`deep_if_tried`), and then marks a departure TRIED when it is inside the window and no lower departure in the window would have succeeded (`n_deep_below` = 0). The departures above the accepted one, which the Fortran never runs, are carried as zeros, as the tape records them.\n\nWHY EACH ASCENT IS FORCED FROM THE TAPE: the parcel's (s, q) is a recurrence over two distinct variables through the saturation adjustment, which esm-spec 4.3.1.1 does not admit (EarthSciAST #701, which proposes the recurrence group that would). The full argument is in shallow_ascent.esm's description; it applies unchanged. Each departure's levels are therefore stepped from that departure's TAPED state one level down (`T_tr`, `q_tr`, `dh_tr`: the dp_* tape, one column per departure), and every operation of the step is pinned; the condensate and the kinetic energy are genuine single-variable recurrences along `climb` with `dep` as a non-recurrence axis. A float64 reimplementation that closes the loop instead reproduces the same tape over all 16 steps x 2 tile columns x 28 departures with every departure's base, top, acceptance and tried flag identical, and the arrays to 5e-15 (T, q, dh) and 1.3e-12 (condensate, kinetic energy, buoyancy) of their maxima.\n\nCUTYPEN'S VERDICT IS PROVISIONAL, TWICE (measured on the chem170 reference, WRF fork commit cf3a2bdf, which tapes cutypen's own outputs as ty_*). The shallow verdict is overridden by this scan: at step 1730 the tape's one shallow cloud becomes deep (ty_ktype 1). And THIS verdict is overridden in turn after cutypen returns: the scheme's final ktype differs from cutypen's at 7 of the 16 steps -- 918, 1080, 1621, 2400 and 2521 end as mid-level convection (3, set later by cubasmcn, for columns cutypen called inactive), at 2134 column 1 likewise, and at 689 and 2134 column 2 the column cutypen called DEEP ends as SHALLOW (2) -- cumastrn reclassifies a deep cloud whose updraught (cuascn) proves too shallow. So `ktype` here is cutypen's output, not the scheme's, and a coupling must not read it as the convection type; the final type belongs to the components for cuascn, cubasmcn and the closure.\n\nThe tie to the shallow phase -- its verdict, base, top and cloud-base velocity -- comes in as four scalars (`*_shallow`) so that `ktype`, `cubot`, `cutop`, `kdpl` and `wbase` are cutypen's complete outputs; a mounting document supplies them from shallow_ascent.esm. The routine's copy of the accepted parcel into cutu/cuqu/culu/culab is not exposed: cuascn recomputes those arrays.\n\nConstants: the seven cu_ntiedtke_init arguments from lib/wrf_constants.esm at binary64; the scan's literals (0.2, 1e-4, 60e2, 50e2, 350e2, 1.75e-3, 0.5) in ntiedtke_parameters.esm at their binary32 roundings (FORTRAN_BUGS N109). The cloud-base comparison reads the condensation pressure truncated to whole pascals, as the Fortran stores it in an integer (FORTRAN_BUGS N114).\n\nNeighbour reads of mass-level fields use the nearest in-range value at the vertical boundaries. The ascent uses its prescribed seed and interior stencil over the original range.",
     "license": "MIT",
     "tags": [
       "wrf",
@@ -4942,10 +4942,16 @@
                     "dh_c",
                     "d",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -4956,10 +4962,16 @@
                     "s_env_dep",
                     "d",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -5018,10 +5030,16 @@
                     "q_c",
                     "d",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -5031,10 +5049,16 @@
                   "args": [
                     "q_h",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -5294,10 +5318,16 @@
                     "T_c",
                     "d",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -5728,10 +5758,16 @@
                             "buoy",
                             "d",
                             {
-                              "op": "+",
+                              "op": "min",
                               "args": [
-                                "k",
-                                1
+                                "NLEV",
+                                {
+                                  "op": "+",
+                                  "args": [
+                                    "k",
+                                    1
+                                  ]
+                                }
                               ]
                             }
                           ]
@@ -6286,10 +6322,16 @@
                             "l_up",
                             "d",
                             {
-                              "op": "+",
+                              "op": "min",
                               "args": [
-                                "k",
-                                1
+                                "NLEV",
+                                {
+                                  "op": "+",
+                                  "args": [
+                                    "k",
+                                    1
+                                  ]
+                                }
                               ]
                             }
                           ]
@@ -6331,10 +6373,16 @@
                     "T_c",
                     "d",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -6345,10 +6393,16 @@
                     "q_c",
                     "d",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -6452,10 +6506,16 @@
                             "ke_up",
                             "d",
                             {
-                              "op": "+",
+                              "op": "min",
                               "args": [
-                                "k",
-                                1
+                                "NLEV",
+                                {
+                                  "op": "+",
+                                  "args": [
+                                    "k",
+                                    1
+                                  ]
+                                }
                               ]
                             }
                           ]
@@ -6799,10 +6859,16 @@
                             "base_low",
                             "d",
                             {
-                              "op": "-",
+                              "op": "max",
                               "args": [
-                                "k",
-                                1
+                                1,
+                                {
+                                  "op": "-",
+                                  "args": [
+                                    "k",
+                                    1
+                                  ]
+                                }
                               ]
                             }
                           ]
@@ -6885,10 +6951,16 @@
                                   "l_mark",
                                   "d",
                                   {
-                                    "op": "+",
+                                    "op": "min",
                                     "args": [
-                                      "k",
-                                      1
+                                      "NLEV",
+                                      {
+                                        "op": "+",
+                                        "args": [
+                                          "k",
+                                          1
+                                        ]
+                                      }
                                     ]
                                   }
                                 ]
@@ -8453,10 +8525,16 @@
                                 "base_low",
                                 "d",
                                 {
-                                  "op": "-",
+                                  "op": "max",
                                   "args": [
-                                    "k",
-                                    1
+                                    1,
+                                    {
+                                      "op": "-",
+                                      "args": [
+                                        "k",
+                                        1
+                                      ]
+                                    }
                                   ]
                                 }
                               ]

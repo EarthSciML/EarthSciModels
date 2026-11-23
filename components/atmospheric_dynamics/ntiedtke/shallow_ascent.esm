@@ -2,7 +2,7 @@
   "esm": "1.2.0",
   "metadata": {
     "name": "NTiedtkeShallowAscent",
-    "description": "The SHALLOW phase of `cutypen`, the convection trigger of WRF's New Tiedtke scheme (`phys/physics_mmm/cu_ntiedtke.F90:1221-1515`, WRF 4.8): a test parcel launched from the lowest layer with a surface-flux excess, lifted through the column, and classified as a shallow cloud (`ktype = 2`) if it rises into cloud and stops within 200 hPa of its base. It runs before the deep departure-level scan, which can override its verdict (the tape shows this: the ascent runs at 14 of the 16 dumped steps and classifies as shallow at only one).\n\nLAUNCH. When the surface virtual-temperature flux is upward the parcel leaves the lowest layer with velocity w = 1.2 (0.001 + 0.6 (phi/(rho T)) (hfx/cp + 0.608 T qfx))^(1/3), a Deardorff convective velocity, and with temperature and humidity excesses 1.5 hfx/(rho cp w) and 1.5 qfx/(rho w) over the lowest half level; its kinetic energy starts at w^2/2. Otherwise nothing is launched and every array is left as cuinin handed it.\n\nONE LEVEL OF THE ASCENT is two operations. First the parcel ENTRAINS from half level k+1 to k: its dry static energy s and humidity q obey the entraining-plume ODE dphi/dz = eta (phi_env - phi) with eta = 0.8/z + 2e-4 (Jakob and Siebesma 2003), integrated by one implicit-trapezoidal step -- the routine's `dh = (coef (dhen[k+1] + dhen[k]) + (1 - coef) dh[k+1])/(1 + coef)` is exactly that step with the rate frozen at the upper end, and it is taken here, through parcel_templates.esm's `entrain_step` (the per-level step this component shares with deep_departure_scan.esm), by the shared EarthSciDiscretizations plume stencil (grids/column_nonuniform_1d/stencils/entraining_plume_lev_interior, EarthSciDiscretizations PR #45) passed eta[k] at both ends. Then the parcel is PROJECTED onto saturation at the half-level pressure by cuadjtqn's condensation-only adjustment (`up_adjust_T`/`up_adjust_q` of moist_thermodynamics.esm), the condensed water accumulates (capped at 5e-3) and the latent heat of any change of ice fraction is added back into s. The kinetic energy obeys dK/dz = 2 (B - eta K) with B the buoyant acceleration averaged over the step, the same stencil again (environment 0, rate 2 eta, source 2 B), and the parcel stops at the first level where K goes negative.\n\nWHY THE SWEEP IS FORCED FROM THE TAPE (read this before changing it). The parcel's (s, q) is carried from level to level THROUGH the projection: the s and q leaving level k are each a function of BOTH the s and the q leaving level k+1, because the saturation adjustment mixes them. That is a cycle between two distinct variables, and esm-spec 4.3.1.1 admits a recurrence on one variable only; the Rust binding rejects the two-variable form with `observed_cycle` (probed 2026-11-11 on the be1fafe6d binary: a[k] = a[k-1] + b[k-1], b[k] = a[k-1] b[k-1]), and the recurrence RFC keeps the rejection deliberately. EarthSciAST #701 proposes the extension that would admit it: a recurrence GROUP of equations over one cell frame whose every cross-read is strictly earlier along one shared axis. None of the three ways out this repository uses for apparent cycles applies (CLAUDE.md): it does not unroll, because each step goes through a nonlinear projection; it is not a quadrature rule in disguise, because the projection sits between steps -- that is exactly why PR #45's lowering rule cannot be used whole and only its STEP is; and there is no conserved sum to carry, because the moist static energy cp T + L q is conserved by the adjustment only while L is constant, which fails in the mixed-phase range the parcel climbs through and is broken outright by the freezing term. So the component steps each level from the TAPED state of the level below (`dh_tr`, `q_tr`, `T_tr`, the sh_* tape at cutypen's shallow exit) rather than from its own output. Every operation of the step map -- entrainment, projection, condensate, freezing, buoyancy, kinetic energy, stall, cloud base, cloud top, verdict -- is transcribed and pinned; what is not yet expressed is feeding the step's output back as its next input. When the spec admits such a group (EarthSciAST #701), `dh_c`, `q_c` and `T_c` become reads of `dh_up`, `q_up` and `T_up` at k+1 and nothing else moves. The condensate and the kinetic energy ARE single-variable recurrences and are written as such (l_climb, ke_climb): neither feeds back into the projection.\n\nThe closed sweep was checked outside the format against the same tape: a float64 reimplementation that carries its own state from level to level reproduces sh_ptu, sh_pqu, sh_dh to 2e-15 and sh_kup, sh_zbuo to 1e-13 of their profile maxima over all 16 steps and both tile columns, with kcbot, kctop, ktype and wbase identical, so the forcing hides no drift.\n\nCLIMB AXIS. A recurrence sweeps upward in index (esm-spec 4.3.1.1), and the scheme indexes top-down, so the two sweeps live on `climb` (j = 1 the lowest layer, kernel level NLEV + 1 - j) and are read back in kernel order as l_up and ke_up. Everything else stays in the kernel's top-down ordering, as in the rest of this scheme's components.\n\nCLOUD BASE AND TOP. The base is looked for at the first level where the parcel holds condensate: the lifting condensation level is extrapolated from the half level below by one Newton step (`lcl_pressure`) and the base placed at whichever adjacent half level is nearer -- to the condensation pressure TRUNCATED to whole pascals, because cutypen stores it in an integer (FORTRAN_BUGS N114) -- the lower one marked by writing 1e-8 of condensate into it, a marker the cloud-top test then reads. The top is the stall level if the parcel stalls with condensate below it. A cloud deeper than 200 hPa is not shallow; the deep scan deals with it.\n\nThe OUTPUT arrays (`*_out`, `lab_out`, `kcbot`, `kctop`, `ktype`, `wbase`) reproduce what cutypen leaves in its locals at the end of the shallow phase, including the levels it never touches (left as cuinin handed them, or zero for the arrays cutypen zero-initialises), because that is what the tape records and what the deep phase then overwrites. The routine's copy into cutu/cuqu/culu/culab for jk >= kctop is not exposed: the deep phase that follows overwrites the same arrays.\n\nConstants: the seven cu_ntiedtke_init arguments from lib/wrf_constants.esm at binary64; the routine's inline literals (0.6 = float32(1.5*0.4), 0.001, 1.2, 1.5, 0.8, 2e-4, 5e-3, 1e-8) at their binary32 roundings in ntiedtke_parameters.esm (FORTRAN_BUGS N109).",
+    "description": "The SHALLOW phase of `cutypen`, the convection trigger of WRF's New Tiedtke scheme (`phys/physics_mmm/cu_ntiedtke.F90:1221-1515`, WRF 4.8): a test parcel launched from the lowest layer with a surface-flux excess, lifted through the column, and classified as a shallow cloud (`ktype = 2`) if it rises into cloud and stops within 200 hPa of its base. It runs before the deep departure-level scan, which can override its verdict (the tape shows this: the ascent runs at 14 of the 16 dumped steps and classifies as shallow at only one).\n\nLAUNCH. When the surface virtual-temperature flux is upward the parcel leaves the lowest layer with velocity w = 1.2 (0.001 + 0.6 (phi/(rho T)) (hfx/cp + 0.608 T qfx))^(1/3), a Deardorff convective velocity, and with temperature and humidity excesses 1.5 hfx/(rho cp w) and 1.5 qfx/(rho w) over the lowest half level; its kinetic energy starts at w^2/2. Otherwise nothing is launched and every array is left as cuinin handed it.\n\nONE LEVEL OF THE ASCENT is two operations. First the parcel ENTRAINS from half level k+1 to k: its dry static energy s and humidity q obey the entraining-plume ODE dphi/dz = eta (phi_env - phi) with eta = 0.8/z + 2e-4 (Jakob and Siebesma 2003), integrated by one implicit-trapezoidal step -- the routine's `dh = (coef (dhen[k+1] + dhen[k]) + (1 - coef) dh[k+1])/(1 + coef)` is exactly that step with the rate frozen at the upper end, and it is taken here, through parcel_templates.esm's `entrain_step` (the per-level step this component shares with deep_departure_scan.esm), by the shared EarthSciDiscretizations plume stencil (grids/column_nonuniform_1d/stencils/entraining_plume_lev_interior, EarthSciDiscretizations PR #45) passed eta[k] at both ends. Then the parcel is PROJECTED onto saturation at the half-level pressure by cuadjtqn's condensation-only adjustment (`up_adjust_T`/`up_adjust_q` of moist_thermodynamics.esm), the condensed water accumulates (capped at 5e-3) and the latent heat of any change of ice fraction is added back into s. The kinetic energy obeys dK/dz = 2 (B - eta K) with B the buoyant acceleration averaged over the step, the same stencil again (environment 0, rate 2 eta, source 2 B), and the parcel stops at the first level where K goes negative.\n\nWHY THE SWEEP IS FORCED FROM THE TAPE (read this before changing it). The parcel's (s, q) is carried from level to level THROUGH the projection: the s and q leaving level k are each a function of BOTH the s and the q leaving level k+1, because the saturation adjustment mixes them. That is a cycle between two distinct variables, and esm-spec 4.3.1.1 admits a recurrence on one variable only; the Rust binding rejects the two-variable form with `observed_cycle` (probed 2026-11-11 on the be1fafe6d binary: a[k] = a[k-1] + b[k-1], b[k] = a[k-1] b[k-1]), and the recurrence RFC keeps the rejection deliberately. EarthSciAST #701 proposes the extension that would admit it: a recurrence GROUP of equations over one cell frame whose every cross-read is strictly earlier along one shared axis. None of the three ways out this repository uses for apparent cycles applies (CLAUDE.md): it does not unroll, because each step goes through a nonlinear projection; it is not a quadrature rule in disguise, because the projection sits between steps -- that is exactly why PR #45's lowering rule cannot be used whole and only its STEP is; and there is no conserved sum to carry, because the moist static energy cp T + L q is conserved by the adjustment only while L is constant, which fails in the mixed-phase range the parcel climbs through and is broken outright by the freezing term. So the component steps each level from the TAPED state of the level below (`dh_tr`, `q_tr`, `T_tr`, the sh_* tape at cutypen's shallow exit) rather than from its own output. Every operation of the step map -- entrainment, projection, condensate, freezing, buoyancy, kinetic energy, stall, cloud base, cloud top, verdict -- is transcribed and pinned; what is not yet expressed is feeding the step's output back as its next input. When the spec admits such a group (EarthSciAST #701), `dh_c`, `q_c` and `T_c` become reads of `dh_up`, `q_up` and `T_up` at k+1 and nothing else moves. The condensate and the kinetic energy ARE single-variable recurrences and are written as such (l_climb, ke_climb): neither feeds back into the projection.\n\nThe closed sweep was checked outside the format against the same tape: a float64 reimplementation that carries its own state from level to level reproduces sh_ptu, sh_pqu, sh_dh to 2e-15 and sh_kup, sh_zbuo to 1e-13 of their profile maxima over all 16 steps and both tile columns, with kcbot, kctop, ktype and wbase identical, so the forcing hides no drift.\n\nCLIMB AXIS. A recurrence sweeps upward in index (esm-spec 4.3.1.1), and the scheme indexes top-down, so the two sweeps live on `climb` (j = 1 the lowest layer, kernel level NLEV + 1 - j) and are read back in kernel order as l_up and ke_up. Everything else stays in the kernel's top-down ordering, as in the rest of this scheme's components.\n\nCLOUD BASE AND TOP. The base is looked for at the first level where the parcel holds condensate: the lifting condensation level is extrapolated from the half level below by one Newton step (`lcl_pressure`) and the base placed at whichever adjacent half level is nearer -- to the condensation pressure TRUNCATED to whole pascals, because cutypen stores it in an integer (FORTRAN_BUGS N114) -- the lower one marked by writing 1e-8 of condensate into it, a marker the cloud-top test then reads. The top is the stall level if the parcel stalls with condensate below it. A cloud deeper than 200 hPa is not shallow; the deep scan deals with it.\n\nThe OUTPUT arrays (`*_out`, `lab_out`, `kcbot`, `kctop`, `ktype`, `wbase`) reproduce what cutypen leaves in its locals at the end of the shallow phase, including the levels it never touches (left as cuinin handed them, or zero for the arrays cutypen zero-initialises), because that is what the tape records and what the deep phase then overwrites. The routine's copy into cutu/cuqu/culu/culab for jk >= kctop is not exposed: the deep phase that follows overwrites the same arrays.\n\nConstants: the seven cu_ntiedtke_init arguments from lib/wrf_constants.esm at binary64; the routine's inline literals (0.6 = float32(1.5*0.4), 0.001, 1.2, 1.5, 0.8, 2e-4, 5e-3, 1e-8) at their binary32 roundings in ntiedtke_parameters.esm (FORTRAN_BUGS N109).\n\nNeighbour reads of mass-level fields use the nearest in-range value at the vertical boundaries. The ascent uses its prescribed seed and interior stencil over the original range.",
     "license": "MIT",
     "tags": [
       "wrf",
@@ -1319,10 +1319,16 @@
                   "args": [
                     "dh_c",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -1332,10 +1338,16 @@
                   "args": [
                     "s_env",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -1388,10 +1400,16 @@
                   "args": [
                     "q_c",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -1401,10 +1419,16 @@
                   "args": [
                     "q_h",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -1633,10 +1657,16 @@
                   "args": [
                     "T_c",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -1952,10 +1982,16 @@
                           "args": [
                             "buoy",
                             {
-                              "op": "+",
+                              "op": "min",
                               "args": [
-                                "k",
-                                1
+                                "NLEV",
+                                {
+                                  "op": "+",
+                                  "args": [
+                                    "k",
+                                    1
+                                  ]
+                                }
                               ]
                             }
                           ]
@@ -2335,10 +2371,16 @@
                   "args": [
                     "T_c",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -2348,10 +2390,16 @@
                   "args": [
                     "q_c",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -2396,10 +2444,16 @@
                   "args": [
                     "T_c",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -2409,10 +2463,16 @@
                   "args": [
                     "q_c",
                     {
-                      "op": "+",
+                      "op": "min",
                       "args": [
-                        "k",
-                        1
+                        "NLEV",
+                        {
+                          "op": "+",
+                          "args": [
+                            "k",
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
@@ -2498,10 +2558,16 @@
                               "args": [
                                 "l_up",
                                 {
-                                  "op": "+",
+                                  "op": "min",
                                   "args": [
-                                    "k",
-                                    1
+                                    "NLEV",
+                                    {
+                                      "op": "+",
+                                      "args": [
+                                        "k",
+                                        1
+                                      ]
+                                    }
                                   ]
                                 }
                               ]
@@ -2592,10 +2658,16 @@
                           "args": [
                             "ke_up",
                             {
-                              "op": "+",
+                              "op": "min",
                               "args": [
-                                "k",
-                                1
+                                "NLEV",
+                                {
+                                  "op": "+",
+                                  "args": [
+                                    "k",
+                                    1
+                                  ]
+                                }
                               ]
                             }
                           ]
@@ -2866,10 +2938,16 @@
                           "args": [
                             "base_low",
                             {
-                              "op": "-",
+                              "op": "max",
                               "args": [
-                                "k",
-                                1
+                                1,
+                                {
+                                  "op": "-",
+                                  "args": [
+                                    "k",
+                                    1
+                                  ]
+                                }
                               ]
                             }
                           ]
@@ -2970,10 +3048,16 @@
                               "args": [
                                 "l_out",
                                 {
-                                  "op": "+",
+                                  "op": "min",
                                   "args": [
-                                    "k",
-                                    1
+                                    "NLEV",
+                                    {
+                                      "op": "+",
+                                      "args": [
+                                        "k",
+                                        1
+                                      ]
+                                    }
                                   ]
                                 }
                               ]
@@ -3925,10 +4009,16 @@
                               "args": [
                                 "base_low",
                                 {
-                                  "op": "-",
+                                  "op": "max",
                                   "args": [
-                                    "k",
-                                    1
+                                    1,
+                                    {
+                                      "op": "-",
+                                      "args": [
+                                        "k",
+                                        1
+                                      ]
+                                    }
                                   ]
                                 }
                               ]
