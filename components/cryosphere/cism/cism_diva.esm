@@ -1,0 +1,3984 @@
+{
+ "esm": "2.0.0",
+ "metadata": {
+  "name": "cism_diva",
+  "description": "The CISM DIVA depth-integrated momentum balance as a PDE on the 2-D vertex grid (stage 2 of the EqESM project; CISM = cismwrap_3_00_002 as built in CESM cesm3.0-alphabranch, glissade_velo_higher.F90, which_ho_approx = HO_APPROX_DIVA = 4 for the reference run). The model solves nothing: it evaluates the discretized balance on the dumped converged FE solution of the fixed 9x9-vertex patch (stage1/dumps/cism/cism_velo_patch.csv, dump_patch_i0 = 24, dump_patch_j0 = 14, dump_patch_n = 8, 2026-11-12 run 12362182), pins the slope-correction chain (F_x/y, beta_eff_x/y) straight to the dumped columns and the balance sums Rx/Ry to the measured FE-vs-FD scale (1.5% of the largest local term and of the dumped driving stress) at interior vertices, so the stage-2 lane can hold the discretization accountable against the FE solve it replaces.",
+  "license": "MIT",
+  "tags": [
+   "cryosphere",
+   "ice-sheet",
+   "cism",
+   "momentum",
+   "diva",
+   "residual",
+   "cesm"
+  ],
+  "created": "2026-11-06T00:00:00Z",
+  "authors": [
+   "EqESM project contributors"
+  ],
+  "references": [
+   {
+    "citation": "CISM (Community Ice Sheet Model) cismwrap_3_00_002 / cism_main_3.00.002, as built in CESM cesm3.0-alphabranch (checkout stage1/cesm/components/cism, reference run T1850Gg/f09_g17_gris20): libglissade/glissade_basal_traction.F90, libglissade/glissade_therm.F90, libglissade/glissade_grid_operators.F90, libglissade/glissade_velo_higher.F90, libglissade/glissade_mass_balance.F90, libglissade/glissade_calving.F90, libglissade/glissade_masks.F90, libglissade/glissade_utils.F90, libglimmer/glimmer_physcon.F90, libglimmer/glimmer_utils.F90, libglide/glide_types.F90, libglide/glide_setup.F90, libglad/glad_main.F90, libglad/glad_timestep.F90, libglad/glad_output_states.F90, libglad/glad_output_fluxes.F90, drivers/cpl/nuopc/glc_import_export.F90 - the reference implementation these components are transcribed from.",
+    "url": "https://github.com/ESCOMP/CESM"
+   },
+   {
+    "citation": "CISM (Community Ice Sheet Model) cism_main_3.00.002, libglissade/glissade_velo_higher.F90 (glissade_velo_higher_solve, compute_element_matrix, glissade_calcbeta) and libglissade/glissade_grid_operators.F90 (glissade_gradient, glissade_slope_angle_staggered)."
+   },
+   {
+    "citation": "Goldberg, D. N. (2011). A variationally derived, depth-integrated approximation for a full-Stokes ice sheet model. Journal of Glaciology, 57(204), 717-728. Eq. 37 (the depth-integrated momentum balance) and eq. 40-41 (the effective basal friction)."
+   },
+   {
+    "citation": "EarthSciModels - the authoritative .esm corpus this component lives in.",
+    "url": "https://github.com/EarthSciML/EarthSciModels"
+   }
+  ]
+ },
+ "index_sets": {
+  "i": {
+   "kind": "interval",
+   "size": "NX"
+  },
+  "j": {
+   "kind": "interval",
+   "size": "NY"
+  },
+  "lev": {
+   "kind": "interval",
+   "size": "NLAYERS"
+  },
+  "lev_nodes": {
+   "kind": "interval",
+   "size": {
+    "op": "+",
+    "args": [
+     "NLAYERS",
+     1
+    ]
+   }
+  }
+ },
+ "models": {
+  "DivaBalance": {
+   "expression_template_imports": [
+    {
+     "ref": "./cism_diva_discretization.esm"
+    },
+    {
+     "ref": "./cism_templates.esm"
+    },
+    {
+     "ref": "./cism_velo_discretization.esm"
+    }
+   ],
+   "variables": {
+    "uvel_2d": {
+     "type": "parameter",
+     "units": "m/yr",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "Converged DIVA 2-D x-velocity at the vertices (solve-internal m/yr, scale_output not yet run; glissade_velo_higher.F90:3908-3933).",
+     "default": 0.0
+    },
+    "vvel_2d": {
+     "type": "parameter",
+     "units": "m/yr",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "Converged DIVA 2-D y-velocity at the vertices.",
+     "default": 0.0
+    },
+    "thck": {
+     "type": "parameter",
+     "units": "m",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "Cell-centered ice thickness (the 8x8 cell block of the patch; row/column NX unused).",
+     "default": 0.0
+    },
+    "usrf": {
+     "type": "parameter",
+     "units": "m",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "Cell-centered upper surface elevation (the 8x8 cell block).",
+     "default": 0.0
+    },
+    "efvs": {
+     "type": "parameter",
+     "units": "Pa yr",
+     "shape": [
+      "lev",
+      "i",
+      "j"
+     ],
+     "description": "Cell-centered per-layer effective viscosity (the arithmetic mean of the 4 quad-point viscosities, glissade_velo_higher.F90:5411-5416; the 8x8 cell block per layer).",
+     "default": 0.0
+    },
+    "sigma": {
+     "type": "parameter",
+     "units": "1",
+     "shape": [
+      "lev_nodes"
+     ],
+     "description": "The sigma coordinate at the 11 velocity levels (0 at the surface, 1 at the bed; identical on every patch cell).",
+     "default": 0.0
+    },
+    "beta_internal": {
+     "type": "parameter",
+     "units": "Pa yr/m",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The accepted calcbeta pass's f_ground*beta at the vertices (glissade_calcbeta, which_ho_babc = 3).",
+     "default": 0.0
+    },
+    "stag_omega": {
+     "type": "parameter",
+     "units": "m/(Pa yr)",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The ice-masked 4-cell mean of the DIVA double integral at the vertices (glissade_velo_higher.F90:2549-2552).",
+     "default": 0.0
+    },
+    "taudx": {
+     "type": "parameter",
+     "units": "Pa",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The x driving stress at the vertices, -rhoi*g*stagthck*dusrf_dx (Pa, converted from model units at glissade_velo_higher.F90:2041).",
+     "default": 0.0
+    },
+    "taudy": {
+     "type": "parameter",
+     "units": "Pa",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The y driving stress at the vertices.",
+     "default": 0.0
+    },
+    "dx": {
+     "type": "parameter",
+     "units": "m",
+     "default": 20000.0,
+     "description": "Grid spacing in x (gris20: 20 km)."
+    },
+    "dy": {
+     "type": "parameter",
+     "units": "m",
+     "default": 20000.0,
+     "description": "Grid spacing in y (gris20: 20 km)."
+    },
+    "dz": {
+     "type": "unknown",
+     "units": "1",
+     "shape": [
+      "lev"
+     ],
+     "description": "The dimensionless sigma layer widths dz[l] = sigma[l+1] - sigma[l] (cism_sigma_measure)."
+    },
+    "z_sfc": {
+     "type": "unknown",
+     "units": "1",
+     "description": "The surface sigma level, 0 (the lower bound of the layer integral)."
+    },
+    "z_top": {
+     "type": "unknown",
+     "units": "1",
+     "description": "The bed sigma level, 1 (the upper bound of the layer integral)."
+    },
+    "etaH": {
+     "type": "unknown",
+     "units": "Pa yr m",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The depth-integrated effective viscosity of the DIVA 2-D balance at the cell centers, thck * sum_k efvs_k * dsigma_k: the exact stencil of the Fortran quad-point vertical average efvs_qp_vertavg = sum_k efvs_qp(k,p)*(sigma(k+1) - sigma(k)) (glissade_velo_higher.F90:5366-5369) applied to the dumped quad-point-mean layer viscosities, with the thickness factor carried by the model (the element matrix coefficient is h_qp*efvs_qp_vertavg, F90:5404)."
+    },
+    "z_mean": {
+     "type": "unknown",
+     "units": "m",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The mid-surface elevation of the DIVA slope correction at the cell centers, 0.5*(usrf + lsrf) = usrf - thck/2 for the grounded patch cells (glissade_velo_higher.F90:2160)."
+    },
+    "dz_dx": {
+     "type": "unknown",
+     "units": "1",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The plain vertex gradient of z_mean in x (glissade_slope_angle_staggered's glissade_gradient with gradient_margin = 1, glissade_grid_operators.F90:309-468, F90:1414-1552)."
+    },
+    "dz_dy": {
+     "type": "unknown",
+     "units": "1",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The plain vertex gradient of z_mean in y."
+    },
+    "theta_x": {
+     "type": "unknown",
+     "units": "rad",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The x-direction vertex slope angle of the DIVA slope correction, atan(|dz_dx|) (cism_theta_slope_x)."
+    },
+    "theta_y": {
+     "type": "unknown",
+     "units": "rad",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The y-direction vertex slope angle, atan(|dz_dy|)."
+    },
+    "F_x": {
+     "type": "unknown",
+     "units": "1",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The x DIVA slope correction factor, cos^2(theta_x) + 4 sin^2(theta_x) (cism_diva_slope_factor, glissade_velo_higher.F90:2189-2193)."
+    },
+    "F_y": {
+     "type": "unknown",
+     "units": "1",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The y DIVA slope correction factor."
+    },
+    "beta_eff_x": {
+     "type": "unknown",
+     "units": "Pa yr/m",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The effective basal friction of the x momentum equation, F_x*beta_internal/(F_x + beta_internal*stag_omega*cos(theta_x)) (cism_beta_eff, glissade_velo_higher.F90:2589-2601)."
+    },
+    "beta_eff_y": {
+     "type": "unknown",
+     "units": "Pa yr/m",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The effective basal friction of the y momentum equation."
+    },
+    "k4": {
+     "type": "unknown",
+     "units": "Pa yr m",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The 4*etaH coefficient of the D(4*etaH*D(u,x),x) and D(4*etaH*D(v,y),y) terms (the rule stencils need the coefficient as a named field)."
+    },
+    "k2": {
+     "type": "unknown",
+     "units": "Pa yr m",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The 2*etaH coefficient of the D(2*etaH*D(v,y),x) and D(2*etaH*D(u,x),y) mixed terms."
+    },
+    "T1x": {
+     "type": "unknown",
+     "units": "Pa",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "D(4*etaH*D(u,x),x) at the vertices: the x-divergence of the xx membrane stress component (cism_stag_Dx_Dx)."
+    },
+    "T2x": {
+     "type": "unknown",
+     "units": "Pa",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "D(2*etaH*D(v,y),x) at the vertices: the x-divergence of the xy membrane stress component acting on the y-velocity gradient (cism_stag_Dx_Dy)."
+    },
+    "T3x": {
+     "type": "unknown",
+     "units": "Pa",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "D(etaH*D(u,y),y) at the vertices: the y-divergence of the xy membrane stress component acting on the x-velocity gradient (cism_stag_Dy_Dy)."
+    },
+    "T4x": {
+     "type": "unknown",
+     "units": "Pa",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "D(etaH*D(v,x),y) at the vertices: the y-divergence of the yy membrane stress component (cism_stag_Dy_Dx)."
+    },
+    "T1y": {
+     "type": "unknown",
+     "units": "Pa",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "D(4*etaH*D(v,y),y) at the vertices (cism_stag_Dy_Dy)."
+    },
+    "T2y": {
+     "type": "unknown",
+     "units": "Pa",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "D(2*etaH*D(u,x),y) at the vertices (cism_stag_Dy_Dx)."
+    },
+    "T3y": {
+     "type": "unknown",
+     "units": "Pa",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "D(etaH*D(v,x),x) at the vertices (cism_stag_Dx_Dx)."
+    },
+    "T4y": {
+     "type": "unknown",
+     "units": "Pa",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "D(etaH*D(u,y),x) at the vertices (cism_stag_Dx_Dy)."
+    },
+    "Rx": {
+     "type": "unknown",
+     "units": "Pa",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The discretized x-momentum balance residual at the vertices, T1x + T2x + T3x + T4x - beta_eff_x*uvel_2d + taudx (the balance div(sigma) - beta_eff*u = rho*g*H*ds/dx = -taudx, so the sum is 0 on the FE solution up to the FE-vs-FD discretization difference). The residual is computed where residual_valid = 1. Outside that interior the output is zero-filled and carries no balance information."
+    },
+    "Ry": {
+     "type": "unknown",
+     "units": "Pa",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "The discretized y-momentum balance residual, T1y + T2y + T3y + T4y - beta_eff_y*vvel_2d + taudy. The residual is computed where residual_valid = 1. Outside that interior the output is zero-filled and carries no balance information."
+    },
+    "residual_valid": {
+     "type": "unknown",
+     "units": "1",
+     "shape": [
+      "i",
+      "j"
+     ],
+     "description": "One where the complete momentum stencil fits in the patch. Ignore Rx and Ry wherever this mask is zero."
+    }
+   },
+   "equations": [
+    {
+     "lhs": "dz",
+     "rhs": {
+      "op": "apply_expression_template",
+      "args": [],
+      "name": "cism_sigma_measure",
+      "bindings": {
+       "sigma": "sigma"
+      }
+     }
+    },
+    {
+     "lhs": "z_sfc",
+     "rhs": {
+      "op": "const",
+      "args": [],
+      "value": 0.0,
+      "units": "1"
+     }
+    },
+    {
+     "lhs": "z_top",
+     "rhs": {
+      "op": "const",
+      "args": [],
+      "value": 1.0,
+      "units": "1"
+     }
+    },
+    {
+     "lhs": "etaH",
+     "rhs": {
+      "op": "*",
+      "args": [
+       "thck",
+       {
+        "op": "integral",
+        "args": [
+         "efvs"
+        ],
+        "var": "lev",
+        "lower": "z_sfc",
+        "upper": "z_top"
+       }
+      ]
+     }
+    },
+    {
+     "lhs": "z_mean",
+     "rhs": {
+      "op": "-",
+      "args": [
+       "usrf",
+       {
+        "op": "*",
+        "args": [
+         0.5,
+         "thck"
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "lhs": "dz_dx",
+     "rhs": {
+      "op": "cism_stag_vertex_gradient_x",
+      "args": [
+       "z_mean"
+      ]
+     }
+    },
+    {
+     "lhs": "dz_dy",
+     "rhs": {
+      "op": "cism_stag_vertex_gradient_y",
+      "args": [
+       "z_mean"
+      ]
+     }
+    },
+    {
+     "lhs": "theta_x",
+     "rhs": {
+      "op": "apply_expression_template",
+      "args": [],
+      "name": "cism_theta_slope_x",
+      "bindings": {
+       "dz_dx": "dz_dx"
+      }
+     }
+    },
+    {
+     "lhs": "theta_y",
+     "rhs": {
+      "op": "apply_expression_template",
+      "args": [],
+      "name": "cism_theta_slope_x",
+      "bindings": {
+       "dz_dx": "dz_dy"
+      }
+     }
+    },
+    {
+     "lhs": "F_x",
+     "rhs": {
+      "op": "apply_expression_template",
+      "args": [],
+      "name": "cism_diva_slope_factor",
+      "bindings": {
+       "theta": "theta_x"
+      }
+     }
+    },
+    {
+     "lhs": "F_y",
+     "rhs": {
+      "op": "apply_expression_template",
+      "args": [],
+      "name": "cism_diva_slope_factor",
+      "bindings": {
+       "theta": "theta_y"
+      }
+     }
+    },
+    {
+     "lhs": "beta_eff_x",
+     "rhs": {
+      "op": "apply_expression_template",
+      "args": [],
+      "name": "cism_beta_eff",
+      "bindings": {
+       "F": "F_x",
+       "beta": "beta_internal",
+       "omega": "stag_omega",
+       "theta": "theta_x"
+      }
+     }
+    },
+    {
+     "lhs": "beta_eff_y",
+     "rhs": {
+      "op": "apply_expression_template",
+      "args": [],
+      "name": "cism_beta_eff",
+      "bindings": {
+       "F": "F_y",
+       "beta": "beta_internal",
+       "omega": "stag_omega",
+       "theta": "theta_y"
+      }
+     }
+    },
+    {
+     "lhs": "k4",
+     "rhs": {
+      "op": "*",
+      "args": [
+       4.0,
+       "etaH"
+      ]
+     }
+    },
+    {
+     "lhs": "k2",
+     "rhs": {
+      "op": "*",
+      "args": [
+       2.0,
+       "etaH"
+      ]
+     }
+    },
+    {
+     "lhs": "T1x",
+     "rhs": {
+      "op": "D",
+      "args": [
+       {
+        "op": "*",
+        "args": [
+         "k4",
+         {
+          "op": "D",
+          "args": [
+           "uvel_2d"
+          ],
+          "wrt": "x"
+         }
+        ]
+       }
+      ],
+      "wrt": "x"
+     }
+    },
+    {
+     "lhs": "T2x",
+     "rhs": {
+      "op": "D",
+      "args": [
+       {
+        "op": "*",
+        "args": [
+         "k2",
+         {
+          "op": "D",
+          "args": [
+           "vvel_2d"
+          ],
+          "wrt": "y"
+         }
+        ]
+       }
+      ],
+      "wrt": "x"
+     }
+    },
+    {
+     "lhs": "T3x",
+     "rhs": {
+      "op": "D",
+      "args": [
+       {
+        "op": "*",
+        "args": [
+         "etaH",
+         {
+          "op": "D",
+          "args": [
+           "uvel_2d"
+          ],
+          "wrt": "y"
+         }
+        ]
+       }
+      ],
+      "wrt": "y"
+     }
+    },
+    {
+     "lhs": "T4x",
+     "rhs": {
+      "op": "D",
+      "args": [
+       {
+        "op": "*",
+        "args": [
+         "etaH",
+         {
+          "op": "D",
+          "args": [
+           "vvel_2d"
+          ],
+          "wrt": "x"
+         }
+        ]
+       }
+      ],
+      "wrt": "y"
+     }
+    },
+    {
+     "lhs": "T1y",
+     "rhs": {
+      "op": "D",
+      "args": [
+       {
+        "op": "*",
+        "args": [
+         "k4",
+         {
+          "op": "D",
+          "args": [
+           "vvel_2d"
+          ],
+          "wrt": "y"
+         }
+        ]
+       }
+      ],
+      "wrt": "y"
+     }
+    },
+    {
+     "lhs": "T2y",
+     "rhs": {
+      "op": "D",
+      "args": [
+       {
+        "op": "*",
+        "args": [
+         "k2",
+         {
+          "op": "D",
+          "args": [
+           "uvel_2d"
+          ],
+          "wrt": "x"
+         }
+        ]
+       }
+      ],
+      "wrt": "y"
+     }
+    },
+    {
+     "lhs": "T3y",
+     "rhs": {
+      "op": "D",
+      "args": [
+       {
+        "op": "*",
+        "args": [
+         "etaH",
+         {
+          "op": "D",
+          "args": [
+           "vvel_2d"
+          ],
+          "wrt": "x"
+         }
+        ]
+       }
+      ],
+      "wrt": "x"
+     }
+    },
+    {
+     "lhs": "T4y",
+     "rhs": {
+      "op": "D",
+      "args": [
+       {
+        "op": "*",
+        "args": [
+         "etaH",
+         {
+          "op": "D",
+          "args": [
+           "uvel_2d"
+          ],
+          "wrt": "y"
+         }
+        ]
+       }
+      ],
+      "wrt": "x"
+     }
+    },
+    {
+     "lhs": "Rx",
+     "rhs": {
+      "op": "ifelse",
+      "args": [
+       {
+        "op": "==",
+        "args": [
+         "residual_valid",
+         1
+        ]
+       },
+       {
+        "op": "-",
+        "args": [
+         {
+          "op": "+",
+          "args": [
+           {
+            "op": "+",
+            "args": [
+             {
+              "op": "+",
+              "args": [
+               "T1x",
+               "T2x"
+              ]
+             },
+             "T3x"
+            ]
+           },
+           "T4x"
+          ]
+         },
+         {
+          "op": "+",
+          "args": [
+           {
+            "op": "*",
+            "args": [
+             "beta_eff_x",
+             "uvel_2d"
+            ]
+           },
+           {
+            "op": "neg",
+            "args": [
+             "taudx"
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "op": "const",
+        "args": [],
+        "value": 0.0,
+        "units": "Pa"
+       }
+      ]
+     }
+    },
+    {
+     "lhs": "Ry",
+     "rhs": {
+      "op": "ifelse",
+      "args": [
+       {
+        "op": "==",
+        "args": [
+         "residual_valid",
+         1
+        ]
+       },
+       {
+        "op": "-",
+        "args": [
+         {
+          "op": "+",
+          "args": [
+           {
+            "op": "+",
+            "args": [
+             {
+              "op": "+",
+              "args": [
+               "T1y",
+               "T2y"
+              ]
+             },
+             "T3y"
+            ]
+           },
+           "T4y"
+          ]
+         },
+         {
+          "op": "+",
+          "args": [
+           {
+            "op": "*",
+            "args": [
+             "beta_eff_y",
+             "vvel_2d"
+            ]
+           },
+           {
+            "op": "neg",
+            "args": [
+             "taudy"
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "op": "const",
+        "args": [],
+        "value": 0.0,
+        "units": "Pa"
+       }
+      ]
+     }
+    },
+    {
+     "lhs": "residual_valid",
+     "rhs": {
+      "op": "faq",
+      "args": [],
+      "output_idx": [
+       "i",
+       "j"
+      ],
+      "ranges": {
+       "i": {
+        "from": "i"
+       },
+       "j": {
+        "from": "j"
+       }
+      },
+      "expr": {
+       "op": "ifelse",
+       "args": [
+        {
+         "op": "apply_expression_template",
+         "args": [],
+         "name": "cism_diva_interior",
+         "bindings": {
+          "ix": "i",
+          "iy": "j",
+          "nx": "NX",
+          "ny": "NY"
+         }
+        },
+        1.0,
+        0.0
+       ]
+      }
+     }
+    }
+   ],
+   "tests": [
+    {
+     "id": "diva_balance_step4",
+     "description": "The DIVA momentum balance on the converged FE solution of step 4 at the three interior vertices (3,3), (4,4), (2,5) = global (26,16), (27,17), (25,18). Chain pins: the imported-by-reference slope-correction chain (z_mean = usrf - thck/2 -> plain vertex gradient cism_stag_vertex_gradient_x/y -> theta = atan(|dz|) -> F = cos^2(theta) + 4 sin^2(theta) -> beta_eff = F*beta/(F + beta*omega*cos(theta)), the same cism_templates.esm laws the stage-2 velocity lane applies at the traced cells) pinned STRAIGHT TO THE DUMPED CSV COLUMNS stag_diva_slope_factor_x/y and beta_eff_x/y at rel 1e-12 (stage1/dumps/cism/cism_velo_patch.csv, step-4 VERT rows at the pinned vertices). The eight membrane terms T1x..T4y and the exact sums are deliberately NOT pinned: they are not dump columns, so a pin would compare the model against a Python transcription of the same stencil (tautological); they are covered through the sums below. Residual pins: Rx = T1x+T2x+T3x+T4x - beta_eff_x*uvel_2d + taudx and Ry likewise are FAILABLE (every term is computed from the overridden fields), and each is asserted |R| <= 1.5% of the largest local term AND |Rx| <= 1.5%*|taudx| / |Ry| <= 1.5%*|taudy| (the driving-stress check: R = membrane + basal - driving is measured against CESM's own dumped driving stress; the FE solver converged to 1e-7 relative, which_ho_resid = HO_RESID_L2NORM_RELATIVE = 4, but the FD operator is NOT the FE assembly - 9-point bilinear stencil with quad-point integration vs the face fluxes - so the measured FE-vs-FD residual is 0.16-0.80% of the largest local term and 0.16-1.18% of the driving stress at these vertices, and the 1.5% tolerance is about 2x the measured maximum; anywhere in the interior the residual is up to 0.6% of the patch-wide driving-stress scale; see README.md).",
+     "time_span": {
+      "start": 0.0,
+      "end": 0.0
+     },
+     "parameter_overrides": {
+      "uvel_2d": [
+       [
+        -5.059885574062776,
+        -14.624905224600997,
+        -13.2067333977893,
+        -8.77953607904513,
+        -7.898708500583228,
+        -9.914096932653615,
+        -11.56791336919219,
+        -10.005476350748143,
+        -6.410927691757936
+       ],
+       [
+        -2.3447481485384043,
+        -5.745895457912504,
+        -4.41383158214036,
+        0.4444724942434275,
+        1.813942643102942,
+        1.662238206046944,
+        0.9257267007634112,
+        -0.6662043268931848,
+        -1.8792604347031616
+       ],
+       [
+        -3.089019367031679,
+        2.810983616381042,
+        15.657009235399512,
+        18.665871854355423,
+        18.504403986028823,
+        24.878988730717673,
+        33.05472538327978,
+        30.412132722065376,
+        15.498391189317166
+       ],
+       [
+        3.0699722406281986,
+        7.780891869907406,
+        20.325565932164814,
+        43.83658985899709,
+        47.78166900562104,
+        66.4814445216937,
+        91.1796845759357,
+        81.86342315313665,
+        50.51502830181468
+       ],
+       [
+        1.3961042836361617,
+        2.92409497578841,
+        16.16080106982391,
+        57.430819190097814,
+        66.05593151835309,
+        77.92280309321126,
+        121.24396788625923,
+        100.68886827045941,
+        70.57615288954582
+       ],
+       [
+        0.08162527744392073,
+        0.24951244017327076,
+        4.28701068417931,
+        18.603756775191137,
+        15.447697716569534,
+        11.0279248726961,
+        24.232658743123114,
+        23.523009838448196,
+        32.433171299606755
+       ],
+       [
+        0.0,
+        0.004200661319098783,
+        0.07562145966475316,
+        0.5041205711468827,
+        0.137868669143927,
+        0.013463210046005203,
+        0.014564280478777959,
+        0.12733822916587706,
+        2.437016525287251
+       ],
+       [
+        0.0,
+        0.0,
+        0.0048810441193078685,
+        0.019453393585987144,
+        0.011598857305590696,
+        0.0,
+        0.0,
+        0.0,
+        0.036616177953707744
+       ],
+       [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.007706270040346874
+       ]
+      ],
+      "vvel_2d": [
+       [
+        -5.684972489157111,
+        -30.201199773425344,
+        -24.159790311035415,
+        -13.625672096434519,
+        -6.545883685721091,
+        -1.9593337324769173,
+        -4.383832475981244,
+        -4.3123528511311315,
+        -2.5651331707786964
+       ],
+       [
+        -4.258977344579888,
+        -15.61982546273994,
+        -11.144880953893423,
+        -11.012469196718055,
+        -6.6285150144094525,
+        -1.6016238475203062,
+        -4.1566950071227655,
+        -3.2343815200776955,
+        -2.099677161228
+       ],
+       [
+        -2.132397626927082,
+        -10.074593564602962,
+        -12.133910423750057,
+        -14.790140489301502,
+        -10.699291987296327,
+        -1.47354782969281,
+        -9.269802482340634,
+        -12.861598109290446,
+        -11.22082850025287
+       ],
+       [
+        0.20426735414394087,
+        -6.28706569227529,
+        -11.70844338457045,
+        -22.445386882118104,
+        -10.874924196938817,
+        7.412007507345837,
+        -3.13329671421844,
+        -29.272052533051564,
+        -35.48185257955861
+       ],
+       [
+        -0.2832710941534228,
+        -2.3724979616824755,
+        -3.578362528639629,
+        -3.6081448697654643,
+        0.7135912604480964,
+        9.049846493195856,
+        9.076230256559727,
+        -40.42188042895172,
+        -55.58457525644892
+       ],
+       [
+        -0.02510693881758669,
+        -0.08949374413750376,
+        -1.1687704012539917,
+        4.728566934966842,
+        2.6100227265615508,
+        0.621278311707217,
+        -2.1641300213748336,
+        -15.688787755788267,
+        -34.57654090952847
+       ],
+       [
+        0.0,
+        -0.002671967371591759,
+        -0.03414017062112478,
+        0.13436931562037358,
+        0.10444008019084806,
+        0.0002519290618083455,
+        -0.011997728331206742,
+        -0.09543469441057517,
+        -3.3498321324645093
+       ],
+       [
+        0.0,
+        0.0,
+        -0.0015382380212792424,
+        0.0015768754983550408,
+        0.008598606147144722,
+        0.0,
+        0.0,
+        0.0,
+        -0.05240091213316129
+       ],
+       [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -0.0033473742901299138
+       ]
+      ],
+      "thck": [
+       [
+        118.53930259619973,
+        601.7340421713236,
+        980.968120918681,
+        1327.5384187001252,
+        1446.080820202574,
+        1651.9242293113907,
+        1794.3718568976356,
+        1840.3153834041857,
+        0.0
+       ],
+       [
+        191.41181310303028,
+        657.5142625579473,
+        704.4716795975918,
+        1346.3838000231528,
+        1417.5494188939638,
+        1589.5301844643468,
+        1799.5287434030188,
+        1696.6829285804222,
+        0.0
+       ],
+       [
+        283.51636657168643,
+        718.8562873962231,
+        896.8135196685151,
+        1489.5071015648068,
+        1461.2643912639946,
+        1492.2861807559511,
+        1696.1664540586896,
+        1613.4420865763093,
+        0.0
+       ],
+       [
+        703.1631199424831,
+        944.8672276835872,
+        1153.3013043920578,
+        1408.936100176705,
+        1424.5011154059544,
+        1384.714827399647,
+        1404.6686959115343,
+        1277.7919052046648,
+        0.0
+       ],
+       [
+        308.33506677788483,
+        488.8662471394219,
+        702.0478203038637,
+        1246.1743045845042,
+        1200.8437977117908,
+        973.6367815087699,
+        1159.7185795075873,
+        942.6267591913991,
+        0.0
+       ],
+       [
+        26.92664657707312,
+        139.5049114604186,
+        162.05131737668364,
+        758.268249489536,
+        755.1969392792275,
+        365.2245900809976,
+        599.0021174391345,
+        788.9934820486119,
+        0.0
+       ],
+       [
+        1.2101426921028463e-05,
+        0.00015088741835420655,
+        10.94835752759544,
+        191.26715030311505,
+        304.2725720890314,
+        7.897932332295724,
+        7.757058774584029,
+        94.97615304744028,
+        0.0
+       ],
+       [
+        0.0,
+        0.0,
+        1.4652074561838149e-05,
+        14.11592290652342,
+        27.73715696908725,
+        5.878824488615081e-05,
+        3.914544218850691e-07,
+        3.5557800104800344e-05,
+        0.0
+       ],
+       [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+       ]
+      ],
+      "usrf": [
+       [
+        1288.9393270102623,
+        1731.2340421713236,
+        2229.3681453327436,
+        2472.8384675282505,
+        2599.5808202025737,
+        2664.624241518422,
+        2683.791839807792,
+        2719.1454004940297,
+        0.0
+       ],
+       [
+        1694.0117886889677,
+        2006.2142137298224,
+        2379.271728425717,
+        2556.0837511950276,
+        2681.049418893964,
+        2763.730135636222,
+        2779.748714106144,
+        2816.582952994485,
+        0.0
+       ],
+       [
+        1871.2163177435614,
+        2161.9562629821608,
+        2475.7135440825778,
+        2569.4071259788693,
+        2660.2643912639946,
+        2741.286180755951,
+        2762.16645405869,
+        2815.842110990372,
+        0.0
+       ],
+       [
+        2227.8630711143583,
+        2212.6672765117123,
+        2310.501255563933,
+        2441.6360513485797,
+        2544.901139820017,
+        2608.914778571522,
+        2602.868647083409,
+        2642.4918563765395,
+        0.0
+       ],
+       [
+        1968.6351156060098,
+        1944.6662959675468,
+        2172.9478447179263,
+        2237.994311908723,
+        2344.7438221258535,
+        2378.9368303368947,
+        2325.7185795075875,
+        2305.026783605462,
+        0.0
+       ],
+       [
+        1236.9266465770731,
+        1496.7048626322935,
+        1875.151292962621,
+        1940.568298317661,
+        1881.1969392792275,
+        1835.4245412528726,
+        1757.3021662672595,
+        1685.8335089040806,
+        0.0
+       ],
+       [
+        628.0800291912707,
+        961.9201337975746,
+        1208.6483086994704,
+        1455.6671747171777,
+        1220.2225842960627,
+        1015.4979079182332,
+        864.4570709816153,
+        1068.516131074784,
+        0.0
+       ],
+       [
+        515.5800170898438,
+        504.6300048828125,
+        738.6400293005121,
+        905.3959522033985,
+        766.7171374378372,
+        369.88006367105737,
+        419.3999942879388,
+        916.8900502062376,
+        0.0
+       ],
+       [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+       ]
+      ],
+      "efvs": [
+       [
+        [
+         25116944.307142798,
+         8885172.270327536,
+         15835001.41278678,
+         16646795.575576792,
+         27036949.85886092,
+         27130485.734119803,
+         26570986.42036417,
+         25329787.440503396,
+         0.0
+        ],
+        [
+         33925972.54259195,
+         15151180.632437939,
+         15856078.236747192,
+         16955918.245349217,
+         17802530.32978882,
+         17796581.86063646,
+         20561621.107720718,
+         20329275.715862427,
+         0.0
+        ],
+        [
+         41673016.847647466,
+         21872441.105401784,
+         15834363.83369204,
+         14268326.267512638,
+         13655260.829479504,
+         12154550.473736975,
+         11752997.11640218,
+         10220302.060766378,
+         0.0
+        ],
+        [
+         42800017.957400255,
+         25273690.283484284,
+         22519526.887037534,
+         16715575.288956434,
+         9809424.72966016,
+         7943436.6940511,
+         7535060.959959772,
+         7221337.52866639,
+         0.0
+        ],
+        [
+         74830691.1447114,
+         26734795.356178746,
+         18790423.772067532,
+         11521254.62333733,
+         11131068.407231756,
+         10287400.170479007,
+         9775490.132805502,
+         8509445.05835547,
+         0.0
+        ],
+        [
+         74117674.46105656,
+         46330564.806369655,
+         21396794.039260704,
+         10483876.622973049,
+         7556560.502839213,
+         6391885.811477946,
+         5055914.744543848,
+         4309731.654717308,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         37698966.042543426,
+         20369751.49468525,
+         14437833.093041457,
+         13078968.490029741,
+         12441693.768736117,
+         10197097.896389337,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         196649924.51685864,
+         181752308.25360692,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ]
+       ],
+       [
+        [
+         21296770.01404433,
+         5764685.826287729,
+         5615096.754573745,
+         9414394.67065585,
+         15843768.957374597,
+         16297917.26469589,
+         14210720.106087726,
+         13990841.51371495,
+         0.0
+        ],
+        [
+         25679886.511105023,
+         8139979.921549263,
+         7462523.735456153,
+         11193115.980663052,
+         13466567.066810973,
+         15510178.35472224,
+         17977644.294910815,
+         17176645.42709743,
+         0.0
+        ],
+        [
+         26230374.28309135,
+         13082207.025545375,
+         10296565.996016083,
+         10733027.265665634,
+         10616227.73645985,
+         10385837.48067088,
+         9966827.358273538,
+         8715177.233405963,
+         0.0
+        ],
+        [
+         32654693.01774676,
+         18131419.328957703,
+         11141058.303310951,
+         8281360.02679913,
+         6501627.726183139,
+         5752305.603369756,
+         4956844.215166837,
+         4470022.482239136,
+         0.0
+        ],
+        [
+         28390343.159622412,
+         15796580.629593985,
+         10686801.552937718,
+         6313117.111685814,
+         4577442.472008763,
+         4108084.9908027127,
+         3274443.29473986,
+         2902442.0156670865,
+         0.0
+        ],
+        [
+         59919740.35132195,
+         37516908.928476356,
+         16121040.355333984,
+         6614490.251923375,
+         4119392.45577207,
+         3954814.406903796,
+         3261685.0531183667,
+         2829955.9594342425,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         32668760.397570726,
+         16745978.3792763,
+         11119669.378679633,
+         9733346.111089936,
+         10184936.998628432,
+         9184477.595717771,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         186298897.57339004,
+         177984007.83984864,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ]
+       ],
+       [
+        [
+         16762705.547925461,
+         3351921.9027814274,
+         2603567.193870866,
+         5009248.355409827,
+         8522782.646347776,
+         8755943.23761175,
+         7185967.614377144,
+         7171224.64874229,
+         0.0
+        ],
+        [
+         18296193.085581742,
+         4260829.211851854,
+         3722553.3265860393,
+         6483137.235915091,
+         9039580.969361626,
+         12817005.447344577,
+         15046209.914492982,
+         13680896.42855154,
+         0.0
+        ],
+        [
+         15403775.00114324,
+         7182206.621462031,
+         6082999.93648839,
+         7196372.135655843,
+         7420469.232061464,
+         8358464.411509559,
+         8055526.745587701,
+         7094982.849994017,
+         0.0
+        ],
+        [
+         22144164.91070436,
+         12017626.083413001,
+         5501162.164933951,
+         4116937.1469391095,
+         3777813.365657443,
+         3647965.1965526887,
+         2884827.26211854,
+         2502601.806775921,
+         0.0
+        ],
+        [
+         13278676.452744909,
+         8345107.249559578,
+         5563034.489258843,
+         3265718.132367177,
+         2180326.4301896566,
+         1962972.6787791252,
+         1509248.96468161,
+         1337656.0929156847,
+         0.0
+        ],
+        [
+         51275467.74243487,
+         27655800.04233521,
+         10593775.503182922,
+         3680883.1844184715,
+         2120734.1986454153,
+         2234889.2615832975,
+         1913653.556236581,
+         1644924.8123170673,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         28078243.69431767,
+         12839902.36065492,
+         8312603.247209172,
+         7680462.067861577,
+         8304116.109266725,
+         7620969.399275845,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         171728268.52939734,
+         163955910.36861295,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ]
+       ],
+       [
+        [
+         13877006.21840194,
+         2218761.6903600227,
+         1648077.960970373,
+         3241061.621805258,
+         5515291.938293955,
+         5654211.6394093465,
+         4594533.355561735,
+         4593922.074140802,
+         0.0
+        ],
+        [
+         14034302.034619806,
+         2744627.611794921,
+         2379370.5016724374,
+         4262436.730956159,
+         6320448.84846708,
+         10651008.283936476,
+         12875252.353191288,
+         11157757.449019957,
+         0.0
+        ],
+        [
+         10444973.306469716,
+         4669261.865236619,
+         4054403.6908450024,
+         5046209.039519339,
+         5331226.670659188,
+         6788375.081534002,
+         6739841.303870072,
+         5969721.718004299,
+         0.0
+        ],
+        [
+         15523268.18847479,
+         8538089.31332298,
+         3506949.0316486503,
+         2627583.5607365896,
+         2486238.3270027563,
+         2472784.8983833375,
+         1902322.1753767347,
+         1634410.673624295,
+         0.0
+        ],
+        [
+         8415906.805003366,
+         5372874.538821779,
+         3572040.82499634,
+         2096152.504371824,
+         1383732.0017726072,
+         1246189.8195211452,
+         953927.4217212955,
+         845135.925128021,
+         0.0
+        ],
+        [
+         45566382.9162737,
+         21410554.467649467,
+         7444871.774293448,
+         2396227.6877114726,
+         1359942.2455820825,
+         1468912.2497800407,
+         1272710.5806557517,
+         1085469.9291482375,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         24900405.586994935,
+         10444849.543462344,
+         6699408.757480543,
+         6574186.162851104,
+         7314489.018507714,
+         6622703.5595558705,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         160348998.3269637,
+         150825348.0950958,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ]
+       ],
+       [
+        [
+         11943503.453868575,
+         1655761.5940904592,
+         1216189.9343152656,
+         2404830.807793729,
+         4092319.7885197867,
+         4192946.785596122,
+         3399422.563279613,
+         3400419.823129501,
+         0.0
+        ],
+        [
+         11314750.330751143,
+         2033841.3752698672,
+         1760030.4813093692,
+         3174893.8747597192,
+         4807967.583658371,
+         9153699.404159505,
+         11435197.851904033,
+         9459794.69107208,
+         0.0
+        ],
+        [
+         7884753.783165155,
+         3468319.8813845506,
+         3033797.174293992,
+         3843834.929934361,
+         4106101.4671057137,
+         5716934.502979985,
+         5877009.598124014,
+         5233442.391266452,
+         0.0
+        ],
+        [
+         11812221.380966537,
+         6559687.06330496,
+         2592911.752798443,
+         1943048.218153572,
+         1852171.8570685652,
+         1858039.7209566557,
+         1417757.6846749785,
+         1214815.8867154229,
+         0.0
+        ],
+        [
+         6215564.786460871,
+         3981513.1854417855,
+         2645089.439074998,
+         1551705.8840783676,
+         1021397.713603458,
+         919660.4346458733,
+         702831.8290832018,
+         622360.4877659851,
+         0.0
+        ],
+        [
+         41022519.9812662,
+         17326208.84908472,
+         5694985.223861084,
+         1779801.2218144436,
+         1005956.5073861439,
+         1093559.4835772098,
+         950294.258035333,
+         808193.0765037695,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         22629676.15861677,
+         8851706.07688441,
+         5627751.01312035,
+         5808268.798241781,
+         6698026.933041091,
+         5991394.051607523,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         151465306.26391613,
+         140655709.47813055,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ]
+       ],
+       [
+        [
+         10543468.19359756,
+         1337678.7394918369,
+         978680.3553563321,
+         1939526.8549811211,
+         3300858.840592679,
+         3381371.155182872,
+         2739315.003554472,
+         2740514.1411418216,
+         0.0
+        ],
+        [
+         9504119.820130898,
+         1639421.0310007795,
+         1417794.5046853335,
+         2564080.597708836,
+         3914822.3447308503,
+         8128010.682942413,
+         10433094.561704634,
+         8260842.500096428,
+         0.0
+        ],
+        [
+         6403233.641164693,
+         2798461.9900779873,
+         2454273.985283706,
+         3131374.8785606357,
+         3361554.2465333194,
+         4977057.575373854,
+         5265954.499256563,
+         4713922.556721638,
+         0.0
+        ],
+        [
+         9618161.763424758,
+         5366366.909878239,
+         2088776.919862851,
+         1565165.6163242785,
+         1495665.840930102,
+         1504990.3224400398,
+         1144767.6700284705,
+         979824.8416603135,
+         0.0
+        ],
+        [
+         5005933.7120706625,
+         3210043.9922838695,
+         2131797.461526637,
+         1250126.6767800695,
+         821758.2164706021,
+         739618.4087884505,
+         564538.4348400099,
+         499610.8476125611,
+         0.0
+        ],
+        [
+         37307659.62722464,
+         14583837.796457931,
+         4650363.589578828,
+         1435523.3712325927,
+         809793.3571614253,
+         882176.0985980901,
+         767092.3562912828,
+         651555.0922210099,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         20914245.86862371,
+         7719453.722902892,
+         4869582.867230876,
+         5229093.147176115,
+         6251556.711791284,
+         5544716.536716869,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         144399581.99537706,
+         132958890.03902683,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ]
+       ],
+       [
+        [
+         9491964.519586291,
+         1138516.737226912,
+         831441.6180242747,
+         1649936.996417395,
+         2808436.0883562937,
+         2876721.630397074,
+         2329665.1038745586,
+         2330834.707803417,
+         0.0
+        ],
+        [
+         8258943.964355381,
+         1394191.601473128,
+         1205309.0323715939,
+         2182646.4593438352,
+         3345015.8981245738,
+         7401915.6710634325,
+         9694275.968248803,
+         7380566.262074895,
+         0.0
+        ],
+        [
+         5465070.34745325,
+         2381252.70890892,
+         2090719.978109342,
+         2676144.153454116,
+         2879753.3549279952,
+         4447403.84125386,
+         4807835.593893415,
+         4324685.652494451,
+         0.0
+        ],
+        [
+         8218375.81003877,
+         4596054.257837834,
+         1776058.0379098316,
+         1330655.924621398,
+         1272892.7095291815,
+         1282515.31670238,
+         974001.5943664846,
+         833135.4993642801,
+         0.0
+        ],
+        [
+         4256553.963518605,
+         2730620.0291542113,
+         1812926.7521082568,
+         1062706.5021122713,
+         697866.3995890545,
+         627822.0347130074,
+         478644.2921658362,
+         423332.4427864582,
+         0.0
+        ],
+        [
+         34272525.564566426,
+         12688683.840470925,
+         3978994.7307227473,
+         1220920.3044385975,
+         687804.0377926779,
+         749882.0016665932,
+         651997.3187288023,
+         553379.7401406653,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         19566092.435205333,
+         6887824.440625297,
+         4318043.038269533,
+         4778090.601584205,
+         5902529.533636049,
+         5204200.901371598,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         138688427.9188139,
+         127028754.57377775,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ]
+       ],
+       [
+        [
+         8684624.296394594,
+         1004144.0253436284,
+         732541.1078678159,
+         1455138.3352280688,
+         2477284.7202861803,
+         2537439.569299837,
+         2054497.0186957645,
+         2055599.071931169,
+         0.0
+        ],
+        [
+         7371839.752044671,
+         1229299.5605321066,
+         1062509.0357254974,
+         1925684.1241021196,
+         2957141.809186972,
+         6867680.230353153,
+         9126794.962398376,
+         6716855.189146972,
+         0.0
+        ],
+        [
+         4828501.074766216,
+         2100539.7182895513,
+         1845259.4640640425,
+         2366027.3511879393,
+         2549339.2953748,
+         4054888.678224994,
+         4452525.151942311,
+         4022190.349621823,
+         0.0
+        ],
+        [
+         7265665.377341949,
+         4068336.4732048726,
+         1566027.5024990381,
+         1173101.526023056,
+         1122739.4780816212,
+         1131963.1115621615,
+         858816.9758307029,
+         734271.8089905867,
+         0.0
+        ],
+        [
+         3753512.5496045235,
+         2408373.772021988,
+         1598609.4752961777,
+         936689.3223749708,
+         614581.8530975521,
+         552625.5629606883,
+         420830.7204704428,
+         371963.28391627973,
+         0.0
+        ],
+        [
+         31790241.424245194,
+         11333815.315153798,
+         3519692.758389106,
+         1076427.95642199,
+         605718.2794023405,
+         660574.6811378113,
+         574145.2360572162,
+         487045.5660585945,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         18478944.95684738,
+         6261796.0325216735,
+         3907396.0532354256,
+         4421321.011097344,
+         5618885.541852921,
+         4933214.870862204,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         133991434.83749396,
+         122337409.0981565,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ]
+       ],
+       [
+        [
+         8053111.403927794,
+         908319.5736929834,
+         662189.2470836609,
+         1316514.0790821426,
+         2241685.4712749533,
+         2296093.86379894,
+         1858848.6743207541,
+         1859884.646813321,
+         0.0
+        ],
+        [
+         6717078.616891388,
+         1111948.3182038458,
+         960904.1360015882,
+         1742685.808897389,
+         2679350.9676967403,
+         6460787.437149908,
+         8678307.439468732,
+         6205562.384052802,
+         0.0
+        ],
+        [
+         4372694.648081188,
+         1900730.9271213633,
+         1670224.0760109029,
+         2143830.135494424,
+         2311697.422898367,
+         3755283.7568508205,
+         4170746.608962197,
+         3781439.2775445413,
+         0.0
+        ],
+        [
+         6583314.878585131,
+         3688975.3727985797,
+         1416688.344764946,
+         1061046.852297104,
+         1015758.853403168,
+         1024463.0485085731,
+         776700.6346542155,
+         663811.694436898,
+         0.0
+        ],
+        [
+         3395465.218294905,
+         2179042.373412626,
+         1446130.6378186757,
+         847013.8724924718,
+         555299.8422188639,
+         499068.36147803813,
+         379621.15312014986,
+         335325.6165227984,
+         0.0
+        ],
+        [
+         29749937.568069257,
+         10331685.99690909,
+         3189125.4957295605,
+         973515.3413755859,
+         547248.7351961823,
+         596789.3448338138,
+         518503.3927147944,
+         439672.5792096918,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         17585983.138890997,
+         5779380.717997871,
+         3594227.396316788,
+         4135347.6651168675,
+         5383288.4429566,
+         4711848.114099444,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         130066066.18128595,
+         118533840.87297828,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ]
+       ],
+       [
+        [
+         7550545.646449369,
+         836621.0763288431,
+         609727.9903362375,
+         1213262.1162275746,
+         2066286.635311212,
+         2116497.7309087496,
+         1713325.2441700157,
+         1714312.6090677173,
+         0.0
+        ],
+        [
+         6217387.990120994,
+         1024293.323580075,
+         885052.5769845382,
+         1606333.05610089,
+         2471704.4636703837,
+         6140783.723790679,
+         8315072.077600572,
+         5802944.345605481,
+         0.0
+        ],
+        [
+         4030891.019822815,
+         1751564.7520973005,
+         1539518.2823831353,
+         1977715.2328823898,
+         2133612.677523084,
+         3520146.676397569,
+         3942796.633793312,
+         3585807.8250945075,
+         0.0
+        ],
+        [
+         6071958.669553056,
+         3404352.7691667173,
+         1305463.200969018,
+         977624.9202359009,
+         936031.0254946343,
+         944235.0161429121,
+         715469.0065344801,
+         611262.6432646867,
+         0.0
+        ],
+        [
+         3127769.7065788084,
+         2007616.4334279872,
+         1332317.9575174612,
+         780195.6867932569,
+         511103.0166760995,
+         459091.0483187,
+         348851.5667559409,
+         307945.06536207657,
+         0.0
+        ],
+        [
+         28060395.471192095,
+         9567171.848890407,
+         2941237.2403903212,
+         896637.5521194785,
+         503551.9941962496,
+         549015.9531549301,
+         476793.846703098,
+         404204.8540873913,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         16841939.768501103,
+         5398783.266982278,
+         3348520.9559928863,
+         3903222.1986536304,
+         5184830.205152302,
+         4527872.2795758,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         126740773.90487948,
+         115386673.10201752,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ],
+        [
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0,
+         0.0
+        ]
+       ]
+      ],
+      "sigma": [
+       0.0,
+       0.23140495867768607,
+       0.4074074074074073,
+       0.5443786982248522,
+       0.6530612244897959,
+       0.7407407407407408,
+       0.8125,
+       0.8719723183391004,
+       0.9218106995884773,
+       0.96398891966759,
+       1.0
+      ],
+      "beta_internal": [
+       [
+        970949.9084980804,
+        1925174.7819232182,
+        5290522.018161925,
+        8623776.350961365,
+        10256772.164052593,
+        11864436.35182158,
+        12291574.617160538,
+        12685880.942272736,
+        13730217.44147749
+       ],
+       [
+        1653946.9072257935,
+        2547140.633318398,
+        6968563.165997685,
+        9737995.950272022,
+        10565335.856933506,
+        12318976.279190069,
+        12602115.231592055,
+        12486425.10887882,
+        12992206.373428037
+       ],
+       [
+        3149415.809218634,
+        4868111.077974293,
+        7052840.629335837,
+        8893904.427815368,
+        9102391.225911371,
+        9397834.029910626,
+        8825687.400911806,
+        8943802.065640885,
+        10238523.944272947
+       ],
+       [
+        2755055.669899423,
+        3740433.0949477516,
+        6194541.880691062,
+        6663045.945535291,
+        6399076.359328003,
+        5715210.972991128,
+        4789693.222300904,
+        4311554.120972884,
+        5190243.39314903
+       ],
+       [
+        504225.73605013127,
+        971640.4247930506,
+        2860778.6866119374,
+        3260570.572261486,
+        2078759.8605529615,
+        1758511.625501147,
+        1864997.9165079382,
+        1812801.6688868306,
+        2378020.561286202
+       ],
+       [
+        116173.19104445065,
+        153258.94549835767,
+        590477.1278582187,
+        1069374.865198933,
+        600154.2919497797,
+        358234.62316570623,
+        617535.5674997033,
+        828407.5244364047,
+        1273539.2391601999
+       ],
+       [
+        100.0,
+        19544.88245426238,
+        186463.50170676343,
+        322867.8242401591,
+        300981.7296174966,
+        22891.16444398905,
+        150649.82434770963,
+        215410.59861100267,
+        413314.77106937056
+       ],
+       [
+        100.0,
+        100.0,
+        25124.249820852663,
+        53363.19219455655,
+        39495.56770939221,
+        100.0,
+        100.0,
+        2634.762777412395,
+        52693.76322167598
+       ],
+       [
+        100.0,
+        100.0,
+        100.0,
+        100.0,
+        100.0,
+        100.0,
+        100.0,
+        542.9364788942742,
+        30371.151015093903
+       ]
+      ],
+      "stag_omega": [
+       [
+        8.383790696212349e-05,
+        0.00021056542868454897,
+        0.0002364661355087462,
+        0.00017496744995830797,
+        0.00013019813037540743,
+        0.00013547476196778434,
+        0.0001526612076100529,
+        0.00014297247165812792,
+        0.00010814192778989182
+       ],
+       [
+        6.705973328745393e-05,
+        0.00013699749028979921,
+        0.0001653154577445318,
+        0.00015969878285088349,
+        0.00012224301477379706,
+        0.00010986444746916658,
+        0.0001216690116102773,
+        0.00011504477970515156,
+        8.504096414249976e-05
+       ],
+       [
+        5.120735916531406e-05,
+        0.00011828335013970299,
+        0.00019517689679355882,
+        0.0002379705030901797,
+        0.00023081907716716773,
+        0.00025594015288344415,
+        0.0002990757456590659,
+        0.0002967869500624758,
+        0.00021756660516060656
+       ],
+       [
+        4.228638512090815e-05,
+        0.00010407264974417898,
+        0.00023655534148396594,
+        0.00036971326194170864,
+        0.00040023704274482906,
+        0.00047891995394422934,
+        0.0005589449431412345,
+        0.0005204052551298583,
+        0.0004126552829835408
+       ],
+       [
+        1.985137131853409e-05,
+        4.5477600976336314e-05,
+        0.00016809378613891668,
+        0.0003421936036192593,
+        0.00035742221578684936,
+        0.00040538862270607433,
+        0.0005250276106698004,
+        0.0005039860997573984,
+        0.0004651527609406932
+       ],
+       [
+        1.5571596661376544e-06,
+        5.2042880448541215e-06,
+        5.707415363952192e-05,
+        0.0001425697472295911,
+        0.00012755523163788567,
+        0.00011348187363220375,
+        0.00018890715589769055,
+        0.00021829701373654632,
+        0.0002846508099607664
+       ],
+       [
+        0.0,
+        1.1460938771741765e-07,
+        4.143430211554858e-06,
+        1.339677545994531e-05,
+        9.673001945377536e-06,
+        5.351183840692627e-07,
+        2.8649070908647126e-06,
+        1.0012556620808373e-05,
+        6.264873912355597e-05
+       ],
+       [
+        0.0,
+        0.0,
+        1.6161955281424627e-08,
+        4.496215594888646e-08,
+        2.880020066746183e-08,
+        0.0,
+        0.0,
+        0.0,
+        1.0872445573027536e-06
+       ],
+       [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        6.026759763804876e-08
+       ]
+      ],
+      "taudx": [
+       [
+        -59974.82559037105,
+        -70316.58269289538,
+        -57122.15364266239,
+        -51262.09901956789,
+        -61957.861854803334,
+        -74934.84054602323,
+        -77506.22102664193,
+        -71561.46751411329,
+        -60356.39686030712
+       ],
+       [
+        -34641.71522118079,
+        -42202.687818724495,
+        -27372.825476087193,
+        2396.4985041136288,
+        14481.565692289785,
+        14796.345759869539,
+        7008.543944445009,
+        -6794.469595290144,
+        -23499.9215557702
+       ],
+       [
+        -60678.69667904481,
+        23899.10547571941,
+        81483.55251462932,
+        79038.47651906231,
+        80235.41677849724,
+        97990.2622032831,
+        112023.75889943748,
+        104255.53387899435,
+        72371.3849161581
+       ],
+       [
+        72454.86912380123,
+        74967.35987414156,
+        86491.20902902483,
+        119835.36434875362,
+        120477.22826423934,
+        140304.86546043152,
+        165278.3280874828,
+        159376.61942141457,
+        123802.16191239533
+       ],
+       [
+        63888.16782066776,
+        62553.54641418115,
+        95959.70003033496,
+        169381.39378464624,
+        186485.82814704636,
+        193574.4751808177,
+        232964.58809288507,
+        201511.05152853587,
+        153523.03226011718
+       ],
+       [
+        7955.262918276177,
+        21098.518856289724,
+        72640.03126599145,
+        129379.88244678333,
+        119233.11299165954,
+        94323.83723760437,
+        126523.33977062708,
+        106395.33467802506,
+        113369.54913675602
+       ],
+       [
+        0.0,
+        57.54276870766788,
+        7827.272852159873,
+        30316.375006965023,
+        10364.97703194662,
+        131.28425995319222,
+        1222.7202350495236,
+        8207.301962635247,
+        36833.24237843007
+       ],
+       [
+        0.0,
+        0.0,
+        116.39138917331721,
+        1017.1609466816399,
+        445.3971106389881,
+        0.0,
+        0.0,
+        0.0,
+        1693.4614310612635
+       ],
+       [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        217.63044312716823
+       ]
+      ],
+      "taudy": [
+       [
+        -66540.19436207376,
+        -144178.77070558156,
+        -102970.40262742233,
+        -78336.33255232206,
+        -50686.40424257218,
+        -13517.036420074697,
+        -28930.531462909545,
+        -29932.02859429389,
+        -23970.434430951984
+       ],
+       [
+        -62733.66133455083,
+        -114937.68812968742,
+        -67457.65827113502,
+        -69316.99272476253,
+        -54839.79636721049,
+        -13640.264760390617,
+        -34619.82476965629,
+        -27610.020490050454,
+        -24687.53322152562
+       ],
+       [
+        -41044.166324228114,
+        -85908.76337585867,
+        -62528.51603123625,
+        -63105.59001252042,
+        -46973.557644531444,
+        -4983.732942409755,
+        -31419.662106641717,
+        -43678.05532242785,
+        -52914.155123294804
+       ],
+       [
+        5382.229246311822,
+        -60282.962414781025,
+        -49730.93729313248,
+        -62325.98988969123,
+        -27506.846242016865,
+        16396.414570693312,
+        -5090.913236911499,
+        -56868.00976112569,
+        -87619.55443931148
+       ],
+       [
+        -12770.88638251376,
+        -50891.82758881039,
+        -21032.864711923725,
+        -10545.680824053543,
+        2144.2554313928376,
+        22864.948677821874,
+        18078.432881947887,
+        -80913.49105094766,
+        -120917.43934815154
+       ],
+       [
+        -2429.8930691062374,
+        -7508.944158899321,
+        -19711.021795157223,
+        33287.43270748748,
+        20168.49621421458,
+        5449.800786594651,
+        -11108.59319681555,
+        -71607.41043816651,
+        -121394.37231904095
+       ],
+       [
+        0.0,
+        -30.20674937939461,
+        -3535.132215600117,
+        8209.67076445162,
+        7964.767550059861,
+        18.333530433918423,
+        -1178.1897168994433,
+        -6385.983510921174,
+        -51170.801106878105
+       ],
+       [
+        0.0,
+        0.0,
+        -34.70309411438166,
+        85.56866096922595,
+        330.8024075789468,
+        0.0,
+        0.0,
+        0.0,
+        -2471.0541943557782
+       ],
+       [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -84.99184608791442
+       ]
+      ],
+      "dx": 20000.0,
+      "dy": 20000.0
+     },
+     "assertions": [
+      {
+       "variable": "F_x",
+       "time": 0.0,
+       "coords": {
+        "i": 3,
+        "j": 3
+       },
+       "expected": 1.000272068987473,
+       "tolerance": {
+        "rel": 1e-12
+       }
+      },
+      {
+       "variable": "F_y",
+       "time": 0.0,
+       "coords": {
+        "i": 3,
+        "j": 3
+       },
+       "expected": 1.000074500835349,
+       "tolerance": {
+        "rel": 1e-12
+       }
+      },
+      {
+       "variable": "beta_eff_x",
+       "time": 0.0,
+       "coords": {
+        "i": 3,
+        "j": 3
+       },
+       "expected": 5121.461910957114,
+       "tolerance": {
+        "rel": 1e-12
+       }
+      },
+      {
+       "variable": "beta_eff_y",
+       "time": 0.0,
+       "coords": {
+        "i": 3,
+        "j": 3
+       },
+       "expected": 5120.282591918041,
+       "tolerance": {
+        "rel": 1e-12
+       }
+      },
+      {
+       "variable": "Rx",
+       "time": 0.0,
+       "coords": {
+        "i": 3,
+        "j": 3
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1222.2532877194399
+       }
+      },
+      {
+       "variable": "Ry",
+       "time": 0.0,
+       "coords": {
+        "i": 3,
+        "j": 3
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1222.2532877194399
+       }
+      },
+      {
+       "variable": "Rx",
+       "time": 0.0,
+       "coords": {
+        "i": 3,
+        "j": 3
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1222.2532877194399
+       }
+      },
+      {
+       "variable": "Ry",
+       "time": 0.0,
+       "coords": {
+        "i": 3,
+        "j": 3
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 937.9277404685437
+       }
+      },
+      {
+       "variable": "F_x",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 4
+       },
+       "expected": 1.0000831500785103,
+       "tolerance": {
+        "rel": 1e-12
+       }
+      },
+      {
+       "variable": "F_y",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 4
+       },
+       "expected": 1.0000948322813743,
+       "tolerance": {
+        "rel": 1e-12
+       }
+      },
+      {
+       "variable": "beta_eff_x",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 4
+       },
+       "expected": 2703.963472461695,
+       "tolerance": {
+        "rel": 1e-12
+       }
+      },
+      {
+       "variable": "beta_eff_y",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 4
+       },
+       "expected": 2704.000308061566,
+       "tolerance": {
+        "rel": 1e-12
+       }
+      },
+      {
+       "variable": "Rx",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 4
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1797.530465231304
+       }
+      },
+      {
+       "variable": "Ry",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 4
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1797.530465231304
+       }
+      },
+      {
+       "variable": "Rx",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 4
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1797.530465231304
+       }
+      },
+      {
+       "variable": "Ry",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 4
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 934.8898483453684
+       }
+      },
+      {
+       "variable": "F_x",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 5
+       },
+       "expected": 1.000000508272417,
+       "tolerance": {
+        "rel": 1e-12
+       }
+      },
+      {
+       "variable": "F_y",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 5
+       },
+       "expected": 1.000007254344056,
+       "tolerance": {
+        "rel": 1e-12
+       }
+      },
+      {
+       "variable": "beta_eff_x",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 5
+       },
+       "expected": 8174.1024022967995,
+       "tolerance": {
+        "rel": 1e-12
+       }
+      },
+      {
+       "variable": "beta_eff_y",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 5
+       },
+       "expected": 8174.166686168097,
+       "tolerance": {
+        "rel": 1e-12
+       }
+      },
+      {
+       "variable": "Rx",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 5
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 822.5969455081573
+       }
+      },
+      {
+       "variable": "Ry",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 5
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 822.5969455081573
+       }
+      },
+      {
+       "variable": "Rx",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 5
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 217.22348538434676
+       }
+      },
+      {
+       "variable": "Ry",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 5
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 822.5969455081573
+       }
+      }
+     ]
+    },
+    {
+     "id": "manufactured_membrane_terms_and_mask",
+     "description": "Quadratic vertex velocities u=x^2+2y^2+3xy and v=4x^2+5y^2+6xy with etaH=1+x+2y sampled at cell centers, unit viscosity and unit sigma measure. Expected membrane terms are the analytic product-rule derivatives of the fluxes. Centered face fluxes recover these derivatives exactly for the polynomial fields. Nonzero driving stresses check that both residuals are zero-filled outside the valid interior.",
+     "time_span": {
+      "start": 0.0,
+      "end": 0.0
+     },
+     "parameter_overrides": {
+      "dx": 2.0,
+      "dy": 3.0,
+      "uvel_2d": [
+       [
+        40.0,
+        112.0,
+        220.0,
+        364.0,
+        544.0,
+        760.0,
+        1012.0,
+        1300.0,
+        1624.0
+       ],
+       [
+        70.0,
+        160.0,
+        286.0,
+        448.0,
+        646.0,
+        880.0,
+        1150.0,
+        1456.0,
+        1798.0
+       ],
+       [
+        108.0,
+        216.0,
+        360.0,
+        540.0,
+        756.0,
+        1008.0,
+        1296.0,
+        1620.0,
+        1980.0
+       ],
+       [
+        154.0,
+        280.0,
+        442.0,
+        640.0,
+        874.0,
+        1144.0,
+        1450.0,
+        1792.0,
+        2170.0
+       ],
+       [
+        208.0,
+        352.0,
+        532.0,
+        748.0,
+        1000.0,
+        1288.0,
+        1612.0,
+        1972.0,
+        2368.0
+       ],
+       [
+        270.0,
+        432.0,
+        630.0,
+        864.0,
+        1134.0,
+        1440.0,
+        1782.0,
+        2160.0,
+        2574.0
+       ],
+       [
+        340.0,
+        520.0,
+        736.0,
+        988.0,
+        1276.0,
+        1600.0,
+        1960.0,
+        2356.0,
+        2788.0
+       ],
+       [
+        418.0,
+        616.0,
+        850.0,
+        1120.0,
+        1426.0,
+        1768.0,
+        2146.0,
+        2560.0,
+        3010.0
+       ],
+       [
+        504.0,
+        720.0,
+        972.0,
+        1260.0,
+        1584.0,
+        1944.0,
+        2340.0,
+        2772.0,
+        3240.0
+       ]
+      ],
+      "vvel_2d": [
+       [
+        97.0,
+        268.0,
+        529.0,
+        880.0,
+        1321.0,
+        1852.0,
+        2473.0,
+        3184.0,
+        3985.0
+       ],
+       [
+        181.0,
+        388.0,
+        685.0,
+        1072.0,
+        1549.0,
+        2116.0,
+        2773.0,
+        3520.0,
+        4357.0
+       ],
+       [
+        297.0,
+        540.0,
+        873.0,
+        1296.0,
+        1809.0,
+        2412.0,
+        3105.0,
+        3888.0,
+        4761.0
+       ],
+       [
+        445.0,
+        724.0,
+        1093.0,
+        1552.0,
+        2101.0,
+        2740.0,
+        3469.0,
+        4288.0,
+        5197.0
+       ],
+       [
+        625.0,
+        940.0,
+        1345.0,
+        1840.0,
+        2425.0,
+        3100.0,
+        3865.0,
+        4720.0,
+        5665.0
+       ],
+       [
+        837.0,
+        1188.0,
+        1629.0,
+        2160.0,
+        2781.0,
+        3492.0,
+        4293.0,
+        5184.0,
+        6165.0
+       ],
+       [
+        1081.0,
+        1468.0,
+        1945.0,
+        2512.0,
+        3169.0,
+        3916.0,
+        4753.0,
+        5680.0,
+        6697.0
+       ],
+       [
+        1357.0,
+        1780.0,
+        2293.0,
+        2896.0,
+        3589.0,
+        4372.0,
+        5245.0,
+        6208.0,
+        7261.0
+       ],
+       [
+        1665.0,
+        2124.0,
+        2673.0,
+        3312.0,
+        4041.0,
+        4860.0,
+        5769.0,
+        6768.0,
+        7857.0
+       ]
+      ],
+      "thck": [
+       [
+        5.0,
+        11.0,
+        17.0,
+        23.0,
+        29.0,
+        35.0,
+        41.0,
+        47.0,
+        53.0
+       ],
+       [
+        7.0,
+        13.0,
+        19.0,
+        25.0,
+        31.0,
+        37.0,
+        43.0,
+        49.0,
+        55.0
+       ],
+       [
+        9.0,
+        15.0,
+        21.0,
+        27.0,
+        33.0,
+        39.0,
+        45.0,
+        51.0,
+        57.0
+       ],
+       [
+        11.0,
+        17.0,
+        23.0,
+        29.0,
+        35.0,
+        41.0,
+        47.0,
+        53.0,
+        59.0
+       ],
+       [
+        13.0,
+        19.0,
+        25.0,
+        31.0,
+        37.0,
+        43.0,
+        49.0,
+        55.0,
+        61.0
+       ],
+       [
+        15.0,
+        21.0,
+        27.0,
+        33.0,
+        39.0,
+        45.0,
+        51.0,
+        57.0,
+        63.0
+       ],
+       [
+        17.0,
+        23.0,
+        29.0,
+        35.0,
+        41.0,
+        47.0,
+        53.0,
+        59.0,
+        65.0
+       ],
+       [
+        19.0,
+        25.0,
+        31.0,
+        37.0,
+        43.0,
+        49.0,
+        55.0,
+        61.0,
+        67.0
+       ],
+       [
+        21.0,
+        27.0,
+        33.0,
+        39.0,
+        45.0,
+        51.0,
+        57.0,
+        63.0,
+        69.0
+       ]
+      ],
+      "sigma": [
+       0.0,
+       0.1,
+       0.2,
+       0.3,
+       0.4,
+       0.5,
+       0.6,
+       0.7,
+       0.8,
+       0.9,
+       1.0
+      ],
+      "efvs": 1.0,
+      "taudx": 1.0,
+      "taudy": -2.0
+     },
+     "assertions": [
+      {
+       "variable": "T1x",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 2
+       },
+       "expected": 240.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T2x",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 2
+       },
+       "expected": 372.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T3x",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 2
+       },
+       "expected": 140.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T4x",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 2
+       },
+       "expected": 238.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T1y",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 2
+       },
+       "expected": 1352.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T2y",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 2
+       },
+       "expected": 206.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T3y",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 2
+       },
+       "expected": 204.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T4y",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 2
+       },
+       "expected": 87.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "residual_valid",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 2
+       },
+       "expected": 1.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "Rx",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 2
+       },
+       "expected": 991.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "Ry",
+       "time": 0.0,
+       "coords": {
+        "i": 2,
+        "j": 2
+       },
+       "expected": 1847.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T1x",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 5
+       },
+       "expected": 556.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T2x",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 5
+       },
+       "expected": 864.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T3x",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 5
+       },
+       "expected": 324.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T4x",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 5
+       },
+       "expected": 542.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T1y",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 5
+       },
+       "expected": 3144.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T2y",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 5
+       },
+       "expected": 478.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T3y",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 5
+       },
+       "expected": 466.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T4y",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 5
+       },
+       "expected": 201.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "residual_valid",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 5
+       },
+       "expected": 1.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "Rx",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 5
+       },
+       "expected": 2287.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "Ry",
+       "time": 0.0,
+       "coords": {
+        "i": 4,
+        "j": 5
+       },
+       "expected": 4287.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T1x",
+       "time": 0.0,
+       "coords": {
+        "i": 7,
+        "j": 7
+       },
+       "expected": 820.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T2x",
+       "time": 0.0,
+       "coords": {
+        "i": 7,
+        "j": 7
+       },
+       "expected": 1272.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T3x",
+       "time": 0.0,
+       "coords": {
+        "i": 7,
+        "j": 7
+       },
+       "expected": 480.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T4x",
+       "time": 0.0,
+       "coords": {
+        "i": 7,
+        "j": 7
+       },
+       "expected": 818.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T1y",
+       "time": 0.0,
+       "coords": {
+        "i": 7,
+        "j": 7
+       },
+       "expected": 4632.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T2y",
+       "time": 0.0,
+       "coords": {
+        "i": 7,
+        "j": 7
+       },
+       "expected": 706.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T3y",
+       "time": 0.0,
+       "coords": {
+        "i": 7,
+        "j": 7
+       },
+       "expected": 694.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "T4y",
+       "time": 0.0,
+       "coords": {
+        "i": 7,
+        "j": 7
+       },
+       "expected": 297.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "residual_valid",
+       "time": 0.0,
+       "coords": {
+        "i": 7,
+        "j": 7
+       },
+       "expected": 1.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "Rx",
+       "time": 0.0,
+       "coords": {
+        "i": 7,
+        "j": 7
+       },
+       "expected": 3391.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "Ry",
+       "time": 0.0,
+       "coords": {
+        "i": 7,
+        "j": 7
+       },
+       "expected": 6327.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "residual_valid",
+       "time": 0.0,
+       "coords": {
+        "i": 1,
+        "j": 5
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "Rx",
+       "time": 0.0,
+       "coords": {
+        "i": 1,
+        "j": 5
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "Ry",
+       "time": 0.0,
+       "coords": {
+        "i": 1,
+        "j": 5
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "residual_valid",
+       "time": 0.0,
+       "coords": {
+        "i": 8,
+        "j": 5
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "Rx",
+       "time": 0.0,
+       "coords": {
+        "i": 8,
+        "j": 5
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "Ry",
+       "time": 0.0,
+       "coords": {
+        "i": 8,
+        "j": 5
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "residual_valid",
+       "time": 0.0,
+       "coords": {
+        "i": 5,
+        "j": 1
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "Rx",
+       "time": 0.0,
+       "coords": {
+        "i": 5,
+        "j": 1
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "Ry",
+       "time": 0.0,
+       "coords": {
+        "i": 5,
+        "j": 1
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "residual_valid",
+       "time": 0.0,
+       "coords": {
+        "i": 5,
+        "j": 8
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "Rx",
+       "time": 0.0,
+       "coords": {
+        "i": 5,
+        "j": 8
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "Ry",
+       "time": 0.0,
+       "coords": {
+        "i": 5,
+        "j": 8
+       },
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      }
+     ]
+    }
+   ]
+  }
+ }
+}
