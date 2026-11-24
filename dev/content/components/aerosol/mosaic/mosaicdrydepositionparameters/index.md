@@ -1,0 +1,161 @@
+---
+title: "MosaicDryDepositionParameters"
+slug: "mosaicdrydepositionparameters"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["mosaic"]
+domain: "aerosol"
+subdomain: "mosaic"
+component_type: "model"
+esm_version: "1.2.0"
+esm_path: "components/aerosol/mosaic/mosaic_drydep_parameters.esm"
+reference: "Binkowski, F. S. and Shankar, U. (1995). The Regional Particulate Matter Model 1. J. Geophys. Res. 100(D12), 26191-26209."
+description: "The fixed numbers of MOSAIC's aerosol dry deposition: the Sutherland viscosity fit and the mean-free-path coefficient of mosaic_drydep_1clm, and the CGS constants of aerosol_depvel_2 (chem/module_mosaic_drydep.F, WRF v4.8.0). These are the routine's own literals, in its own CGS units, not the SI constants of lib/wrf_constants.esm -- aerosol_depvel_2 carries its own gravity (980.616 cm/s^2) and Boltzmann constant (1.3807e-16 erg/K), and using the WRF values instead would not reproduce it."
+tags: ["aerosol", "mosaic", "model", "dry-deposition", "wrf-chem"]
+---
+
+## Description
+
+The fixed numbers of MOSAIC's aerosol dry deposition: the Sutherland viscosity fit and the mean-free-path coefficient of mosaic_drydep_1clm, and the CGS constants of aerosol_depvel_2 (chem/module_mosaic_drydep.F, WRF v4.8.0). These are the routine's own literals, in its own CGS units, not the SI constants of lib/wrf_constants.esm -- aerosol_depvel_2 carries its own gravity (980.616 cm/s^2) and Boltzmann constant (1.3807e-16 erg/K), and using the WRF values instead would not reproduce it.
+
+## Reference
+
+- Binkowski, F. S. and Shankar, U. (1995). The Regional Particulate Matter Model 1. J. Geophys. Res. 100(D12), 26191-26209.
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `mw_air` | `g/mol` | `28.966` | Molecular weight of dry air as mosaic_drydep_1clm spells it inline (`airdens = cairclm(1)*28.966`, :288). MOSAIC's own xmwair is commented out on the line above. |
+| `visc_c0` | `cm^2/s*g/cm^3` | `0.00018325` | Leading coefficient of the Sutherland viscosity fit (:292). |
+| `visc_t1` | `K` | `416.16` | Sutherland numerator temperature. |
+| `visc_t2` | `K` | `120.0` | Sutherland offset. |
+| `visc_t3` | `K` | `296.16` | Sutherland reference temperature. |
+| `freepath_c0` | `cm*s/cm^2*K^(1/2)` | `0.000739758` | Coefficient of the mean-free-path relation (:296). |
+| `m_to_cm` | `cm/m` | `100.0` | MOSAIC works in CGS: u* is multiplied by 100 and the aerodynamic resistance divided by it (:298-300), and the deposition velocity is converted back at the end. |
+| `smallmassaa` | `g/mol` | `1e-20` | Below this dry mass the aerosol water is dropped (:327). |
+| `smallmassbb` | `g/mol` | `1e-30` | At or below this dry mass the bin falls back to its centre diameter and the default density (module_mosaic_drydep.F:321, drymass .le. smallmassbb; no 1.01 factor here, unlike the coagulation modules). |
+| `dens_default` | `g/cm^3` | `2.0` | The default particle density used in that fallback (`densdefault`). |
+| `vol_floor` | `cm^3/mol` | `1e-300` | A floor on the volume in the density ratios. MOSAIC never divides by zero there because the fallback branch above already caught the empty bin; this keeps the expression finite when a consumer evaluates every branch. |
+| `piover6` | `1` | `0.5235987750000001` | pi/6, the sphere volume factor MOSAIC precomputes (`piover6 = pi/6.0` with its own pi = 3.14159265, module_data_mosaic_other.F:177). Was the true pi/6 (0.5235987755983) until 2026-11-13, which agrees with the real32 model but leaves the largest section's deposition velocity 1.7e-9 from a real64 replay. |
+| `pi` | `1` | `3.1415926536` | Pi as aerosol_depvel_2 spells it. |
+| `gravity` | `cm/s^2` | `980.616` | Gravity in CGS, the value aerosol_depvel_2 carries. |
+| `boltzmann` | `erg/K` | `1.3807e-16` | Boltzmann constant in CGS, likewise. |
+| `knudsen_fact` | `1` | `1.246` | Cunningham slip coefficient in `xknudsenfact = xknudsen*1.246`. |
+| `schmidt_exp` | `1` | `-0.66666666` | Exponent of the Schmidt number in the surface-collection factor. It is the routine's own truncated -2/3 and reproducing it matters at single precision. |
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "variables": {
+    "mw_air": {
+      "type": "parameter",
+      "units": "g/mol",
+      "default": 28.966,
+      "description": "Molecular weight of dry air as mosaic_drydep_1clm spells it inline (`airdens = cairclm(1)*28.966`, :288). MOSAIC's own xmwair is commented out on the line above."
+    },
+    "visc_c0": {
+      "type": "parameter",
+      "units": "cm^2/s*g/cm^3",
+      "default": 0.00018325,
+      "description": "Leading coefficient of the Sutherland viscosity fit (:292)."
+    },
+    "visc_t1": {
+      "type": "parameter",
+      "units": "K",
+      "default": 416.16,
+      "description": "Sutherland numerator temperature."
+    },
+    "visc_t2": {
+      "type": "parameter",
+      "units": "K",
+      "default": 120.0,
+      "description": "Sutherland offset."
+    },
+    "visc_t3": {
+      "type": "parameter",
+      "units": "K",
+      "default": 296.16,
+      "description": "Sutherland reference temperature."
+    },
+    "freepath_c0": {
+      "type": "parameter",
+      "units": "cm*s/cm^2*K^(1/2)",
+      "default": 0.000739758,
+      "description": "Coefficient of the mean-free-path relation (:296)."
+    },
+    "m_to_cm": {
+      "type": "parameter",
+      "units": "cm/m",
+      "default": 100.0,
+      "description": "MOSAIC works in CGS: u* is multiplied by 100 and the aerodynamic resistance divided by it (:298-300), and the deposition velocity is converted back at the end."
+    },
+    "smallmassaa": {
+      "type": "parameter",
+      "units": "g/mol",
+      "default": 1e-20,
+      "description": "Below this dry mass the aerosol water is dropped (:327)."
+    },
+    "smallmassbb": {
+      "type": "parameter",
+      "units": "g/mol",
+      "default": 1e-30,
+      "description": "At or below this dry mass the bin falls back to its centre diameter and the default density (module_mosaic_drydep.F:321, drymass .le. smallmassbb; no 1.01 factor here, unlike the coagulation modules)."
+    },
+    "dens_default": {
+      "type": "parameter",
+      "units": "g/cm^3",
+      "default": 2.0,
+      "description": "The default particle density used in that fallback (`densdefault`)."
+    },
+    "vol_floor": {
+      "type": "parameter",
+      "units": "cm^3/mol",
+      "default": 1e-300,
+      "description": "A floor on the volume in the density ratios. MOSAIC never divides by zero there because the fallback branch above already caught the empty bin; this keeps the expression finite when a consumer evaluates every branch."
+    },
+    "piover6": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.5235987750000001,
+      "description": "pi/6, the sphere volume factor MOSAIC precomputes (`piover6 = pi/6.0` with its own pi = 3.14159265, module_data_mosaic_other.F:177). Was the true pi/6 (0.5235987755983) until 2026-11-13, which agrees with the real32 model but leaves the largest section's deposition velocity 1.7e-9 from a real64 replay."
+    },
+    "pi": {
+      "type": "parameter",
+      "units": "1",
+      "default": 3.1415926536,
+      "description": "Pi as aerosol_depvel_2 spells it."
+    },
+    "gravity": {
+      "type": "parameter",
+      "units": "cm/s^2",
+      "default": 980.616,
+      "description": "Gravity in CGS, the value aerosol_depvel_2 carries."
+    },
+    "boltzmann": {
+      "type": "parameter",
+      "units": "erg/K",
+      "default": 1.3807e-16,
+      "description": "Boltzmann constant in CGS, likewise."
+    },
+    "knudsen_fact": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.246,
+      "description": "Cunningham slip coefficient in `xknudsenfact = xknudsen*1.246`."
+    },
+    "schmidt_exp": {
+      "type": "parameter",
+      "units": "1",
+      "default": -0.66666666,
+      "description": "Exponent of the Schmidt number in the surface-collection factor. It is the routine's own truncated -2/3 and reproducing it matters at single precision."
+    }
+  },
+  "equations": []
+}
+```
+
+</details>

@@ -1,0 +1,2004 @@
+---
+title: "RothermelFireSpread"
+slug: "rothermelfirespread"
+domains: ["wildland_fire"]
+component_types: ["model"]
+subdomains: ["rothermel"]
+domain: "wildland_fire"
+subdomain: "rothermel"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/wildland_fire/rothermel/fire_spread.esm"
+reference: "Rothermel, R. C. (1972). A mathematical model for predicting fire spread in wildland fuels. USDA Forest Service Research Paper INT-115. Ogden, UT. — The original model; Table 3 empirical coefficients (US customary)."
+description: "Rothermel (1972) surface fire spread model — predicts rate of spread (R), fireline intensity (IB), flame length (F_L), and related outputs from fuel-bed properties, fuel moisture, wind speed, and terrain slope. Migrated from WildlandFire.jl@126976f2 src/rothermel.jl:70 (`RothermelFireSpread` @component). Observed-only (algebraic): all 27 unknowns are defined by algebraic equations; no ODE states. Implements Table 3 and Table 7 in Andrews (2018) RMRS-GTR-371 using SI units. All empirical coefficients are converted from US customary. See reference notes for the complete Unicode→ASCII identifier map and the coupling interface (RothermelCoupler couple2 methods)."
+tags: ["wildland_fire", "rothermel", "model", "fire_spread", "observed-only"]
+---
+
+## Description
+
+Rothermel (1972) surface fire spread model — predicts rate of spread (R), fireline intensity (IB), flame length (F_L), and related outputs from fuel-bed properties, fuel moisture, wind speed, and terrain slope. Migrated from WildlandFire.jl@126976f2 src/rothermel.jl:70 (`RothermelFireSpread` @component). Observed-only (algebraic): all 27 unknowns are defined by algebraic equations; no ODE states. Implements Table 3 and Table 7 in Andrews (2018) RMRS-GTR-371 using SI units. All empirical coefficients are converted from US customary. See reference notes for the complete Unicode→ASCII identifier map and the coupling interface (RothermelCoupler couple2 methods).
+
+## Reference
+
+_source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/rothermel.jl:70
+
+Upstream `RothermelFireSpread` is an MTK `@component` with 11 `@parameters` (fuel-bed and environmental inputs), 35 `@constants` (empirical coefficients, reference values, and floor guards), and 27 time-indexed `@variables` defined by 27 purely algebraic equations (no D(x) terms — observed-only system). Structural verification: `length(equations(sys)) == 27`, `length(unknowns(sys)) == 27` (see test_rothermel.jl `Structural Verification`).
+
+Unicode → ASCII identifier transliteration follows the rig convention (components/wildland_fire/terrain_slope.esm, components/wildland_fire/rothermel/effective_midflame_wind.esm):
+  σ → sigma          ρ_p → rho_p       tanϕ → tan_phi
+  δ → delta          ρb  → rhob        Γ_max → Gamma_max
+  β → beta           β_op → beta_op    Γ' → Gamma_prime
+  β_ratio → beta_ratio  η_M → eta_M   η_s → eta_s
+  ξ → xi             φw → phi_w       φs → phi_s
+  φs_coeff → phi_s_coeff  ε → epsilon
+  σ_ref → sigma_ref, σ_floor → sigma_floor, δ_floor → delta_floor
+  β_floor → beta_floor, β_ratio_floor → beta_ratio_floor
+  ρb_floor → rhob_floor, ε_floor → epsilon_floor
+
+MTK `@constants` are unified into ESM `parameter` declarations (same pattern as wind_limit.esm, live_fuel_moisture_extinction.esm). Both the empirical-coefficient constants and the floor-guard constants are preserved as parameters with their upstream default values.
+
+Floor constants rationale: several equations involve bases raised to non-integer powers and denominators. Floor guards prevent 0^negative or 0/0 when fuel is absent (depletion) or non-burnable (σ=0). Only denominators and negative-power bases are guarded; numerators are unguarded so IR→0 and R→0 naturally when fuel is absent.
+
+SI conversion notes (from US customary, Table 3, Andrews 2018):
+  c_beta_op = 8.858 (from 3.348 * ft_to_m^(-0.8189))
+  c_A = 340.5 (from 133 * ft_to_m^(-0.7913))
+  c_C_2 = 0.0692 (from 0.133 * ft_to_m^0.55)
+  c_B = 0.01317 (from 0.02526 * ft_to_m^0.54)
+  c_E_2 = 1.094e-4 (from 3.59e-4 * ft_to_m)
+  c_eps = 452.7 (from 138 / ft_to_m)
+  c_Qig_1 = 581500 J/kg, c_Qig_2 = 2595816 J/kg (from 250 and 1116 Btu/lb)
+  c_tr = 75590.6 s/m (from 384 min / ft_to_m * 60)
+  c_FL = 0.00323 m (from 0.45 ft / (Btu/ft/s → W/m)^0.46)
+  U_ref = 0.3048/60 m/s = 1 ft/min (non-dimensionalizes U for the wind-factor power law)
+
+Coupling interface (RothermelCoupler, coupling.jl):
+  couple2(FuelModelLookupCoupler, RothermelCoupler) promotes sigma, w0, delta, Mx, h
+    from parameters to variables and connects them to FuelModelLookup outputs.
+  couple2(TerrainSlopeCoupler, RothermelCoupler) promotes tan_phi from parameter to
+    variable and connects it to TerrainSlope.tan_phi.
+  couple2(MidflameWindCoupler, RothermelCoupler) promotes U from parameter to variable
+    and connects it to MidflameWind.U.
+  These couplings apply when composing multi-component ESM files; standalone use
+  requires setting sigma, w0, delta, Mx, h, tan_phi, U, Mf as direct parameters.
+
+Tolerance rationale (model-level rel=1e-6): observed-only algebraic system; all
+equations are closed-form arithmetic and transcendental functions on float64.
+1e-6 matches the upstream Julia test suite tolerances (rtol=1e-6)._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `sigma` | `1/m` |  | Surface-area-to-volume ratio of the fuel particle |
+| `w0` | `kg/m^2` |  | Oven-dry fuel load per unit area |
+| `delta` | `m` |  | Fuel bed depth |
+| `Mx` | `1` |  | Dead fuel moisture of extinction (dimensionless, dry weight basis) |
+| `h` | `J/kg` | `18608000.0` | Low heat content of dry fuel (default 8000 Btu/lb = 18608000 J/kg) |
+| `S_T` | `1` | `0.0555` | Total mineral content (dimensionless fraction) |
+| `S_e` | `1` | `0.01` | Effective (silica-free) mineral content (dimensionless fraction) |
+| `rho_p` | `kg/m^3` | `512.6` | Oven-dry particle density (default 32 lb/ft^3 = 512.6 kg/m^3) |
+| `Mf` | `1` |  | Fuel moisture content (dimensionless, dry weight basis) |
+| `U` | `m/s` | `0.0` | Wind velocity at midflame height. Default 0.0 so the model stays valid when U is left unbound: it feeds only Rothermel's own phi_w -> rate R, which the wildland-fire coupling does NOT consume (only R0 + the C/B/E/beta/phi_s coefficients are coupled to the level-set leaf, which recomputes wind directionally). Binders that use Rothermel's full R still override it. |
+| `tan_phi` | `1` | `0.0` | Slope steepness (dimensionless rise/run). Default 0.0 so the model stays valid when tan_phi is left unbound: it feeds only Rothermel's own phi_s -> rate R, which the wildland-fire coupling does NOT consume (the level-set leaf recomputes slope directionally). Binders that use Rothermel's full R still override it. |
+| `sigma_ref` | `1/m` | `1.0` | Reference SAV ratio for non-dimensionalization before non-integer power laws (MTK @constant preserved as parameter) |
+| `U_ref` | `m/s` | `0.005080000000000001` | Reference wind speed = 1 ft/min = 0.3048/60 m/s; non-dimensionalizes U for the wind-factor power law (empirical calibration in ft/min) |
+| `IB_ref` | `W/m` | `1.0` | Reference fireline intensity for non-dimensionalization before the 0.46 power in F_L (MTK @constant preserved as parameter) |
+| `one` | `1` | `1.0` | Dimensionless one — MTK unit-balancing literal preserved from upstream @constants |
+| `c_beta_op` | `1` | `8.858` | Optimum packing ratio coefficient (SI); upstream US value 3.348 converted via 3.348 * ft_to_m^(-0.8189) |
+| `c_Gamma_denom1` | `1` | `176502.0` | Gamma_max denominator constant 1 (SI, empirical; Table 3 Andrews 2018) |
+| `c_Gamma_denom2` | `1` | `3.564` | Gamma_max denominator constant 2 (SI, empirical; Table 3 Andrews 2018) |
+| `c_Gamma_mult` | `1/s` | `1.0` | Gamma_max unit conversion factor; gives Gamma_max units of 1/s (reaction velocity) |
+| `c_A` | `1` | `340.5` | Coefficient A constant (SI); upstream US value 133 converted via 133 * ft_to_m^(-0.7913) |
+| `c_etaM_1` | `1` | `2.59` | Moisture damping polynomial coefficient 1 (dimensionless; Table 3 Andrews 2018) |
+| `c_etaM_2` | `1` | `5.11` | Moisture damping polynomial coefficient 2 (dimensionless; Table 3 Andrews 2018) |
+| `c_etaM_3` | `1` | `3.52` | Moisture damping polynomial coefficient 3 (dimensionless; Table 3 Andrews 2018) |
+| `c_etas` | `1` | `0.174` | Mineral damping coefficient (empirical; Table 3 Andrews 2018): eta_s = 0.174 * S_e^(-0.19) |
+| `c_xi_1` | `1` | `192.0` | Propagating flux ratio denominator coefficient 1 (empirical; Table 3 Andrews 2018) |
+| `c_xi_2` | `m` | `0.07908` | Propagating flux ratio denominator coefficient 2 (SI, has units m to cancel sigma's 1/m; Table 3 Andrews 2018) |
+| `c_xi_3` | `1` | `0.792` | Propagating flux ratio exponent coefficient 3 (empirical; Table 3 Andrews 2018) |
+| `c_xi_4` | `1` | `0.376` | Propagating flux ratio exponent coefficient 4 (SI; Table 3 Andrews 2018) |
+| `c_C_1` | `1` | `7.47` | Wind coefficient C pre-exponential constant (empirical; Table 3 Andrews 2018) |
+| `c_C_2` | `1` | `0.0692` | Wind coefficient C exponential constant (SI); upstream US value 0.133 converted via 0.133 * ft_to_m^0.55 |
+| `c_B` | `1` | `0.01317` | Wind coefficient B constant (SI); upstream US value 0.02526 converted via 0.02526 * ft_to_m^0.54 |
+| `c_E_1` | `1` | `0.715` | Wind coefficient E pre-exponential constant (empirical; Table 3 Andrews 2018) |
+| `c_E_2` | `m` | `0.0001094` | Wind coefficient E exponential constant (SI, units m to cancel sigma's 1/m); upstream US value 3.59e-4 converted via 3.59e-4 * ft_to_m |
+| `c_phis` | `1` | `5.275` | Slope factor coefficient (empirical; Table 3 Andrews 2018) |
+| `c_eps` | `1/m` | `452.7` | Effective heating number coefficient (SI); upstream US value 138 converted via 138 / ft_to_m |
+| `c_Qig_1` | `J/kg` | `581500.0` | Heat of preignition base constant (SI); upstream US value 250 Btu/lb converted to J/kg |
+| `c_Qig_2` | `J/kg` | `2595816.0` | Heat of preignition moisture coefficient (SI); upstream US value 1116 Btu/lb converted to J/kg |
+| `c_tr` | `s/m` | `75590.6` | Residence time coefficient (SI); upstream US value 384 min·ft^(-1) converted via 384*60/ft_to_m |
+| `c_FL` | `m` | `0.00323` | Flame length coefficient (SI); upstream US value 0.45 ft converted for IB in W/m |
+| `sigma_floor` | `1/m` | `1e-06` | Minimum SAV ratio floor to avoid division by zero and negative-power singularity in sigma-dependent expressions |
+| `delta_floor` | `m` | `1e-10` | Minimum fuel bed depth floor to avoid division by zero in rhob = w0/delta |
+| `beta_floor` | `1` | `1e-10` | Minimum packing ratio floor to avoid negative-power singularity in phi_s_coeff = c_phis * beta^(-0.3) |
+| `beta_ratio_floor` | `1` | `1e-10` | Minimum relative packing ratio floor to avoid negative-power singularity in phi_w and log(beta_ratio) in Gamma_prime |
+| `rhob_floor` | `kg/m^3` | `1e-10` | Minimum bulk density floor to avoid division by zero in R0 = IR*xi / (rhob*epsilon*Qig) |
+| `epsilon_floor` | `1` | `1e-10` | Minimum effective heating number floor to avoid division by zero in R0 denominator |
+| `Mx_floor` | `1` | `1e-10` | Minimum moisture of extinction floor to avoid division by zero in rM = Mf/Mx |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `wn` | `kg/m^2` |  | Net (mineral-free) fuel load: wn = w0 * (1 - S_T) |
+| `rhob` | `kg/m^3` |  | Oven-dry bulk density: rhob = w0 / delta |
+| `beta` | `1` |  | Packing ratio (dimensionless): beta = rhob / rho_p |
+| `beta_op` | `1` |  | Optimum packing ratio: beta_op = c_beta_op * sigma^(-0.8189) |
+| `beta_ratio` | `1` |  | Relative packing ratio: beta_ratio = beta / beta_op |
+| `Gamma_max` | `1/s` |  | Maximum reaction velocity: Gamma_max = sigma^1.5 / (c_Gamma_denom1 + c_Gamma_denom2 * sigma^1.5) |
+| `A_coeff` | `1` |  | Coefficient A for reaction velocity (dimensionless): A = c_A * sigma^(-0.7913) |
+| `Gamma_prime` | `1/s` |  | Optimum reaction velocity: Gamma_prime = Gamma_max * exp(A * (log(beta_ratio) + 1 - beta_ratio)) |
+| `rM` | `1` |  | Moisture ratio capped at 1.0: rM = min(Mf / Mx, 1) |
+| `eta_M` | `1` |  | Moisture damping coefficient: eta_M = 1 - 2.59*rM + 5.11*rM^2 - 3.52*rM^3 |
+| `eta_s` | `1` |  | Mineral damping coefficient capped at 1.0: eta_s = min(0.174 * S_e^(-0.19), 1) |
+| `IR` | `W/m^2` |  | Reaction intensity: IR = Gamma_prime * wn * h * eta_M * eta_s |
+| `xi` | `1` |  | Propagating flux ratio (dimensionless): fraction of IR that propagates ahead of fire front |
+| `C_coeff` | `1` |  | Wind factor coefficient C: C = c_C_1 * exp(-c_C_2 * sigma^0.55) |
+| `B_coeff` | `1` |  | Wind factor coefficient B (wind-speed exponent): B = c_B * sigma^0.54 |
+| `E_coeff` | `1` |  | Wind factor coefficient E (packing-ratio exponent): E = c_E_1 * exp(-c_E_2 * sigma) |
+| `phi_w` | `1` |  | Wind factor (dimensionless): phi_w = C * (U/U_ref)^B * beta_ratio^(-E) |
+| `phi_s_coeff` | `1` |  | Slope factor coefficient: phi_s_coeff = c_phis * beta^(-0.3) |
+| `phi_s` | `1` |  | Slope factor (dimensionless): phi_s = phi_s_coeff * tan_phi^2 |
+| `epsilon` | `1` |  | Effective heating number (dimensionless): epsilon = exp(-c_eps / sigma) |
+| `Qig` | `J/kg` |  | Heat of preignition: Qig = c_Qig_1 + c_Qig_2 * Mf |
+| `R0` | `m/s` |  | No-wind no-slope rate of spread: R0 = IR * xi / (rhob * epsilon * Qig) |
+| `R` | `m/s` |  | Rate of spread with wind and slope: R = R0 * (1 + phi_w + phi_s) |
+| `t_r` | `s` |  | Flame residence time: t_r = c_tr / sigma |
+| `HA` | `J/m^2` |  | Heat per unit area: HA = IR * t_r |
+| `IB` | `W/m` |  | Fireline intensity (Byram): IB = HA * R |
+| `F_L` | `m` |  | Flame length (Byram): F_L = c_FL * IB^0.46 |
+
+## Observed expressions
+
+$$
+wn = w0 \cdot \left(one - S_{T}\right)
+$$
+_Net (mineral-free) fuel load: wn = w0 * (1 - S_T)_
+
+$$
+rhob = \frac{w0}{\mathrm{max}\left(delta, delta_{floor}\right)}
+$$
+_Oven-dry bulk density: rhob = w0 / delta_
+
+$$
+beta = \frac{rhob}{rho_{p}}
+$$
+_Packing ratio (dimensionless): beta = rhob / rho_p_
+
+$$
+beta_{op} = c_{beta\,op} \cdot \mathrm{max}\left(\frac{sigma}{sigma_{ref}}, \frac{sigma_{floor}}{sigma_{ref}}\right)^{-0.8189}
+$$
+_Optimum packing ratio: beta_op = c_beta_op * sigma^(-0.8189)_
+
+$$
+beta_{ratio} = \frac{beta}{beta_{op}}
+$$
+_Relative packing ratio: beta_ratio = beta / beta_op_
+
+$$
+Gamma_{max} = \frac{c_{Gamma\,mult} \cdot \frac{sigma}{sigma_{ref}}^{1.5}}{c_{Gamma\,denom1} + c_{Gamma\,denom2} \cdot \frac{sigma}{sigma_{ref}}^{1.5}}
+$$
+_Maximum reaction velocity: Gamma_max = sigma^1.5 / (c_Gamma_denom1 + c_Gamma_denom2 * sigma^1.5)_
+
+$$
+A_{coeff} = c_{A} \cdot \mathrm{max}\left(\frac{sigma}{sigma_{ref}}, \frac{sigma_{floor}}{sigma_{ref}}\right)^{-0.7913}
+$$
+_Coefficient A for reaction velocity (dimensionless): A = c_A * sigma^(-0.7913)_
+
+$$
+Gamma_{prime} = Gamma_{max} \cdot e^{A_{coeff} \cdot \left(\ln\left(\mathrm{max}\left(beta_{ratio}, beta_{ratio\,floor}\right)\right) + one - beta_{ratio}\right)}
+$$
+_Optimum reaction velocity: Gamma_prime = Gamma_max * exp(A * (log(beta_ratio) + 1 - beta_ratio))_
+
+$$
+rM = \mathrm{min}\left(\frac{Mf}{\mathrm{max}\left(Mx, Mx_{floor}\right)}, one\right)
+$$
+_Moisture ratio capped at 1.0: rM = min(Mf / Mx, 1)_
+
+$$
+eta_{M} = one - c_{etaM\,1} \cdot rM + c_{etaM\,2} \cdot rM^{2.0} - c_{etaM\,3} \cdot rM^{3.0}
+$$
+_Moisture damping coefficient: eta_M = 1 - 2.59*rM + 5.11*rM^2 - 3.52*rM^3_
+
+$$
+eta_{s} = \mathrm{min}\left(c_{etas} \cdot S_{e}^{-0.19}, one\right)
+$$
+_Mineral damping coefficient capped at 1.0: eta_s = min(0.174 * S_e^(-0.19), 1)_
+
+$$
+IR = Gamma_{prime} \cdot wn \cdot h \cdot eta_{M} \cdot eta_{s}
+$$
+_Reaction intensity: IR = Gamma_prime * wn * h * eta_M * eta_s_
+
+$$
+xi = \left(c_{xi\,1} + c_{xi\,2} \cdot sigma\right)^{-1.0} \cdot e^{\left(c_{xi\,3} + c_{xi\,4} \cdot \sqrt{\frac{sigma}{sigma_{ref}}}\right) \cdot \left(beta + 0.1 \cdot one\right)}
+$$
+_Propagating flux ratio (dimensionless): fraction of IR that propagates ahead of fire front_
+
+$$
+C_{coeff} = c_{C\,1} \cdot e^{\left(-1.0\right) \cdot c_{C\,2} \cdot \frac{sigma}{sigma_{ref}}^{0.55}}
+$$
+_Wind factor coefficient C: C = c_C_1 * exp(-c_C_2 * sigma^0.55)_
+
+$$
+B_{coeff} = c_{B} \cdot \frac{sigma}{sigma_{ref}}^{0.54}
+$$
+_Wind factor coefficient B (wind-speed exponent): B = c_B * sigma^0.54_
+
+$$
+E_{coeff} = c_{E\,1} \cdot e^{\left(-1.0\right) \cdot c_{E\,2} \cdot sigma}
+$$
+_Wind factor coefficient E (packing-ratio exponent): E = c_E_1 * exp(-c_E_2 * sigma)_
+
+$$
+phi_{w} = C_{coeff} \cdot \frac{U}{U_{ref}}^{B_{coeff}} \cdot \mathrm{max}\left(beta_{ratio}, beta_{ratio\,floor}\right)^{\left(-1.0\right) \cdot E_{coeff}}
+$$
+_Wind factor (dimensionless): phi_w = C * (U/U_ref)^B * beta_ratio^(-E)_
+
+$$
+phi_{s\,coeff} = c_{phis} \cdot \mathrm{max}\left(beta, beta_{floor}\right)^{-0.3}
+$$
+_Slope factor coefficient: phi_s_coeff = c_phis * beta^(-0.3)_
+
+$$
+phi_{s} = phi_{s\,coeff} \cdot tan_{phi}^{2.0}
+$$
+_Slope factor (dimensionless): phi_s = phi_s_coeff * tan_phi^2_
+
+$$
+epsilon = e^{\left(-1.0\right) \cdot c_{eps} \cdot \mathrm{max}\left(sigma, sigma_{floor}\right)^{-1.0}}
+$$
+_Effective heating number (dimensionless): epsilon = exp(-c_eps / sigma)_
+
+$$
+Qig = c_{Qig\,1} + c_{Qig\,2} \cdot Mf
+$$
+_Heat of preignition: Qig = c_Qig_1 + c_Qig_2 * Mf_
+
+$$
+R0 = \frac{IR \cdot xi}{\mathrm{max}\left(rhob, rhob_{floor}\right) \cdot \mathrm{max}\left(epsilon, epsilon_{floor}\right) \cdot Qig}
+$$
+_No-wind no-slope rate of spread: R0 = IR * xi / (rhob * epsilon * Qig)_
+
+$$
+R = R0 \cdot \left(one + phi_{w} + phi_{s}\right)
+$$
+_Rate of spread with wind and slope: R = R0 * (1 + phi_w + phi_s)_
+
+$$
+t_{r} = \frac{c_{tr}}{\mathrm{max}\left(sigma, sigma_{floor}\right)}
+$$
+_Flame residence time: t_r = c_tr / sigma_
+
+$$
+HA = IR \cdot t_{r}
+$$
+_Heat per unit area: HA = IR * t_r_
+
+$$
+IB = HA \cdot R
+$$
+_Fireline intensity (Byram): IB = HA * R_
+
+$$
+F_{L} = c_{FL} \cdot \frac{IB}{IB_{ref}}^{0.46}
+$$
+_Flame length (Byram): F_L = c_FL * IB^0.46_
+
+## Analyses
+
+### spread_rate_vs_wind
+
+Sweep wind speed U from 0 to 10 m/s at Fuel Model 1 conditions (Mf=5%, flat). Shows the power-law wind amplification of fire spread rate: R grows rapidly with wind as the wind factor phi_w = C*(U/U_ref)^B scales with U^B_coeff where B_coeff ~ 2.05.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `U`
+
+![Rate of spread R (m/s) vs midflame wind speed U (m/s). Power-law growth characteristic of the Rothermel wind factor.](/plots/wildland_fire/rothermel/rothermelfirespread/spread_rate_vs_wind-R_vs_U.png)
+
+### spread_rate_vs_slope
+
+Sweep slope tan_phi from 0 to 1.0 (0% to 100% rise/run) at Fuel Model 1 conditions (Mf=5%, no wind). Shows slope factor phi_s = phi_s_coeff * tan_phi^2 growing quadratically with slope.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `tan_phi`
+
+![Rate of spread R (m/s) vs slope steepness tan_phi (rise/run). Quadratic growth from the slope factor phi_s = phi_s_coeff * tan_phi^2.](/plots/wildland_fire/rothermel/rothermelfirespread/spread_rate_vs_slope-R_vs_slope.png)
+
+### spread_rate_vs_moisture
+
+Sweep fuel moisture Mf from 0.01 (1%) to 0.12 (extinction, Mx) at Fuel Model 1 conditions. Shows moisture damping: eta_M polynomial approaches 0 at Mf=Mx, bringing R→0.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `Mf`
+
+![Rate of spread R (m/s) vs fuel moisture Mf (fraction). Monotonic decrease to zero at Mf=Mx (extinction).](/plots/wildland_fire/rothermel/rothermelfirespread/spread_rate_vs_moisture-R_vs_Mf.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/rothermel.jl:70\n\nUpstream `RothermelFireSpread` is an MTK `@component` with 11 `@parameters` (fuel-bed and environmental inputs), 35 `@constants` (empirical coefficients, reference values, and floor guards), and 27 time-indexed `@variables` defined by 27 purely algebraic equations (no D(x) terms — observed-only system). Structural verification: `length(equations(sys)) == 27`, `length(unknowns(sys)) == 27` (see test_rothermel.jl `Structural Verification`).\n\nUnicode → ASCII identifier transliteration follows the rig convention (components/wildland_fire/terrain_slope.esm, components/wildland_fire/rothermel/effective_midflame_wind.esm):\n  σ → sigma          ρ_p → rho_p       tanϕ → tan_phi\n  δ → delta          ρb  → rhob        Γ_max → Gamma_max\n  β → beta           β_op → beta_op    Γ' → Gamma_prime\n  β_ratio → beta_ratio  η_M → eta_M   η_s → eta_s\n  ξ → xi             φw → phi_w       φs → phi_s\n  φs_coeff → phi_s_coeff  ε → epsilon\n  σ_ref → sigma_ref, σ_floor → sigma_floor, δ_floor → delta_floor\n  β_floor → beta_floor, β_ratio_floor → beta_ratio_floor\n  ρb_floor → rhob_floor, ε_floor → epsilon_floor\n\nMTK `@constants` are unified into ESM `parameter` declarations (same pattern as wind_limit.esm, live_fuel_moisture_extinction.esm). Both the empirical-coefficient constants and the floor-guard constants are preserved as parameters with their upstream default values.\n\nFloor constants rationale: several equations involve bases raised to non-integer powers and denominators. Floor guards prevent 0^negative or 0/0 when fuel is absent (depletion) or non-burnable (σ=0). Only denominators and negative-power bases are guarded; numerators are unguarded so IR→0 and R→0 naturally when fuel is absent.\n\nSI conversion notes (from US customary, Table 3, Andrews 2018):\n  c_beta_op = 8.858 (from 3.348 * ft_to_m^(-0.8189))\n  c_A = 340.5 (from 133 * ft_to_m^(-0.7913))\n  c_C_2 = 0.0692 (from 0.133 * ft_to_m^0.55)\n  c_B = 0.01317 (from 0.02526 * ft_to_m^0.54)\n  c_E_2 = 1.094e-4 (from 3.59e-4 * ft_to_m)\n  c_eps = 452.7 (from 138 / ft_to_m)\n  c_Qig_1 = 581500 J/kg, c_Qig_2 = 2595816 J/kg (from 250 and 1116 Btu/lb)\n  c_tr = 75590.6 s/m (from 384 min / ft_to_m * 60)\n  c_FL = 0.00323 m (from 0.45 ft / (Btu/ft/s → W/m)^0.46)\n  U_ref = 0.3048/60 m/s = 1 ft/min (non-dimensionalizes U for the wind-factor power law)\n\nCoupling interface (RothermelCoupler, coupling.jl):\n  couple2(FuelModelLookupCoupler, RothermelCoupler) promotes sigma, w0, delta, Mx, h\n    from parameters to variables and connects them to FuelModelLookup outputs.\n  couple2(TerrainSlopeCoupler, RothermelCoupler) promotes tan_phi from parameter to\n    variable and connects it to TerrainSlope.tan_phi.\n  couple2(MidflameWindCoupler, RothermelCoupler) promotes U from parameter to variable\n    and connects it to MidflameWind.U.\n  These couplings apply when composing multi-component ESM files; standalone use\n  requires setting sigma, w0, delta, Mx, h, tan_phi, U, Mf as direct parameters.\n\nTolerance rationale (model-level rel=1e-6): observed-only algebraic system; all\nequations are closed-form arithmetic and transcendental functions on float64.\n1e-6 matches the upstream Julia test suite tolerances (rtol=1e-6)."
+  },
+  "tolerance": {
+    "rel": 1e-06
+  },
+  "variables": {
+    "sigma": {
+      "type": "parameter",
+      "units": "1/m",
+      "description": "Surface-area-to-volume ratio of the fuel particle"
+    },
+    "w0": {
+      "type": "parameter",
+      "units": "kg/m^2",
+      "description": "Oven-dry fuel load per unit area"
+    },
+    "delta": {
+      "type": "parameter",
+      "units": "m",
+      "description": "Fuel bed depth"
+    },
+    "Mx": {
+      "type": "parameter",
+      "units": "1",
+      "description": "Dead fuel moisture of extinction (dimensionless, dry weight basis)"
+    },
+    "h": {
+      "type": "parameter",
+      "units": "J/kg",
+      "default": 18608000.0,
+      "description": "Low heat content of dry fuel (default 8000 Btu/lb = 18608000 J/kg)"
+    },
+    "S_T": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0555,
+      "description": "Total mineral content (dimensionless fraction)"
+    },
+    "S_e": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.01,
+      "description": "Effective (silica-free) mineral content (dimensionless fraction)"
+    },
+    "rho_p": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 512.6,
+      "description": "Oven-dry particle density (default 32 lb/ft^3 = 512.6 kg/m^3)"
+    },
+    "Mf": {
+      "type": "parameter",
+      "units": "1",
+      "description": "Fuel moisture content (dimensionless, dry weight basis)"
+    },
+    "U": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 0.0,
+      "description": "Wind velocity at midflame height. Default 0.0 so the model stays valid when U is left unbound: it feeds only Rothermel's own phi_w -> rate R, which the wildland-fire coupling does NOT consume (only R0 + the C/B/E/beta/phi_s coefficients are coupled to the level-set leaf, which recomputes wind directionally). Binders that use Rothermel's full R still override it."
+    },
+    "tan_phi": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "Slope steepness (dimensionless rise/run). Default 0.0 so the model stays valid when tan_phi is left unbound: it feeds only Rothermel's own phi_s -> rate R, which the wildland-fire coupling does NOT consume (the level-set leaf recomputes slope directionally). Binders that use Rothermel's full R still override it."
+    },
+    "sigma_ref": {
+      "type": "parameter",
+      "units": "1/m",
+      "default": 1.0,
+      "description": "Reference SAV ratio for non-dimensionalization before non-integer power laws (MTK @constant preserved as parameter)"
+    },
+    "U_ref": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 0.005080000000000001,
+      "description": "Reference wind speed = 1 ft/min = 0.3048/60 m/s; non-dimensionalizes U for the wind-factor power law (empirical calibration in ft/min)"
+    },
+    "IB_ref": {
+      "type": "parameter",
+      "units": "W/m",
+      "default": 1.0,
+      "description": "Reference fireline intensity for non-dimensionalization before the 0.46 power in F_L (MTK @constant preserved as parameter)"
+    },
+    "one": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "Dimensionless one — MTK unit-balancing literal preserved from upstream @constants"
+    },
+    "c_beta_op": {
+      "type": "parameter",
+      "units": "1",
+      "default": 8.858,
+      "description": "Optimum packing ratio coefficient (SI); upstream US value 3.348 converted via 3.348 * ft_to_m^(-0.8189)"
+    },
+    "c_Gamma_denom1": {
+      "type": "parameter",
+      "units": "1",
+      "default": 176502.0,
+      "description": "Gamma_max denominator constant 1 (SI, empirical; Table 3 Andrews 2018)"
+    },
+    "c_Gamma_denom2": {
+      "type": "parameter",
+      "units": "1",
+      "default": 3.564,
+      "description": "Gamma_max denominator constant 2 (SI, empirical; Table 3 Andrews 2018)"
+    },
+    "c_Gamma_mult": {
+      "type": "parameter",
+      "units": "1/s",
+      "default": 1.0,
+      "description": "Gamma_max unit conversion factor; gives Gamma_max units of 1/s (reaction velocity)"
+    },
+    "c_A": {
+      "type": "parameter",
+      "units": "1",
+      "default": 340.5,
+      "description": "Coefficient A constant (SI); upstream US value 133 converted via 133 * ft_to_m^(-0.7913)"
+    },
+    "c_etaM_1": {
+      "type": "parameter",
+      "units": "1",
+      "default": 2.59,
+      "description": "Moisture damping polynomial coefficient 1 (dimensionless; Table 3 Andrews 2018)"
+    },
+    "c_etaM_2": {
+      "type": "parameter",
+      "units": "1",
+      "default": 5.11,
+      "description": "Moisture damping polynomial coefficient 2 (dimensionless; Table 3 Andrews 2018)"
+    },
+    "c_etaM_3": {
+      "type": "parameter",
+      "units": "1",
+      "default": 3.52,
+      "description": "Moisture damping polynomial coefficient 3 (dimensionless; Table 3 Andrews 2018)"
+    },
+    "c_etas": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.174,
+      "description": "Mineral damping coefficient (empirical; Table 3 Andrews 2018): eta_s = 0.174 * S_e^(-0.19)"
+    },
+    "c_xi_1": {
+      "type": "parameter",
+      "units": "1",
+      "default": 192.0,
+      "description": "Propagating flux ratio denominator coefficient 1 (empirical; Table 3 Andrews 2018)"
+    },
+    "c_xi_2": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0.07908,
+      "description": "Propagating flux ratio denominator coefficient 2 (SI, has units m to cancel sigma's 1/m; Table 3 Andrews 2018)"
+    },
+    "c_xi_3": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.792,
+      "description": "Propagating flux ratio exponent coefficient 3 (empirical; Table 3 Andrews 2018)"
+    },
+    "c_xi_4": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.376,
+      "description": "Propagating flux ratio exponent coefficient 4 (SI; Table 3 Andrews 2018)"
+    },
+    "c_C_1": {
+      "type": "parameter",
+      "units": "1",
+      "default": 7.47,
+      "description": "Wind coefficient C pre-exponential constant (empirical; Table 3 Andrews 2018)"
+    },
+    "c_C_2": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0692,
+      "description": "Wind coefficient C exponential constant (SI); upstream US value 0.133 converted via 0.133 * ft_to_m^0.55"
+    },
+    "c_B": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.01317,
+      "description": "Wind coefficient B constant (SI); upstream US value 0.02526 converted via 0.02526 * ft_to_m^0.54"
+    },
+    "c_E_1": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.715,
+      "description": "Wind coefficient E pre-exponential constant (empirical; Table 3 Andrews 2018)"
+    },
+    "c_E_2": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0.0001094,
+      "description": "Wind coefficient E exponential constant (SI, units m to cancel sigma's 1/m); upstream US value 3.59e-4 converted via 3.59e-4 * ft_to_m"
+    },
+    "c_phis": {
+      "type": "parameter",
+      "units": "1",
+      "default": 5.275,
+      "description": "Slope factor coefficient (empirical; Table 3 Andrews 2018)"
+    },
+    "c_eps": {
+      "type": "parameter",
+      "units": "1/m",
+      "default": 452.7,
+      "description": "Effective heating number coefficient (SI); upstream US value 138 converted via 138 / ft_to_m"
+    },
+    "c_Qig_1": {
+      "type": "parameter",
+      "units": "J/kg",
+      "default": 581500.0,
+      "description": "Heat of preignition base constant (SI); upstream US value 250 Btu/lb converted to J/kg"
+    },
+    "c_Qig_2": {
+      "type": "parameter",
+      "units": "J/kg",
+      "default": 2595816.0,
+      "description": "Heat of preignition moisture coefficient (SI); upstream US value 1116 Btu/lb converted to J/kg"
+    },
+    "c_tr": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 75590.6,
+      "description": "Residence time coefficient (SI); upstream US value 384 min·ft^(-1) converted via 384*60/ft_to_m"
+    },
+    "c_FL": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0.00323,
+      "description": "Flame length coefficient (SI); upstream US value 0.45 ft converted for IB in W/m"
+    },
+    "sigma_floor": {
+      "type": "parameter",
+      "units": "1/m",
+      "default": 1e-06,
+      "description": "Minimum SAV ratio floor to avoid division by zero and negative-power singularity in sigma-dependent expressions"
+    },
+    "delta_floor": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1e-10,
+      "description": "Minimum fuel bed depth floor to avoid division by zero in rhob = w0/delta"
+    },
+    "beta_floor": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1e-10,
+      "description": "Minimum packing ratio floor to avoid negative-power singularity in phi_s_coeff = c_phis * beta^(-0.3)"
+    },
+    "beta_ratio_floor": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1e-10,
+      "description": "Minimum relative packing ratio floor to avoid negative-power singularity in phi_w and log(beta_ratio) in Gamma_prime"
+    },
+    "rhob_floor": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 1e-10,
+      "description": "Minimum bulk density floor to avoid division by zero in R0 = IR*xi / (rhob*epsilon*Qig)"
+    },
+    "epsilon_floor": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1e-10,
+      "description": "Minimum effective heating number floor to avoid division by zero in R0 denominator"
+    },
+    "Mx_floor": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1e-10,
+      "description": "Minimum moisture of extinction floor to avoid division by zero in rM = Mf/Mx"
+    },
+    "wn": {
+      "type": "unknown",
+      "units": "kg/m^2",
+      "description": "Net (mineral-free) fuel load: wn = w0 * (1 - S_T)"
+    },
+    "rhob": {
+      "type": "unknown",
+      "units": "kg/m^3",
+      "description": "Oven-dry bulk density: rhob = w0 / delta"
+    },
+    "beta": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Packing ratio (dimensionless): beta = rhob / rho_p"
+    },
+    "beta_op": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Optimum packing ratio: beta_op = c_beta_op * sigma^(-0.8189)"
+    },
+    "beta_ratio": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Relative packing ratio: beta_ratio = beta / beta_op"
+    },
+    "Gamma_max": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "Maximum reaction velocity: Gamma_max = sigma^1.5 / (c_Gamma_denom1 + c_Gamma_denom2 * sigma^1.5)"
+    },
+    "A_coeff": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Coefficient A for reaction velocity (dimensionless): A = c_A * sigma^(-0.7913)"
+    },
+    "Gamma_prime": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "Optimum reaction velocity: Gamma_prime = Gamma_max * exp(A * (log(beta_ratio) + 1 - beta_ratio))"
+    },
+    "rM": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Moisture ratio capped at 1.0: rM = min(Mf / Mx, 1)"
+    },
+    "eta_M": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Moisture damping coefficient: eta_M = 1 - 2.59*rM + 5.11*rM^2 - 3.52*rM^3"
+    },
+    "eta_s": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Mineral damping coefficient capped at 1.0: eta_s = min(0.174 * S_e^(-0.19), 1)"
+    },
+    "IR": {
+      "type": "unknown",
+      "units": "W/m^2",
+      "description": "Reaction intensity: IR = Gamma_prime * wn * h * eta_M * eta_s"
+    },
+    "xi": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Propagating flux ratio (dimensionless): fraction of IR that propagates ahead of fire front"
+    },
+    "C_coeff": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Wind factor coefficient C: C = c_C_1 * exp(-c_C_2 * sigma^0.55)"
+    },
+    "B_coeff": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Wind factor coefficient B (wind-speed exponent): B = c_B * sigma^0.54"
+    },
+    "E_coeff": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Wind factor coefficient E (packing-ratio exponent): E = c_E_1 * exp(-c_E_2 * sigma)"
+    },
+    "phi_w": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Wind factor (dimensionless): phi_w = C * (U/U_ref)^B * beta_ratio^(-E)"
+    },
+    "phi_s_coeff": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Slope factor coefficient: phi_s_coeff = c_phis * beta^(-0.3)"
+    },
+    "phi_s": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Slope factor (dimensionless): phi_s = phi_s_coeff * tan_phi^2"
+    },
+    "epsilon": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Effective heating number (dimensionless): epsilon = exp(-c_eps / sigma)"
+    },
+    "Qig": {
+      "type": "unknown",
+      "units": "J/kg",
+      "description": "Heat of preignition: Qig = c_Qig_1 + c_Qig_2 * Mf"
+    },
+    "R0": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "No-wind no-slope rate of spread: R0 = IR * xi / (rhob * epsilon * Qig)"
+    },
+    "R": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Rate of spread with wind and slope: R = R0 * (1 + phi_w + phi_s)"
+    },
+    "t_r": {
+      "type": "unknown",
+      "units": "s",
+      "description": "Flame residence time: t_r = c_tr / sigma"
+    },
+    "HA": {
+      "type": "unknown",
+      "units": "J/m^2",
+      "description": "Heat per unit area: HA = IR * t_r"
+    },
+    "IB": {
+      "type": "unknown",
+      "units": "W/m",
+      "description": "Fireline intensity (Byram): IB = HA * R"
+    },
+    "F_L": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Flame length (Byram): F_L = c_FL * IB^0.46"
+    }
+  },
+  "equations": [
+    {
+      "lhs": "wn",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "w0",
+          {
+            "op": "-",
+            "args": [
+              "one",
+              "S_T"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rhob",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "w0",
+          {
+            "op": "max",
+            "args": [
+              "delta",
+              "delta_floor"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "beta",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "rhob",
+          "rho_p"
+        ]
+      }
+    },
+    {
+      "lhs": "beta_op",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "c_beta_op",
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "max",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "sigma",
+                      "sigma_ref"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      "sigma_floor",
+                      "sigma_ref"
+                    ]
+                  }
+                ]
+              },
+              -0.8189
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "beta_ratio",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "beta",
+          "beta_op"
+        ]
+      }
+    },
+    {
+      "lhs": "Gamma_max",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "c_Gamma_mult",
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "sigma",
+                      "sigma_ref"
+                    ]
+                  },
+                  1.5
+                ]
+              }
+            ]
+          },
+          {
+            "op": "+",
+            "args": [
+              "c_Gamma_denom1",
+              {
+                "op": "*",
+                "args": [
+                  "c_Gamma_denom2",
+                  {
+                    "op": "^",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          "sigma",
+                          "sigma_ref"
+                        ]
+                      },
+                      1.5
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "A_coeff",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "c_A",
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "max",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "sigma",
+                      "sigma_ref"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      "sigma_floor",
+                      "sigma_ref"
+                    ]
+                  }
+                ]
+              },
+              -0.7913
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "Gamma_prime",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "Gamma_max",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "A_coeff",
+                  {
+                    "op": "-",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          {
+                            "op": "log",
+                            "args": [
+                              {
+                                "op": "max",
+                                "args": [
+                                  "beta_ratio",
+                                  "beta_ratio_floor"
+                                ]
+                              }
+                            ]
+                          },
+                          "one"
+                        ]
+                      },
+                      "beta_ratio"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rM",
+      "rhs": {
+        "op": "min",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              "Mf",
+              {
+                "op": "max",
+                "args": [
+                  "Mx",
+                  "Mx_floor"
+                ]
+              }
+            ]
+          },
+          "one"
+        ]
+      }
+    },
+    {
+      "lhs": "eta_M",
+      "rhs": {
+        "op": "-",
+        "args": [
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "-",
+                "args": [
+                  "one",
+                  {
+                    "op": "*",
+                    "args": [
+                      "c_etaM_1",
+                      "rM"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "c_etaM_2",
+                  {
+                    "op": "^",
+                    "args": [
+                      "rM",
+                      2.0
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "c_etaM_3",
+              {
+                "op": "^",
+                "args": [
+                  "rM",
+                  3.0
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "eta_s",
+      "rhs": {
+        "op": "min",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "c_etas",
+              {
+                "op": "^",
+                "args": [
+                  "S_e",
+                  -0.19
+                ]
+              }
+            ]
+          },
+          "one"
+        ]
+      }
+    },
+    {
+      "lhs": "IR",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "Gamma_prime",
+          "wn",
+          "h",
+          "eta_M",
+          "eta_s"
+        ]
+      }
+    },
+    {
+      "lhs": "xi",
+      "rhs": {
+        "op": "*",
+        "args": [
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "+",
+                "args": [
+                  "c_xi_1",
+                  {
+                    "op": "*",
+                    "args": [
+                      "c_xi_2",
+                      "sigma"
+                    ]
+                  }
+                ]
+              },
+              -1.0
+            ]
+          },
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "+",
+                    "args": [
+                      "c_xi_3",
+                      {
+                        "op": "*",
+                        "args": [
+                          "c_xi_4",
+                          {
+                            "op": "sqrt",
+                            "args": [
+                              {
+                                "op": "/",
+                                "args": [
+                                  "sigma",
+                                  "sigma_ref"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "+",
+                    "args": [
+                      "beta",
+                      {
+                        "op": "*",
+                        "args": [
+                          0.1,
+                          "one"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "C_coeff",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "c_C_1",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  -1.0,
+                  "c_C_2",
+                  {
+                    "op": "^",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          "sigma",
+                          "sigma_ref"
+                        ]
+                      },
+                      0.55
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "B_coeff",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "c_B",
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "sigma",
+                  "sigma_ref"
+                ]
+              },
+              0.54
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "E_coeff",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "c_E_1",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  -1.0,
+                  "c_E_2",
+                  "sigma"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "phi_w",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "C_coeff",
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "U",
+                  "U_ref"
+                ]
+              },
+              "B_coeff"
+            ]
+          },
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "max",
+                "args": [
+                  "beta_ratio",
+                  "beta_ratio_floor"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  -1.0,
+                  "E_coeff"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "phi_s_coeff",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "c_phis",
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "max",
+                "args": [
+                  "beta",
+                  "beta_floor"
+                ]
+              },
+              -0.3
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "phi_s",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "phi_s_coeff",
+          {
+            "op": "^",
+            "args": [
+              "tan_phi",
+              2.0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "epsilon",
+      "rhs": {
+        "op": "exp",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "c_eps",
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "max",
+                    "args": [
+                      "sigma",
+                      "sigma_floor"
+                    ]
+                  },
+                  -1.0
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "Qig",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "c_Qig_1",
+          {
+            "op": "*",
+            "args": [
+              "c_Qig_2",
+              "Mf"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "R0",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "IR",
+              "xi"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "max",
+                "args": [
+                  "rhob",
+                  "rhob_floor"
+                ]
+              },
+              {
+                "op": "max",
+                "args": [
+                  "epsilon",
+                  "epsilon_floor"
+                ]
+              },
+              "Qig"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "R",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "R0",
+          {
+            "op": "+",
+            "args": [
+              "one",
+              "phi_w",
+              "phi_s"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "t_r",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "c_tr",
+          {
+            "op": "max",
+            "args": [
+              "sigma",
+              "sigma_floor"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "HA",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "IR",
+          "t_r"
+        ]
+      }
+    },
+    {
+      "lhs": "IB",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "HA",
+          "R"
+        ]
+      }
+    },
+    {
+      "lhs": "F_L",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "c_FL",
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "IB",
+                  "IB_ref"
+                ]
+              },
+              0.46
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "fm1_no_wind_flat",
+      "description": "Fuel Model 1 (short grass, SI): sigma=11482.9 1/m, w0=0.166 kg/m^2, delta=0.3048 m, Mx=0.12, Mf=0.05, no wind, flat. Reference case verifying bulk density, packing ratio, intermediate coefficients, R0=R (no wind/slope), and output variables. Upstream test: 'Fuel Model 1 - Short Grass'.",
+      "parameter_overrides": {
+        "sigma": 11482.939632545931,
+        "w0": 0.16600240422703066,
+        "delta": 0.3048,
+        "Mx": 0.12,
+        "Mf": 0.05,
+        "U": 0.0,
+        "tan_phi": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "rhob",
+          "time": 0.0,
+          "expected": 0.5446273098918715
+        },
+        {
+          "variable": "beta",
+          "time": 0.0,
+          "expected": 0.0010624801365249834
+        },
+        {
+          "variable": "beta_op",
+          "time": 0.0,
+          "expected": 0.004193321893073434
+        },
+        {
+          "variable": "epsilon",
+          "time": 0.0,
+          "expected": 0.9613433034596717
+        },
+        {
+          "variable": "xi",
+          "time": 0.0,
+          "expected": 0.05777953848264748
+        },
+        {
+          "variable": "eta_M",
+          "time": 0.0,
+          "expected": 0.5533564814814815
+        },
+        {
+          "variable": "eta_s",
+          "time": 0.0,
+          "expected": 0.41739693291481456
+        },
+        {
+          "variable": "IR",
+          "time": 0.0,
+          "expected": 159496.04
+        },
+        {
+          "variable": "R0",
+          "time": 0.0,
+          "expected": 0.024745647
+        },
+        {
+          "variable": "R",
+          "time": 0.0,
+          "expected": 0.024745647,
+          "tolerance": {
+            "rel": 1e-05
+          }
+        },
+        {
+          "variable": "phi_w",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "phi_s",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "t_r",
+          "time": 0.0,
+          "expected": 6.582861
+        },
+        {
+          "variable": "IB",
+          "time": 0.0,
+          "expected": 25981.456
+        },
+        {
+          "variable": "F_L",
+          "time": 0.0,
+          "expected": 0.3466951
+        }
+      ]
+    },
+    {
+      "id": "fm1_wind_5mph",
+      "description": "Fuel Model 1 with 5 mi/h wind (440 ft/min = 2.2352 m/s), flat terrain. Verifies wind factor phi_w, wind-enhanced spread rate R > R0, fireline intensity IB, and flame length F_L = c_FL * IB^0.46. Upstream test: 'Wind Effect' and 'Flame Length Relationship'.",
+      "parameter_overrides": {
+        "sigma": 11482.939632545931,
+        "w0": 0.16600240422703066,
+        "delta": 0.3048,
+        "Mx": 0.12,
+        "Mf": 0.05,
+        "U": 2.2352,
+        "tan_phi": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "phi_w",
+          "time": 0.0,
+          "expected": 18.947278
+        },
+        {
+          "variable": "R0",
+          "time": 0.0,
+          "expected": 0.024745647
+        },
+        {
+          "variable": "R",
+          "time": 0.0,
+          "expected": 0.49360837
+        },
+        {
+          "variable": "IB",
+          "time": 0.0,
+          "expected": 518259.33
+        },
+        {
+          "variable": "F_L",
+          "time": 0.0,
+          "expected": 1.3737073
+        }
+      ]
+    },
+    {
+      "id": "fm1_slope_03",
+      "description": "Fuel Model 1 with 30% slope (tan_phi=0.3, ~16.7 deg), no wind. Verifies slope factor phi_s > 0 and slope-enhanced R > R0. Upstream test: 'Slope Effect'.",
+      "parameter_overrides": {
+        "sigma": 11482.939632545931,
+        "w0": 0.16600240422703066,
+        "delta": 0.3048,
+        "Mx": 0.12,
+        "Mf": 0.05,
+        "U": 0.0,
+        "tan_phi": 0.3
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "phi_s",
+          "time": 0.0,
+          "expected": 3.703128
+        },
+        {
+          "variable": "R0",
+          "time": 0.0,
+          "expected": 0.024745647
+        },
+        {
+          "variable": "R",
+          "time": 0.0,
+          "expected": 0.11638196
+        }
+      ]
+    },
+    {
+      "id": "fm1_high_moisture",
+      "description": "Fuel Model 1 at 10% moisture (wet). eta_M(10%) < eta_M(5%) ⇒ R_wet < R_dry. Upstream test: 'Moisture Effect'.",
+      "parameter_overrides": {
+        "sigma": 11482.939632545931,
+        "w0": 0.16600240422703066,
+        "delta": 0.3048,
+        "Mx": 0.12,
+        "Mf": 0.1,
+        "U": 0.0,
+        "tan_phi": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "R",
+          "time": 0.0,
+          "expected": 0.013358993
+        }
+      ]
+    },
+    {
+      "id": "extinction_moisture",
+      "description": "At Mf = Mx = 0.12 (extinction moisture), rM = 1.0 exactly ⇒ eta_M = 1 - 2.59 + 5.11 - 3.52 = 0 ⇒ IR = 0 ⇒ R = 0. Upstream test: 'Extinction Moisture'.",
+      "parameter_overrides": {
+        "sigma": 11482.939632545931,
+        "w0": 0.16600240422703066,
+        "delta": 0.3048,
+        "Mx": 0.12,
+        "Mf": 0.12,
+        "U": 0.0,
+        "tan_phi": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "eta_M",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-10
+          }
+        },
+        {
+          "variable": "R",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-10
+          }
+        }
+      ]
+    },
+    {
+      "id": "nonburnable_h_zero",
+      "description": "Non-burnable fuel: h=0 ⇒ IR = Gamma_prime * wn * h * eta_M * eta_s = 0 ⇒ R0 = 0 ⇒ R = 0 even with nonzero wind and slope. Upstream test: 'Non-burnable fuel yields R=0'.",
+      "parameter_overrides": {
+        "sigma": 11482.939632545931,
+        "w0": 0.16600240422703066,
+        "delta": 0.3048,
+        "Mx": 0.12,
+        "Mf": 0.05,
+        "U": 2.235,
+        "tan_phi": 0.3,
+        "h": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "IR",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "R0",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "R",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        }
+      ]
+    },
+    {
+      "id": "zero_fuel_load",
+      "description": "w0=0 (no fuel): wn=0 ⇒ IR=0 ⇒ R0=0 ⇒ R=0. Floor guards keep denominators finite. Upstream test: 'Zero fuel load (w0=0) yields finite R=0'.",
+      "parameter_overrides": {
+        "sigma": 11482.939632545931,
+        "w0": 0.0,
+        "delta": 0.3048,
+        "Mx": 0.12,
+        "Mf": 0.05,
+        "U": 2.235,
+        "tan_phi": 0.3
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "IR",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "R0",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "R",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "F_L",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        }
+      ]
+    },
+    {
+      "id": "residence_time_si",
+      "description": "Residence time: t_r = c_tr / sigma = 75590.6 / 11482.94 = 6.5829 s. Cross-check: t_r / 60 ≈ t_r_US_min = 384/3500 min. Upstream test: 'Residence Time Relationship'.",
+      "parameter_overrides": {
+        "sigma": 11482.939632545931,
+        "w0": 0.16600240422703066,
+        "delta": 0.3048,
+        "Mx": 0.12,
+        "Mf": 0.05,
+        "U": 0.0,
+        "tan_phi": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "t_r",
+          "time": 0.0,
+          "expected": 6.5828614
+        }
+      ]
+    },
+    {
+      "id": "ha_ir_tr_identity",
+      "description": "Heat per unit area identity: HA = IR * t_r. Cross-check with values from fm1_no_wind_flat: HA = 159496 * 6.583 = 1049940 J/m^2. Upstream test: 'Heat Per Unit Area'.",
+      "parameter_overrides": {
+        "sigma": 11482.939632545931,
+        "w0": 0.16600240422703066,
+        "delta": 0.3048,
+        "Mx": 0.12,
+        "Mf": 0.05,
+        "U": 0.0,
+        "tan_phi": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "HA",
+          "time": 0.0,
+          "expected": 1049940.3
+        }
+      ]
+    },
+    {
+      "id": "r_sanity_ft_per_min",
+      "description": "Sanity check: Fuel Model 1 (short grass), no wind, 5% moisture — spread rate in ft/min should be 1–20. R_SI = 0.02475 m/s → R_US = 0.02475/0.00508 = 4.87 ft/min. Within range. Upstream test: 'Cross-validation with US Customary Units'.",
+      "parameter_overrides": {
+        "sigma": 11482.939632545931,
+        "w0": 0.16600240422703066,
+        "delta": 0.3048,
+        "Mx": 0.12,
+        "Mf": 0.05,
+        "U": 0.0,
+        "tan_phi": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "R",
+          "time": 0.0,
+          "expected": 0.024745647
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "spread_rate_vs_wind",
+      "description": "Sweep wind speed U from 0 to 10 m/s at Fuel Model 1 conditions (Mf=5%, flat). Shows the power-law wind amplification of fire spread rate: R grows rapidly with wind as the wind factor phi_w = C*(U/U_ref)^B scales with U^B_coeff where B_coeff ~ 2.05.",
+      "initial_state": {},
+      "parameters": {
+        "sigma": 11482.939632545931,
+        "w0": 0.16600240422703066,
+        "delta": 0.3048,
+        "Mx": 0.12,
+        "Mf": 0.05,
+        "tan_phi": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "U",
+            "range": {
+              "start": 0.0,
+              "stop": 10.0,
+              "count": 21,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "R_vs_U",
+          "type": "line",
+          "description": "Rate of spread R (m/s) vs midflame wind speed U (m/s). Power-law growth characteristic of the Rothermel wind factor.",
+          "x": {
+            "variable": "U",
+            "label": "U (m/s)"
+          },
+          "y": {
+            "variable": "R",
+            "label": "R (m/s)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "spread_rate_vs_slope",
+      "description": "Sweep slope tan_phi from 0 to 1.0 (0% to 100% rise/run) at Fuel Model 1 conditions (Mf=5%, no wind). Shows slope factor phi_s = phi_s_coeff * tan_phi^2 growing quadratically with slope.",
+      "initial_state": {},
+      "parameters": {
+        "sigma": 11482.939632545931,
+        "w0": 0.16600240422703066,
+        "delta": 0.3048,
+        "Mx": 0.12,
+        "Mf": 0.05,
+        "U": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "tan_phi",
+            "range": {
+              "start": 0.0,
+              "stop": 1.0,
+              "count": 21,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "R_vs_slope",
+          "type": "line",
+          "description": "Rate of spread R (m/s) vs slope steepness tan_phi (rise/run). Quadratic growth from the slope factor phi_s = phi_s_coeff * tan_phi^2.",
+          "x": {
+            "variable": "tan_phi",
+            "label": "tan_phi (rise/run)"
+          },
+          "y": {
+            "variable": "R",
+            "label": "R (m/s)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "spread_rate_vs_moisture",
+      "description": "Sweep fuel moisture Mf from 0.01 (1%) to 0.12 (extinction, Mx) at Fuel Model 1 conditions. Shows moisture damping: eta_M polynomial approaches 0 at Mf=Mx, bringing R→0.",
+      "initial_state": {},
+      "parameters": {
+        "sigma": 11482.939632545931,
+        "w0": 0.16600240422703066,
+        "delta": 0.3048,
+        "Mx": 0.12,
+        "U": 0.0,
+        "tan_phi": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "Mf",
+            "range": {
+              "start": 0.01,
+              "stop": 0.12,
+              "count": 23,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "R_vs_Mf",
+          "type": "line",
+          "description": "Rate of spread R (m/s) vs fuel moisture Mf (fraction). Monotonic decrease to zero at Mf=Mx (extinction).",
+          "x": {
+            "variable": "Mf",
+            "label": "Mf (fraction)"
+          },
+          "y": {
+            "variable": "R",
+            "label": "R (m/s)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

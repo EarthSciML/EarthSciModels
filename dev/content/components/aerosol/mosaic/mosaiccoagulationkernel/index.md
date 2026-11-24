@@ -1,0 +1,1533 @@
+---
+title: "MosaicCoagulationKernel"
+slug: "mosaiccoagulationkernel"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["mosaic"]
+domain: "aerosol"
+subdomain: "mosaic"
+component_type: "model"
+esm_version: "1.1.0"
+esm_path: "components/aerosol/mosaic/coagulation_kernel.esm"
+reference: "Fuchs, N. A. (1964). The Mechanics of Aerosols. Pergamon Press."
+description: "The Brownian coagulation kernel MOSAIC uses, for ONE pair of size bins: SUBROUTINE coagsolv of chem/module_mosaic_coag.F (WRF v4.8.0), loops 145 and 155, which is Fuchs's transition-regime form as Jacobson's coagsolv codes it. Pairs are independent, so a consumer maps this over its bin pairs rather than the component owning the pair indices."
+tags: ["aerosol", "mosaic", "model", "coagulation", "wrf-chem", "chem_opt-170"]
+---
+
+## Description
+
+The Brownian coagulation kernel MOSAIC uses, for ONE pair of size bins: SUBROUTINE coagsolv of chem/module_mosaic_coag.F (WRF v4.8.0), loops 145 and 155, which is Fuchs's transition-regime form as Jacobson's coagsolv codes it. Pairs are independent, so a consumer maps this over its bin pairs rather than the component owning the pair indices.
+
+WHAT THIS IS AND IS NOT. The kernel is the rate COEFFICIENT per particle pair. The stage's own quantity -- the rate of change of each bin's number and volume -- is a weighted sum over pairs of this coefficient times the concentrations, assembled in coagsolv's production and loss loops with the bin-splitting tables (jbinik, fink, floss). That assembly is not transcribed here and is the next piece.
+
+WHY THE KERNEL, AND NOT A DIFFERENCE OF STATES. MOSAIC applies coagulation as an in-place semi-implicit update of a real32 column state, and differencing two such states leaves only one to two significant digits for a typical species-level (EqWeFiC FORTRAN_BUGS N87: the median entry has resolution/|increment| of 0.04-0.09, and at every dumped step 90-113 of 472 number entries have an increment at or below the representable resolution). The instrumented model therefore records the rates where they form, evaluated at the INPUT distribution, which is what makes them well defined; and the kernel itself, which no assembled rate can be inverted for, is recorded directly. This component was first referenced against that recorded real32 kernel at rel 2e-5; since 2026-11-12 it is referenced against a REAL64 replay of coagsolv on the same recorded inputs (kernels/coagsolv_rate_driver, WRF fork d2b3f8b4, -fdefault-real-8), and agrees with it to 1.1e-14 relative at worst over the thirty pairs. That replay also corrects what the old tolerance was attributed to: the real32-vs-real64 kernel difference at IDENTICAL inputs is 1e-9 to 6.5e-6, so the 2e-5 residual was the single-precision ARITHMETIC of Fuchs's transition length (which subtracts two nearly equal terms), not the real32 storage of the dumped wet diameter and density.
+
+The per-bin block -- diffusivity, thermal speed and the Fuchs delta -- is factored into mosaic_coagulation_templates.esm and applied to both partners, because coagsolv evaluates it once per bin and then pairs the results.
+
+## Reference
+
+- Fuchs, N. A. (1964). The Mechanics of Aerosols. Pergamon Press.
+- Jacobson, M. Z. (2005). Fundamentals of Atmospheric Modeling, 2nd ed., Cambridge University Press.
+- Zaveri, R. A., Easter, R. C., Fast, J. D. and Peters, L. K. (2008). Model for Simulating Aerosol Interactions and Chemistry (MOSAIC). J. Geophys. Res. 113, D13204.
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `tk` | `K` | `306.7` | Cell temperature, coagsolv's `tkelvin`. |
+| `patm` | `atm` | `0.965` | Cell pressure in atmospheres, coagsolv's `patm`. |
+| `dp_wet_i` | `cm` | `7.71e-06` | Wet diameter of the first bin, `dpwet_inp(i)`. |
+| `dens_wet_i` | `g/cm^3` | `1.8` | Wet density of the first bin, `denswet_inp(i)`. |
+| `dp_wet_j` | `cm` | `5.3e-05` | Wet diameter of the second bin, `dpwet_inp(j)`. |
+| `dens_wet_j` | `g/cm^3` | `1.8` | Wet density of the second bin, `denswet_inp(j)`. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `amu` | `g/(cm*s)` |  | Dynamic viscosity of air, coagsolv's Sutherland form. |
+| `rho_air` | `g/cm^3` |  | Air mass density from the ideal gas law with MOSAIC's own gas constant in atm units. |
+| `viscosk` | `cm^2/s` |  | Kinematic viscosity of air. |
+| `vthermg` | `cm/s` |  | Mean thermal speed of an air molecule. |
+| `gmfp` | `cm` |  | Mean free path of an air molecule, 2*viscosk/vthermg. |
+| `radwet_i` | `cm` |  | Wet radius of the first bin. |
+| `radwet_j` | `cm` |  | Wet radius of the second bin. |
+| `volwet_i` | `cm^3` |  | Wet volume of one particle in the first bin. |
+| `volwet_j` | `cm^3` |  | Wet volume of one particle in the second bin. |
+| `difcof_i` | `cm^2/s` |  | Brownian diffusivity of a first-bin particle. |
+| `difcof_j` | `cm^2/s` |  | Brownian diffusivity of a second-bin particle. |
+| `vthermp_i` | `cm/s` |  | Thermal speed of a first-bin particle. |
+| `vthermp_j` | `cm/s` |  | Thermal speed of a second-bin particle. |
+| `sumdp_i` | `cm^2` |  | Fuchs delta squared for the first bin. |
+| `sumdp_j` | `cm^2` |  | Fuchs delta squared for the second bin. |
+| `rsuma` | `cm` |  | Sum of the two wet radii. |
+| `sumdc` | `cm^2/s` |  | Sum of the two diffusivities. |
+| `ggr` | `cm/s` |  | Root-sum-square of the two particle thermal speeds. |
+| `deltr` | `cm` |  | Root-sum-square of the two Fuchs deltas. |
+| `term1` | `1` |  | The continuum-limit factor rsuma/(rsuma + deltr). |
+| `term2` | `1` |  | The free-molecular factor 4*sumdc/(rsuma*ggr). |
+| `cbr` | `cm^3/s` |  | Brownian coagulation kernel for this pair of bins, 4*pi*rsuma*sumdc/(term1 + term2) -- the rate coefficient per particle pair. |
+
+## Observed expressions
+
+$$
+amu = \frac{par.consmu}{tk + par.sutherland_{offset}} \cdot \frac{tk}{par.sutherland_{tref}}^{1.5}
+$$
+_Dynamic viscosity of air, coagsolv's Sutherland form._
+
+$$
+rho_{air} = \frac{patm \cdot par.mw_{air} \cdot par.l_{per\,cm3}}{par.rgas_{atm} \cdot tk}
+$$
+_Air mass density from the ideal gas law with MOSAIC's own gas constant in atm units._
+
+$$
+viscosk = \frac{amu}{rho_{air}}
+$$
+_Kinematic viscosity of air._
+
+$$
+vthermg = \frac{8.0 \cdot par.boltg \cdot tk \cdot par.avogadro}{par.pi \cdot par.mw_{air}}^{0.5}
+$$
+_Mean thermal speed of an air molecule._
+
+$$
+gmfp = \frac{2.0 \cdot viscosk}{vthermg}
+$$
+_Mean free path of an air molecule, 2*viscosk/vthermg._
+
+$$
+radwet_{i} = dp_{wet\,i} \cdot 0.5
+$$
+_Wet radius of the first bin._
+
+$$
+radwet_{j} = dp_{wet\,j} \cdot 0.5
+$$
+_Wet radius of the second bin._
+
+$$
+volwet_{i} = \frac{4.0 \cdot par.pi}{3.0} \cdot radwet_{i} \cdot radwet_{i} \cdot radwet_{i}
+$$
+_Wet volume of one particle in the first bin._
+
+$$
+volwet_{j} = \frac{4.0 \cdot par.pi}{3.0} \cdot radwet_{j} \cdot radwet_{j} \cdot radwet_{j}
+$$
+_Wet volume of one particle in the second bin._
+
+$$
+difcof_{i} = \mathrm{particle_diffusivity}\left(radwet=radwet_{i}, gmfp=gmfp, tk=tk, amu=amu, boltg=par.boltg, onepi=par.pi\right)
+$$
+_Brownian diffusivity of a first-bin particle._
+
+$$
+difcof_{j} = \mathrm{particle_diffusivity}\left(radwet=radwet_{j}, gmfp=gmfp, tk=tk, amu=amu, boltg=par.boltg, onepi=par.pi\right)
+$$
+_Brownian diffusivity of a second-bin particle._
+
+$$
+vthermp_{i} = \mathrm{particle_thermal_speed}\left(radwet=radwet_{i}, denav=dens_{wet\,i}, volwet=volwet_{i}, tk=tk, boltg=par.boltg, onepi=par.pi\right)
+$$
+_Thermal speed of a first-bin particle._
+
+$$
+vthermp_{j} = \mathrm{particle_thermal_speed}\left(radwet=radwet_{j}, denav=dens_{wet\,j}, volwet=volwet_{j}, tk=tk, boltg=par.boltg, onepi=par.pi\right)
+$$
+_Thermal speed of a second-bin particle._
+
+$$
+sumdp_{i} = \mathrm{particle_delta}\left(radwet=radwet_{i}, difcof=difcof_{i}, vthermp=vthermp_{i}, onepi=par.pi\right)
+$$
+_Fuchs delta squared for the first bin._
+
+$$
+sumdp_{j} = \mathrm{particle_delta}\left(radwet=radwet_{j}, difcof=difcof_{j}, vthermp=vthermp_{j}, onepi=par.pi\right)
+$$
+_Fuchs delta squared for the second bin._
+
+$$
+rsuma = radwet_{i} + radwet_{j}
+$$
+_Sum of the two wet radii._
+
+$$
+sumdc = difcof_{i} + difcof_{j}
+$$
+_Sum of the two diffusivities._
+
+$$
+ggr = \left(vthermp_{i} \cdot vthermp_{i} + vthermp_{j} \cdot vthermp_{j}\right)^{0.5}
+$$
+_Root-sum-square of the two particle thermal speeds._
+
+$$
+deltr = \left(sumdp_{i} + sumdp_{j}\right)^{0.5}
+$$
+_Root-sum-square of the two Fuchs deltas._
+
+$$
+term1 = \frac{rsuma}{rsuma + deltr}
+$$
+_The continuum-limit factor rsuma/(rsuma + deltr)._
+
+$$
+term2 = \frac{4.0 \cdot sumdc}{rsuma \cdot ggr}
+$$
+_The free-molecular factor 4*sumdc/(rsuma*ggr)._
+
+$$
+cbr = \frac{4.0 \cdot par.pi \cdot rsuma \cdot sumdc}{term1 + term2}
+$$
+_Brownian coagulation kernel for this pair of bins, 4*pi*rsuma*sumdc/(term1 + term2) -- the rate coefficient per particle pair._
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "expression_template_imports": [
+    {
+      "ref": "./mosaic_coagulation_templates.esm"
+    }
+  ],
+  "subsystems": {
+    "par": {
+      "ref": "./mosaic_coagulation_parameters.esm"
+    }
+  },
+  "variables": {
+    "tk": {
+      "type": "parameter",
+      "units": "K",
+      "default": 306.7,
+      "description": "Cell temperature, coagsolv's `tkelvin`."
+    },
+    "patm": {
+      "type": "parameter",
+      "units": "atm",
+      "default": 0.965,
+      "description": "Cell pressure in atmospheres, coagsolv's `patm`."
+    },
+    "dp_wet_i": {
+      "type": "parameter",
+      "units": "cm",
+      "default": 7.71e-06,
+      "description": "Wet diameter of the first bin, `dpwet_inp(i)`."
+    },
+    "dens_wet_i": {
+      "type": "parameter",
+      "units": "g/cm^3",
+      "default": 1.8,
+      "description": "Wet density of the first bin, `denswet_inp(i)`."
+    },
+    "dp_wet_j": {
+      "type": "parameter",
+      "units": "cm",
+      "default": 5.3e-05,
+      "description": "Wet diameter of the second bin, `dpwet_inp(j)`."
+    },
+    "dens_wet_j": {
+      "type": "parameter",
+      "units": "g/cm^3",
+      "default": 1.8,
+      "description": "Wet density of the second bin, `denswet_inp(j)`."
+    },
+    "amu": {
+      "type": "unknown",
+      "units": "g/(cm*s)",
+      "description": "Dynamic viscosity of air, coagsolv's Sutherland form."
+    },
+    "rho_air": {
+      "type": "unknown",
+      "units": "g/cm^3",
+      "description": "Air mass density from the ideal gas law with MOSAIC's own gas constant in atm units."
+    },
+    "viscosk": {
+      "type": "unknown",
+      "units": "cm^2/s",
+      "description": "Kinematic viscosity of air."
+    },
+    "vthermg": {
+      "type": "unknown",
+      "units": "cm/s",
+      "description": "Mean thermal speed of an air molecule."
+    },
+    "gmfp": {
+      "type": "unknown",
+      "units": "cm",
+      "description": "Mean free path of an air molecule, 2*viscosk/vthermg."
+    },
+    "radwet_i": {
+      "type": "unknown",
+      "units": "cm",
+      "description": "Wet radius of the first bin."
+    },
+    "radwet_j": {
+      "type": "unknown",
+      "units": "cm",
+      "description": "Wet radius of the second bin."
+    },
+    "volwet_i": {
+      "type": "unknown",
+      "units": "cm^3",
+      "description": "Wet volume of one particle in the first bin."
+    },
+    "volwet_j": {
+      "type": "unknown",
+      "units": "cm^3",
+      "description": "Wet volume of one particle in the second bin."
+    },
+    "difcof_i": {
+      "type": "unknown",
+      "units": "cm^2/s",
+      "description": "Brownian diffusivity of a first-bin particle."
+    },
+    "difcof_j": {
+      "type": "unknown",
+      "units": "cm^2/s",
+      "description": "Brownian diffusivity of a second-bin particle."
+    },
+    "vthermp_i": {
+      "type": "unknown",
+      "units": "cm/s",
+      "description": "Thermal speed of a first-bin particle."
+    },
+    "vthermp_j": {
+      "type": "unknown",
+      "units": "cm/s",
+      "description": "Thermal speed of a second-bin particle."
+    },
+    "sumdp_i": {
+      "type": "unknown",
+      "units": "cm^2",
+      "description": "Fuchs delta squared for the first bin."
+    },
+    "sumdp_j": {
+      "type": "unknown",
+      "units": "cm^2",
+      "description": "Fuchs delta squared for the second bin."
+    },
+    "rsuma": {
+      "type": "unknown",
+      "units": "cm",
+      "description": "Sum of the two wet radii."
+    },
+    "sumdc": {
+      "type": "unknown",
+      "units": "cm^2/s",
+      "description": "Sum of the two diffusivities."
+    },
+    "ggr": {
+      "type": "unknown",
+      "units": "cm/s",
+      "description": "Root-sum-square of the two particle thermal speeds."
+    },
+    "deltr": {
+      "type": "unknown",
+      "units": "cm",
+      "description": "Root-sum-square of the two Fuchs deltas."
+    },
+    "term1": {
+      "type": "unknown",
+      "units": "1",
+      "description": "The continuum-limit factor rsuma/(rsuma + deltr)."
+    },
+    "term2": {
+      "type": "unknown",
+      "units": "1",
+      "description": "The free-molecular factor 4*sumdc/(rsuma*ggr)."
+    },
+    "cbr": {
+      "type": "unknown",
+      "units": "cm^3/s",
+      "description": "Brownian coagulation kernel for this pair of bins, 4*pi*rsuma*sumdc/(term1 + term2) -- the rate coefficient per particle pair."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "amu",
+      "rhs": {
+        "op": "*",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              "par.consmu",
+              {
+                "op": "+",
+                "args": [
+                  "tk",
+                  "par.sutherland_offset"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "tk",
+                  "par.sutherland_tref"
+                ]
+              },
+              1.5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rho_air",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "patm",
+              "par.mw_air",
+              "par.l_per_cm3"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "par.rgas_atm",
+              "tk"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "viscosk",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "amu",
+          "rho_air"
+        ]
+      }
+    },
+    {
+      "lhs": "vthermg",
+      "rhs": {
+        "op": "^",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  8.0,
+                  "par.boltg",
+                  "tk",
+                  "par.avogadro"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "par.pi",
+                  "par.mw_air"
+                ]
+              }
+            ]
+          },
+          0.5
+        ]
+      }
+    },
+    {
+      "lhs": "gmfp",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              2.0,
+              "viscosk"
+            ]
+          },
+          "vthermg"
+        ]
+      }
+    },
+    {
+      "lhs": "radwet_i",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "dp_wet_i",
+          0.5
+        ]
+      }
+    },
+    {
+      "lhs": "radwet_j",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "dp_wet_j",
+          0.5
+        ]
+      }
+    },
+    {
+      "lhs": "volwet_i",
+      "rhs": {
+        "op": "*",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  4.0,
+                  "par.pi"
+                ]
+              },
+              3.0
+            ]
+          },
+          "radwet_i",
+          "radwet_i",
+          "radwet_i"
+        ]
+      }
+    },
+    {
+      "lhs": "volwet_j",
+      "rhs": {
+        "op": "*",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  4.0,
+                  "par.pi"
+                ]
+              },
+              3.0
+            ]
+          },
+          "radwet_j",
+          "radwet_j",
+          "radwet_j"
+        ]
+      }
+    },
+    {
+      "lhs": "difcof_i",
+      "rhs": {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "particle_diffusivity",
+        "bindings": {
+          "radwet": "radwet_i",
+          "gmfp": "gmfp",
+          "tk": "tk",
+          "amu": "amu",
+          "boltg": "par.boltg",
+          "onepi": "par.pi"
+        }
+      }
+    },
+    {
+      "lhs": "vthermp_i",
+      "rhs": {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "particle_thermal_speed",
+        "bindings": {
+          "radwet": "radwet_i",
+          "denav": "dens_wet_i",
+          "volwet": "volwet_i",
+          "tk": "tk",
+          "boltg": "par.boltg",
+          "onepi": "par.pi"
+        }
+      }
+    },
+    {
+      "lhs": "sumdp_i",
+      "rhs": {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "particle_delta",
+        "bindings": {
+          "radwet": "radwet_i",
+          "difcof": "difcof_i",
+          "vthermp": "vthermp_i",
+          "onepi": "par.pi"
+        }
+      }
+    },
+    {
+      "lhs": "difcof_j",
+      "rhs": {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "particle_diffusivity",
+        "bindings": {
+          "radwet": "radwet_j",
+          "gmfp": "gmfp",
+          "tk": "tk",
+          "amu": "amu",
+          "boltg": "par.boltg",
+          "onepi": "par.pi"
+        }
+      }
+    },
+    {
+      "lhs": "vthermp_j",
+      "rhs": {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "particle_thermal_speed",
+        "bindings": {
+          "radwet": "radwet_j",
+          "denav": "dens_wet_j",
+          "volwet": "volwet_j",
+          "tk": "tk",
+          "boltg": "par.boltg",
+          "onepi": "par.pi"
+        }
+      }
+    },
+    {
+      "lhs": "sumdp_j",
+      "rhs": {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "particle_delta",
+        "bindings": {
+          "radwet": "radwet_j",
+          "difcof": "difcof_j",
+          "vthermp": "vthermp_j",
+          "onepi": "par.pi"
+        }
+      }
+    },
+    {
+      "lhs": "rsuma",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "radwet_i",
+          "radwet_j"
+        ]
+      }
+    },
+    {
+      "lhs": "sumdc",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "difcof_i",
+          "difcof_j"
+        ]
+      }
+    },
+    {
+      "lhs": "ggr",
+      "rhs": {
+        "op": "^",
+        "args": [
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "vthermp_i",
+                  "vthermp_i"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "vthermp_j",
+                  "vthermp_j"
+                ]
+              }
+            ]
+          },
+          0.5
+        ]
+      }
+    },
+    {
+      "lhs": "deltr",
+      "rhs": {
+        "op": "^",
+        "args": [
+          {
+            "op": "+",
+            "args": [
+              "sumdp_i",
+              "sumdp_j"
+            ]
+          },
+          0.5
+        ]
+      }
+    },
+    {
+      "lhs": "term1",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "rsuma",
+          {
+            "op": "+",
+            "args": [
+              "rsuma",
+              "deltr"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "term2",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              4.0,
+              "sumdc"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "rsuma",
+              "ggr"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "cbr",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              4.0,
+              "par.pi",
+              "rsuma",
+              "sumdc"
+            ]
+          },
+          {
+            "op": "+",
+            "args": [
+              "term1",
+              "term2"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "chem170_step1_lev1_bins11",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 1, level 1, for the bin pair (1, 1) of 8. Regime: T = 306.17 K, p = 0.9835 atm, wet diameters 6.153e-06 and 6.153e-06 cm, wet densities 1.341 and 1.341 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_1.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 1.8647037248e-09, differs from the reference by 2.8e-07 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 306.1650695800781,
+        "patm": 0.9835473299026489,
+        "dp_wet_i": 6.153463800728787e-06,
+        "dens_wet_i": 1.3409100770950317,
+        "dp_wet_j": 6.153463800728787e-06,
+        "dens_wet_j": 1.3409100770950317
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 1.864704252326478e-09
+        }
+      ]
+    },
+    {
+      "id": "chem170_step1_lev1_bins14",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 1, level 1, for the bin pair (1, 4) of 8. Regime: T = 306.17 K, p = 0.9835 atm, wet diameters 6.153e-06 and 4.915e-05 cm, wet densities 1.341 and 1.342 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_1.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 5.8895404109e-09, differs from the reference by 4.3e-08 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 306.1650695800781,
+        "patm": 0.9835473299026489,
+        "dp_wet_i": 6.153463800728787e-06,
+        "dens_wet_i": 1.3409100770950317,
+        "dp_wet_j": 4.915197132504545e-05,
+        "dens_wet_j": 1.3416768312454224
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 5.889540664812672e-09
+        }
+      ]
+    },
+    {
+      "id": "chem170_step1_lev1_bins18",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 1, level 1, for the bin pair (1, 8) of 8. Regime: T = 306.17 K, p = 0.9835 atm, wet diameters 6.153e-06 and 0.0007065 cm, wet densities 1.341 and 2.460 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_1.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 7.7530508236e-08, differs from the reference by 2.7e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 306.1650695800781,
+        "patm": 0.9835473299026489,
+        "dp_wet_i": 6.153463800728787e-06,
+        "dens_wet_i": 1.3409100770950317,
+        "dp_wet_j": 0.0007064583478495479,
+        "dens_wet_j": 2.4601552486419678
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 7.753029966669114e-08
+        }
+      ]
+    },
+    {
+      "id": "chem170_step1_lev1_bins44",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 1, level 1, for the bin pair (4, 4) of 8. Regime: T = 306.17 K, p = 0.9835 atm, wet diameters 4.915e-05 and 4.915e-05 cm, wet densities 1.342 and 1.342 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_1.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 7.8009593230e-10, differs from the reference by 9.0e-08 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 306.1650695800781,
+        "patm": 0.9835473299026489,
+        "dp_wet_i": 4.915197132504545e-05,
+        "dens_wet_i": 1.3416768312454224,
+        "dp_wet_j": 4.915197132504545e-05,
+        "dens_wet_j": 1.3416768312454224
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 7.800958618922487e-10
+        }
+      ]
+    },
+    {
+      "id": "chem170_step1_lev1_bins48",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 1, level 1, for the bin pair (4, 8) of 8. Regime: T = 306.17 K, p = 0.9835 atm, wet diameters 4.915e-05 and 0.0007065 cm, wet densities 1.342 and 2.460 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_1.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 3.3035938429e-09, differs from the reference by 2.7e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 306.1650695800781,
+        "patm": 0.9835473299026489,
+        "dp_wet_i": 4.915197132504545e-05,
+        "dens_wet_i": 1.3416768312454224,
+        "dp_wet_j": 0.0007064583478495479,
+        "dens_wet_j": 2.4601552486419678
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 3.303584865957749e-09
+        }
+      ]
+    },
+    {
+      "id": "chem170_step1_lev1_bins88",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 1, level 1, for the bin pair (8, 8) of 8. Regime: T = 306.17 K, p = 0.9835 atm, wet diameters 0.0007065 and 0.0007065 cm, wet densities 2.460 and 2.460 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_1.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 6.0675664493e-10, differs from the reference by 1.8e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 306.1650695800781,
+        "patm": 0.9835473299026489,
+        "dp_wet_i": 0.0007064583478495479,
+        "dens_wet_i": 2.4601552486419678,
+        "dp_wet_j": 0.0007064583478495479,
+        "dens_wet_j": 2.4601552486419678
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 6.06755550938932e-10
+        }
+      ]
+    },
+    {
+      "id": "chem170_step1_lev25_bins11",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 1, level 25, for the bin pair (1, 1) of 8. Regime: T = 286.62 K, p = 0.7519 atm, wet diameters 5.57e-06 and 5.57e-06 cm, wet densities 1.279 and 1.279 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_1.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 2.1210933010e-09, differs from the reference by 5.5e-08 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 286.6180725097656,
+        "patm": 0.7518726587295532,
+        "dp_wet_i": 5.5703544603602495e-06,
+        "dens_wet_i": 1.2791635990142822,
+        "dp_wet_j": 5.5703544603602495e-06,
+        "dens_wet_j": 1.2791635990142822
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 2.1210931841307517e-09
+        }
+      ]
+    },
+    {
+      "id": "chem170_step1_lev25_bins14",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 1, level 25, for the bin pair (1, 4) of 8. Regime: T = 286.62 K, p = 0.7519 atm, wet diameters 5.57e-06 and 5.452e-05 cm, wet densities 1.279 and 1.250 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_1.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 8.7318445807e-09, differs from the reference by 2.4e-07 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 286.6180725097656,
+        "patm": 0.7518726587295532,
+        "dp_wet_i": 5.5703544603602495e-06,
+        "dens_wet_i": 1.2791635990142822,
+        "dp_wet_j": 5.4517004173249006e-05,
+        "dens_wet_j": 1.2504013776779175
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 8.73184669243028e-09
+        }
+      ]
+    },
+    {
+      "id": "chem170_step1_lev25_bins18",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 1, level 25, for the bin pair (1, 8) of 8. Regime: T = 286.62 K, p = 0.7519 atm, wet diameters 5.57e-06 and 0.0007068 cm, wet densities 1.279 and 2.459 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_1.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 1.0754961011e-07, differs from the reference by 6.5e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 286.6180725097656,
+        "patm": 0.7518726587295532,
+        "dp_wet_i": 5.5703544603602495e-06,
+        "dens_wet_i": 1.2791635990142822,
+        "dp_wet_j": 0.0007067573606036603,
+        "dens_wet_j": 2.459470510482788
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 1.075503105584588e-07
+        }
+      ]
+    },
+    {
+      "id": "chem170_step1_lev25_bins44",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 1, level 25, for the bin pair (4, 4) of 8. Regime: T = 286.62 K, p = 0.7519 atm, wet diameters 5.452e-05 and 5.452e-05 cm, wet densities 1.250 and 1.250 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_1.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 7.8834788697e-10, differs from the reference by 3.6e-07 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 286.6180725097656,
+        "patm": 0.7518726587295532,
+        "dp_wet_i": 5.4517004173249006e-05,
+        "dens_wet_i": 1.2504013776779175,
+        "dp_wet_j": 5.4517004173249006e-05,
+        "dens_wet_j": 1.2504013776779175
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 7.883481745856243e-10
+        }
+      ]
+    },
+    {
+      "id": "chem170_step1_lev25_bins48",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 1, level 25, for the bin pair (4, 8) of 8. Regime: T = 286.62 K, p = 0.7519 atm, wet diameters 5.452e-05 and 0.0007068 cm, wet densities 1.250 and 2.459 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_1.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 3.0394227135e-09, differs from the reference by 6.5e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 286.6180725097656,
+        "patm": 0.7518726587295532,
+        "dp_wet_i": 5.4517004173249006e-05,
+        "dens_wet_i": 1.2504013776779175,
+        "dp_wet_j": 0.0007067573606036603,
+        "dens_wet_j": 2.459470510482788
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 3.039442383662764e-09
+        }
+      ]
+    },
+    {
+      "id": "chem170_step1_lev25_bins88",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 1, level 25, for the bin pair (8, 8) of 8. Regime: T = 286.62 K, p = 0.7519 atm, wet diameters 0.0007068 and 0.0007068 cm, wet densities 2.459 and 2.459 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_1.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 6.0109273115e-10, differs from the reference by 5.2e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 286.6180725097656,
+        "patm": 0.7518726587295532,
+        "dp_wet_i": 0.0007067573606036603,
+        "dens_wet_i": 2.459470510482788,
+        "dp_wet_j": 0.0007067573606036603,
+        "dens_wet_j": 2.459470510482788
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 6.010958287630413e-10
+        }
+      ]
+    },
+    {
+      "id": "chem170_step601_lev1_bins11",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 601, level 1, for the bin pair (1, 1) of 8. Regime: T = 306.70 K, p = 0.9831 atm, wet diameters 7.713e-06 and 7.713e-06 cm, wet densities 1.294 and 1.294 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_601.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 1.6946684056e-09, differs from the reference by 1.2e-07 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 306.6976318359375,
+        "patm": 0.9831036925315857,
+        "dp_wet_i": 7.712911610724404e-06,
+        "dens_wet_i": 1.2944204807281494,
+        "dp_wet_j": 7.712911610724404e-06,
+        "dens_wet_j": 1.2944204807281494
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 1.6946686054904935e-09
+        }
+      ]
+    },
+    {
+      "id": "chem170_step601_lev1_bins14",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 601, level 1, for the bin pair (1, 4) of 8. Regime: T = 306.70 K, p = 0.9831 atm, wet diameters 7.713e-06 and 5.305e-05 cm, wet densities 1.294 and 1.315 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_601.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 4.3978074515e-09, differs from the reference by 1.1e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 306.6976318359375,
+        "patm": 0.9831036925315857,
+        "dp_wet_i": 7.712911610724404e-06,
+        "dens_wet_i": 1.2944204807281494,
+        "dp_wet_j": 5.304900696501136e-05,
+        "dens_wet_j": 1.3154345750808716
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 4.397812283434505e-09
+        }
+      ]
+    },
+    {
+      "id": "chem170_step601_lev1_bins18",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 601, level 1, for the bin pair (1, 8) of 8. Regime: T = 306.70 K, p = 0.9831 atm, wet diameters 7.713e-06 and 0.0007076 cm, wet densities 1.294 and 2.455 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_601.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 5.1804754264e-08, differs from the reference by 3.3e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 306.6976318359375,
+        "patm": 0.9831036925315857,
+        "dp_wet_i": 7.712911610724404e-06,
+        "dens_wet_i": 1.2944204807281494,
+        "dp_wet_j": 0.0007075820467434824,
+        "dens_wet_j": 2.455138921737671
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 5.180458108700102e-08
+        }
+      ]
+    },
+    {
+      "id": "chem170_step601_lev1_bins44",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 601, level 1, for the bin pair (4, 4) of 8. Regime: T = 306.70 K, p = 0.9831 atm, wet diameters 5.305e-05 and 5.305e-05 cm, wet densities 1.315 and 1.315 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_601.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 7.6755235501e-10, differs from the reference by 1.4e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 306.6976318359375,
+        "patm": 0.9831036925315857,
+        "dp_wet_i": 5.304900696501136e-05,
+        "dens_wet_i": 1.3154345750808716,
+        "dp_wet_j": 5.304900696501136e-05,
+        "dens_wet_j": 1.3154345750808716
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 7.675534287118066e-10
+        }
+      ]
+    },
+    {
+      "id": "chem170_step601_lev1_bins48",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 601, level 1, for the bin pair (4, 8) of 8. Regime: T = 306.70 K, p = 0.9831 atm, wet diameters 5.305e-05 and 0.0007076 cm, wet densities 1.315 and 2.455 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_601.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 3.0375757465e-09, differs from the reference by 3.2e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 306.6976318359375,
+        "patm": 0.9831036925315857,
+        "dp_wet_i": 5.304900696501136e-05,
+        "dens_wet_i": 1.3154345750808716,
+        "dp_wet_j": 0.0007075820467434824,
+        "dens_wet_j": 2.455138921737671
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 3.037565984045681e-09
+        }
+      ]
+    },
+    {
+      "id": "chem170_step601_lev1_bins88",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 601, level 1, for the bin pair (8, 8) of 8. Regime: T = 306.70 K, p = 0.9831 atm, wet diameters 0.0007076 and 0.0007076 cm, wet densities 2.455 and 2.455 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_601.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 6.0702037841e-10, differs from the reference by 2.4e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 306.6976318359375,
+        "patm": 0.9831036925315857,
+        "dp_wet_i": 0.0007075820467434824,
+        "dens_wet_i": 2.455138921737671,
+        "dp_wet_j": 0.0007075820467434824,
+        "dens_wet_j": 2.455138921737671
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 6.070189465549419e-10
+        }
+      ]
+    },
+    {
+      "id": "chem170_step601_lev45_bins11",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 601, level 45, for the bin pair (1, 1) of 8. Regime: T = 257.02 K, p = 0.4216 atm, wet diameters 5.755e-06 and 5.755e-06 cm, wet densities 1.270 and 1.270 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_601.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 2.5267785642e-09, differs from the reference by 1.8e-07 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 257.01629638671875,
+        "patm": 0.42162802815437317,
+        "dp_wet_i": 5.7553761507733725e-06,
+        "dens_wet_i": 1.2702248096466064,
+        "dp_wet_j": 5.7553761507733725e-06,
+        "dens_wet_j": 1.2702248096466064
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 2.5267790294627882e-09
+        }
+      ]
+    },
+    {
+      "id": "chem170_step601_lev45_bins14",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 601, level 45, for the bin pair (1, 4) of 8. Regime: T = 257.02 K, p = 0.4216 atm, wet diameters 5.755e-06 and 4.502e-05 cm, wet densities 1.270 and 1.447 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_601.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 9.6119681103e-09, differs from the reference by 1.2e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 257.01629638671875,
+        "patm": 0.42162802815437317,
+        "dp_wet_i": 5.7553761507733725e-06,
+        "dens_wet_i": 1.2702248096466064,
+        "dp_wet_j": 4.5017062802799046e-05,
+        "dens_wet_j": 1.4470845460891724
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 9.611980055305803e-09
+        }
+      ]
+    },
+    {
+      "id": "chem170_step601_lev45_bins18",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 601, level 45, for the bin pair (1, 8) of 8. Regime: T = 257.02 K, p = 0.4216 atm, wet diameters 5.755e-06 and 0.0007071 cm, wet densities 1.270 and 2.457 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_601.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 1.4626722589e-07, differs from the reference by 1.4e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 257.01629638671875,
+        "patm": 0.42162802815437317,
+        "dp_wet_i": 5.7553761507733725e-06,
+        "dens_wet_i": 1.2702248096466064,
+        "dp_wet_j": 0.0007071226136758924,
+        "dens_wet_j": 2.45694637298584
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 1.4626742982447182e-07
+        }
+      ]
+    },
+    {
+      "id": "chem170_step601_lev45_bins44",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 601, level 45, for the bin pair (4, 4) of 8. Regime: T = 257.02 K, p = 0.4216 atm, wet diameters 4.502e-05 and 4.502e-05 cm, wet densities 1.447 and 1.447 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_601.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 9.5600050098e-10, differs from the reference by 2.5e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 257.01629638671875,
+        "patm": 0.42162802815437317,
+        "dp_wet_i": 4.5017062802799046e-05,
+        "dens_wet_i": 1.4470845460891724,
+        "dp_wet_j": 4.5017062802799046e-05,
+        "dens_wet_j": 1.4470845460891724
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 9.560029320172367e-10
+        }
+      ]
+    },
+    {
+      "id": "chem170_step601_lev45_bins48",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 601, level 45, for the bin pair (4, 8) of 8. Regime: T = 257.02 K, p = 0.4216 atm, wet diameters 4.502e-05 and 0.0007071 cm, wet densities 1.447 and 2.457 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_601.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 4.4240224817e-09, differs from the reference by 1.7e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 257.01629638671875,
+        "patm": 0.42162802815437317,
+        "dp_wet_i": 4.5017062802799046e-05,
+        "dens_wet_i": 1.4470845460891724,
+        "dp_wet_j": 0.0007071226136758924,
+        "dens_wet_j": 2.45694637298584
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 4.424029961689512e-09
+        }
+      ]
+    },
+    {
+      "id": "chem170_step601_lev45_bins88",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 601, level 45, for the bin pair (8, 8) of 8. Regime: T = 257.02 K, p = 0.4216 atm, wet diameters 0.0007071 and 0.0007071 cm, wet densities 2.457 and 2.457 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_601.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 5.9753518800e-10, differs from the reference by 1.3e-06 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 257.01629638671875,
+        "patm": 0.42162802815437317,
+        "dp_wet_i": 0.0007071226136758924,
+        "dens_wet_i": 2.45694637298584,
+        "dp_wet_j": 0.0007071226136758924,
+        "dens_wet_j": 2.45694637298584
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 5.975359856097191e-10
+        }
+      ]
+    },
+    {
+      "id": "chem170_step2101_lev10_bins11",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 2101, level 10, for the bin pair (1, 1) of 8. Regime: T = 302.42 K, p = 0.9120 atm, wet diameters 7.763e-06 and 7.763e-06 cm, wet densities 1.304 and 1.304 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_2101.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 1.7399535146e-09, differs from the reference by 1.1e-09 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 302.4187927246094,
+        "patm": 0.9120062589645386,
+        "dp_wet_i": 7.762865607219283e-06,
+        "dens_wet_i": 1.3044655323028564,
+        "dp_wet_j": 7.762865607219283e-06,
+        "dens_wet_j": 1.3044655323028564
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 1.739953516542024e-09
+        }
+      ]
+    },
+    {
+      "id": "chem170_step2101_lev10_bins14",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 2101, level 10, for the bin pair (1, 4) of 8. Regime: T = 302.42 K, p = 0.9120 atm, wet diameters 7.763e-06 and 5.476e-05 cm, wet densities 1.304 and 1.286 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_2101.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 4.6491721584e-09, differs from the reference by 7.2e-08 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 302.4187927246094,
+        "patm": 0.9120062589645386,
+        "dp_wet_i": 7.762865607219283e-06,
+        "dens_wet_i": 1.3044655323028564,
+        "dp_wet_j": 5.4762906074756756e-05,
+        "dens_wet_j": 1.28592848777771
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 4.649171821377541e-09
+        }
+      ]
+    },
+    {
+      "id": "chem170_step2101_lev10_bins18",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 2101, level 10, for the bin pair (1, 8) of 8. Regime: T = 302.42 K, p = 0.9120 atm, wet diameters 7.763e-06 and 0.0007095 cm, wet densities 1.304 and 2.447 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_2101.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 5.3568875558e-08, differs from the reference by 6.3e-07 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 302.4187927246094,
+        "patm": 0.9120062589645386,
+        "dp_wet_i": 7.762865607219283e-06,
+        "dens_wet_i": 1.3044655323028564,
+        "dp_wet_j": 0.0007094916072674096,
+        "dens_wet_j": 2.4470252990722656
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 5.356890927874601e-08
+        }
+      ]
+    },
+    {
+      "id": "chem170_step2101_lev10_bins44",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 2101, level 10, for the bin pair (4, 4) of 8. Regime: T = 302.42 K, p = 0.9120 atm, wet diameters 5.476e-05 and 5.476e-05 cm, wet densities 1.286 and 1.286 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_2101.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 7.7075945626e-10, differs from the reference by 3.0e-07 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 302.4187927246094,
+        "patm": 0.9120062589645386,
+        "dp_wet_i": 5.4762906074756756e-05,
+        "dens_wet_i": 1.28592848777771,
+        "dp_wet_j": 5.4762906074756756e-05,
+        "dens_wet_j": 1.28592848777771
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 7.707592229158006e-10
+        }
+      ]
+    },
+    {
+      "id": "chem170_step2101_lev10_bins48",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 2101, level 10, for the bin pair (4, 8) of 8. Regime: T = 302.42 K, p = 0.9120 atm, wet diameters 5.476e-05 and 0.0007095 cm, wet densities 1.286 and 2.447 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_2101.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 2.9705515825e-09, differs from the reference by 5.6e-07 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 302.4187927246094,
+        "patm": 0.9120062589645386,
+        "dp_wet_i": 5.4762906074756756e-05,
+        "dens_wet_i": 1.28592848777771,
+        "dp_wet_j": 0.0007094916072674096,
+        "dens_wet_j": 2.4470252990722656
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 2.9705532409775465e-09
+        }
+      ]
+    },
+    {
+      "id": "chem170_step2101_lev10_bins88",
+      "description": "Reference: the em_scm_xy chem_opt = 170 column of data/eqwefic/chem170_scm (fork branch earthsciml-instrumented-chem170, B20 fixed), inputs as dumped inside coagsolv by the GNU gfortran 13.3 REAL*4 model at model step 2101, level 10, for the bin pair (8, 8) of 8. Regime: T = 302.42 K, p = 0.9120 atm, wet diameters 0.0007095 and 0.0007095 cm, wet densities 2.447 and 2.447 g/cm3. Expected value: the REAL64 replay of coagsolv on these same inputs (kernels/coagsolv_rate_driver, fork d2b3f8b4, -fdefault-real-8; chem170_scm/coag64/r64_2101.json). Tolerance rel 1e-9, the double-precision convention; measured worst 1.1e-14 over the thirty pairs. The in-model REAL*4 kernel at this pair, 6.0597465934e-10, differs from the reference by 4.9e-07 relative: single-precision arithmetic in Fuchs's transition length, which cancels two nearly equal terms.",
+      "parameter_overrides": {
+        "tk": 302.4187927246094,
+        "patm": 0.9120062589645386,
+        "dp_wet_i": 0.0007094916072674096,
+        "dens_wet_i": 2.4470252990722656,
+        "dp_wet_j": 0.0007094916072674096,
+        "dens_wet_j": 2.4470252990722656
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "cbr",
+          "time": 0.0,
+          "expected": 6.059749581494482e-10
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

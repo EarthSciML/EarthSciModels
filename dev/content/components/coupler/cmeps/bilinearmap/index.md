@@ -1,0 +1,1312 @@
+---
+title: "BilinearMap"
+slug: "bilinearmap"
+domains: ["coupler"]
+component_types: ["model"]
+subdomains: ["cmeps"]
+domain: "coupler"
+subdomain: "cmeps"
+component_type: "model"
+esm_version: "1.3.0"
+esm_path: "components/coupler/cmeps/cmeps_map.esm"
+reference: "https://github.com/ESCOMP/CESM"
+description: "The atm->ocn mapping step of the CMEPS mediator (map_atm2ocn of med_phases_post_atm_mod.F90, the sparse weight apply of med_map_field_packed, med_map_mod.F90:1187-1234) as transcribed from the M8 stage-1 dump (cmeps_map_ocn.csv / cmeps_map_atm.csv of the C_JRA_t62_inst run, fork cmeps 2673bd61). The law is dst_j = (sum_i W_ij x_i)/normOne_j over the source stencil of each destination cell, with the weights W taken AS DATA from the offline ESMF_RegridWeightGen mapping files (atm2ocn_conserve_fracarea.nc, atm2ocn_bilinear.nc - bit-identical to the online routehandle: stage1/analysis/check_cmeps_map.py replays both laws from the file weights at worst rel 0.0 over 1152 (field,step,cell) checks each) and normOne the field_normOne row sums (mapnorm='one': no source fraction factor). Both routehandles express the SAME law through the single EarthSciDiscretizations conservative_overlap_apply template imported by reference (${ESD_ROOT}/regridding/conservative_overlap.esm): ConserveMap binds the ESMF conserve weights as its A_ij data and the dumped normOne_consf as A_j; BilinearMap binds the bilinear weights and normOne_bilnr the same way. The mapnorm='lfrac' source weighting of the M9 lane's lnd->rof map is carried in the field (F_src = lfrac*x) rather than in a second template, so there is exactly one map law for every ESMF routehandle. Both models evaluate on the traced 12-cell window (the first masked cells of PET 0, gids 41583, 41584, 42123-42126, 42662-42667 - the same window as cmeps_merge.csv) with the full ESMF stencils (conserve: 3 distinct T62 source cells, <= 2 terms; bilinear: 8, exactly 4 terms), and the tests pin cmeps_map_ocn.csv cell-wise (coords over the 12 traced cells) at rel 1e-12 at the STEPS_PINNED = (1, 13, 24) steps of the 24-step window (the first, a middle and the last: the steps repeat the same map and the same stencils with smoothly drifting inputs, so three steps spanning the drift suffice): Faxa_snowl (conserve) and Sa_tbot, Sa_pbot (bilinear) - 108 assertions (the stage-1 replay is bit-exact; the engine's own summation order leaves ~1e-16 slack on these short stencils). The remaining dumped fields are configuration facts of the traced window, not law statements, and are unpinned as unfailable: Faxa_rainl/Faxa_rainc/Faxa_snowc are identically 0 on every traced row (the Gulf-of-Guinea window receives snowfall but no rain in this JRA January window), Sa_z is a constant 10 m source (the mapped constant equals itself to 2e-15), and Sa_pslv is bit-identical to Sa_pbot on every traced row (the unfailable-assertion precedent of the prep_ice round)."
+tags: ["coupler", "cmeps", "model", "map", "cesm"]
+---
+
+## Description
+
+The atm->ocn mapping step of the CMEPS mediator (map_atm2ocn of med_phases_post_atm_mod.F90, the sparse weight apply of med_map_field_packed, med_map_mod.F90:1187-1234) as transcribed from the M8 stage-1 dump (cmeps_map_ocn.csv / cmeps_map_atm.csv of the C_JRA_t62_inst run, fork cmeps 2673bd61). The law is dst_j = (sum_i W_ij x_i)/normOne_j over the source stencil of each destination cell, with the weights W taken AS DATA from the offline ESMF_RegridWeightGen mapping files (atm2ocn_conserve_fracarea.nc, atm2ocn_bilinear.nc - bit-identical to the online routehandle: stage1/analysis/check_cmeps_map.py replays both laws from the file weights at worst rel 0.0 over 1152 (field,step,cell) checks each) and normOne the field_normOne row sums (mapnorm='one': no source fraction factor). Both routehandles express the SAME law through the single EarthSciDiscretizations conservative_overlap_apply template imported by reference (${ESD_ROOT}/regridding/conservative_overlap.esm): ConserveMap binds the ESMF conserve weights as its A_ij data and the dumped normOne_consf as A_j; BilinearMap binds the bilinear weights and normOne_bilnr the same way. The mapnorm='lfrac' source weighting of the M9 lane's lnd->rof map is carried in the field (F_src = lfrac*x) rather than in a second template, so there is exactly one map law for every ESMF routehandle. Both models evaluate on the traced 12-cell window (the first masked cells of PET 0, gids 41583, 41584, 42123-42126, 42662-42667 - the same window as cmeps_merge.csv) with the full ESMF stencils (conserve: 3 distinct T62 source cells, <= 2 terms; bilinear: 8, exactly 4 terms), and the tests pin cmeps_map_ocn.csv cell-wise (coords over the 12 traced cells) at rel 1e-12 at the STEPS_PINNED = (1, 13, 24) steps of the 24-step window (the first, a middle and the last: the steps repeat the same map and the same stencils with smoothly drifting inputs, so three steps spanning the drift suffice): Faxa_snowl (conserve) and Sa_tbot, Sa_pbot (bilinear) - 108 assertions (the stage-1 replay is bit-exact; the engine's own summation order leaves ~1e-16 slack on these short stencils). The remaining dumped fields are configuration facts of the traced window, not law statements, and are unpinned as unfailable: Faxa_rainl/Faxa_rainc/Faxa_snowc are identically 0 on every traced row (the Gulf-of-Guinea window receives snowfall but no rain in this JRA January window), Sa_z is a constant 10 m source (the mapped constant equals itself to 2e-15), and Sa_pslv is bit-identical to Sa_pbot on every traced row (the unfailable-assertion precedent of the prep_ice round).
+
+## Reference
+
+- CESM (Community Earth System Model), ESCOMP/CESM: CMEPS (Coupled Mediator for Earth System Prediction) source (cesm3.0-alphabranch) - flux_atmocn/flux_atmocn_Large.F90, share/src/shr_wv_sat_mod.F90, share/src/shr_orb_mod.F90, mediator/med_phases_aofluxes_mod.F90, mediator/med_phases_ocnalb_mod.F90, mediator/med_phases_prep_ocn_mod.F90, mediator/med_phases_prep_atm_mod.F90, mediator/med_merge_mod.F90, mediator/esmFldsExchange_cesm_mod.F90 - the reference implementation these components are transcribed from.
+- EarthSciModels - the authoritative .esm corpus this component lives in.
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `w_ij` | `1` | `[[0.17604999015823405, 0.0, 0.15413662322419153, 0.0, 0.0, 0.0, 0.39562263510484674, 0.1319857219282444, 0.0, 0.0, 0.0, 0.0], [0.8141375507151465, 0.8141375507151456, 0.7127998859554446, 0.7127998859554452, 0.40431727684592705, 0.09636626416486754, 0.34617392493043997, 0.6103637511336992, 0.6103637511336995, 0.3461739249304404, 0.08252181184990082, 0.0], [0.0, 0.176049990158236, 0.0, 0.15413662322419236, 0.46207138945067566, 0.7708230948177658, 0.0, 0.0, 0.13198572192824515, 0.39562263510484585, 0.6600828511032054, 0.5607171052910225], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.18142502564182578], [0.0017446021701562951, 0.0, 0.023657969104199143, 0.0, 0.0, 0.0, 0.1377077366159756, 0.04580887040014694, 0.0, 0.0, 0.0, 0.0], [0.008067856956463138, 0.008067856956462253, 0.10940552171616469, 0.10940552171616351, 0.06235235143324939, 0.014758558997079726, 0.12049570334873774, 0.2118416565379094, 0.21184165653790837, 0.12049570334873819, 0.028603011312045686, 0.0], [0.0, 0.0017446021701561251, 0.0, 0.023657969104198994, 0.07125898227014785, 0.11805208202028689, 0.0, 0.0, 0.045808870400146966, 0.1377077366159756, 0.2287923257348481, 0.1948216007331451], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.06303626833400673]]` | the ESMF bilinear routehandle weights of the traced subdomain (atm2ocn_bilinear.nc, S column in file order; the 8 distinct source cells of gids 1960-1963, 2152-2155, exactly 4 terms per destination cell), [1] |
+| `norm_one` | `1` | `[1.0, 1.0, 1.0, 1.0, 0.9999999999999999, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]` | the field_normOne row sums of the mapbilnr routehandle (normOne_bilnr of cmeps_map_ocn.csv, = the weight-file row sums bit-for-bit; 0.9999999999999999 on the fifth traced cell, 1.0 elsewhere) |
+| `atol` | `1` | `0.0` | sliver filter of conservative_overlap_apply (w_ij > atol); 0 drops only the exact-zero weights the ESMF files do not carry (the surviving set is the full 4-term stencil) |
+| `x_tbot` | `K` | `[270.3474415178794, 271.6794880252112, 267.7630477512013, 266.86554737766625, 272.89181734331277, 272.5612868326855, 272.8299989103445, 272.8320469588794]` | Sa_tbot 2-m air temperature of the traced subdomain's source cells (cmeps_map_atm.csv; overridden per test), [K] |
+| `x_pbot` | `Pa` | `[99742.30031399216, 99755.95672581423, 99825.41650673494, 100042.88418118938, 99798.37396333361, 99784.79460626526, 99751.74317330157, 99718.72786166891]` | Sa_pbot surface pressure of the traced subdomain's source cells (cmeps_map_atm.csv; overridden per test; Sa_pslv is bit-identical to Sa_pbot on every traced row and is not pinned separately), [Pa] |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `dst_tbot` | `K` | `0.0` | the mapped Sa_tbot 2-m air temperature: dst_j = (sum_i w_ij x_i)/normOne_j of med_map_field_packed, [K] |
+| `dst_pbot` | `Pa` | `0.0` | the mapped Sa_pbot surface pressure: dst_j = (sum_i w_ij x_i)/normOne_j of med_map_field_packed, [Pa] |
+
+## Observed expressions
+
+$$
+dst_{tbot} = \mathrm{conservative_overlap_apply}\left(A_{ij}=w_{ij}, A_{j}=norm_{one}, F_{src}=x_{tbot}, atol=atol\right)
+$$
+_the mapped Sa_tbot 2-m air temperature: dst_j = (sum_i w_ij x_i)/normOne_j of med_map_field_packed, [K]_
+
+$$
+dst_{pbot} = \mathrm{conservative_overlap_apply}\left(A_{ij}=w_{ij}, A_{j}=norm_{one}, F_{src}=x_{pbot}, atol=atol\right)
+$$
+_the mapped Sa_pbot surface pressure: dst_j = (sum_i w_ij x_i)/normOne_j of med_map_field_packed, [Pa]_
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "expression_template_imports": [
+    {
+      "ref": "${ESD_ROOT}/regridding/conservative_overlap.esm",
+      "only": [
+        "conservative_overlap_apply"
+      ],
+      "bindings": {
+        "NSRC": "NSRC",
+        "NTGT": "NTGT",
+        "NVERT": "NVERT"
+      }
+    }
+  ],
+  "variables": {
+    "w_ij": {
+      "type": "parameter",
+      "units": "1",
+      "description": "the ESMF bilinear routehandle weights of the traced subdomain (atm2ocn_bilinear.nc, S column in file order; the 8 distinct source cells of gids 1960-1963, 2152-2155, exactly 4 terms per destination cell), [1]",
+      "default": [
+        [
+          0.17604999015823405,
+          0.0,
+          0.15413662322419153,
+          0.0,
+          0.0,
+          0.0,
+          0.39562263510484674,
+          0.1319857219282444,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.8141375507151465,
+          0.8141375507151456,
+          0.7127998859554446,
+          0.7127998859554452,
+          0.40431727684592705,
+          0.09636626416486754,
+          0.34617392493043997,
+          0.6103637511336992,
+          0.6103637511336995,
+          0.3461739249304404,
+          0.08252181184990082,
+          0.0
+        ],
+        [
+          0.0,
+          0.176049990158236,
+          0.0,
+          0.15413662322419236,
+          0.46207138945067566,
+          0.7708230948177658,
+          0.0,
+          0.0,
+          0.13198572192824515,
+          0.39562263510484585,
+          0.6600828511032054,
+          0.5607171052910225
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.18142502564182578
+        ],
+        [
+          0.0017446021701562951,
+          0.0,
+          0.023657969104199143,
+          0.0,
+          0.0,
+          0.0,
+          0.1377077366159756,
+          0.04580887040014694,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.008067856956463138,
+          0.008067856956462253,
+          0.10940552171616469,
+          0.10940552171616351,
+          0.06235235143324939,
+          0.014758558997079726,
+          0.12049570334873774,
+          0.2118416565379094,
+          0.21184165653790837,
+          0.12049570334873819,
+          0.028603011312045686,
+          0.0
+        ],
+        [
+          0.0,
+          0.0017446021701561251,
+          0.0,
+          0.023657969104198994,
+          0.07125898227014785,
+          0.11805208202028689,
+          0.0,
+          0.0,
+          0.045808870400146966,
+          0.1377077366159756,
+          0.2287923257348481,
+          0.1948216007331451
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.06303626833400673
+        ]
+      ],
+      "shape": [
+        "src_cells",
+        "tgt_cells"
+      ]
+    },
+    "norm_one": {
+      "type": "parameter",
+      "units": "1",
+      "description": "the field_normOne row sums of the mapbilnr routehandle (normOne_bilnr of cmeps_map_ocn.csv, = the weight-file row sums bit-for-bit; 0.9999999999999999 on the fifth traced cell, 1.0 elsewhere)",
+      "default": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.9999999999999999,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "shape": [
+        "tgt_cells"
+      ]
+    },
+    "atol": {
+      "type": "parameter",
+      "units": "1",
+      "description": "sliver filter of conservative_overlap_apply (w_ij > atol); 0 drops only the exact-zero weights the ESMF files do not carry (the surviving set is the full 4-term stencil)",
+      "default": 0.0
+    },
+    "x_tbot": {
+      "type": "parameter",
+      "units": "K",
+      "description": "Sa_tbot 2-m air temperature of the traced subdomain's source cells (cmeps_map_atm.csv; overridden per test), [K]",
+      "default": [
+        270.3474415178794,
+        271.6794880252112,
+        267.7630477512013,
+        266.86554737766625,
+        272.89181734331277,
+        272.5612868326855,
+        272.8299989103445,
+        272.8320469588794
+      ],
+      "shape": [
+        "src_cells"
+      ]
+    },
+    "dst_tbot": {
+      "type": "unknown",
+      "units": "K",
+      "description": "the mapped Sa_tbot 2-m air temperature: dst_j = (sum_i w_ij x_i)/normOne_j of med_map_field_packed, [K]",
+      "default": 0.0,
+      "shape": [
+        "tgt_cells"
+      ]
+    },
+    "x_pbot": {
+      "type": "parameter",
+      "units": "Pa",
+      "description": "Sa_pbot surface pressure of the traced subdomain's source cells (cmeps_map_atm.csv; overridden per test; Sa_pslv is bit-identical to Sa_pbot on every traced row and is not pinned separately), [Pa]",
+      "default": [
+        99742.30031399216,
+        99755.95672581423,
+        99825.41650673494,
+        100042.88418118938,
+        99798.37396333361,
+        99784.79460626526,
+        99751.74317330157,
+        99718.72786166891
+      ],
+      "shape": [
+        "src_cells"
+      ]
+    },
+    "dst_pbot": {
+      "type": "unknown",
+      "units": "Pa",
+      "description": "the mapped Sa_pbot surface pressure: dst_j = (sum_i w_ij x_i)/normOne_j of med_map_field_packed, [Pa]",
+      "default": 0.0,
+      "shape": [
+        "tgt_cells"
+      ]
+    }
+  },
+  "equations": [
+    {
+      "lhs": "dst_tbot",
+      "rhs": {
+        "op": "apply_expression_template",
+        "name": "conservative_overlap_apply",
+        "args": [],
+        "bindings": {
+          "A_ij": "w_ij",
+          "A_j": "norm_one",
+          "F_src": "x_tbot",
+          "atol": "atol"
+        }
+      }
+    },
+    {
+      "lhs": "dst_pbot",
+      "rhs": {
+        "op": "apply_expression_template",
+        "name": "conservative_overlap_apply",
+        "args": [],
+        "bindings": {
+          "A_ij": "w_ij",
+          "A_j": "norm_one",
+          "F_src": "x_pbot",
+          "atol": "atol"
+        }
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "step1_sa_tbot",
+      "description": "bilinear atm->ocn map of Sa_tbot at coupling step 1: dst_t = (sum_i w_ij x_i)/normOne_t replayed from the offline ESMF weights (cmeps_map_ocn.csv / cmeps_map_atm.csv / atm2ocn_bilinear.nc) on the 12 traced cells, pinned cell-wise at rel 1e-12",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "x_tbot": [
+          270.3474415178794,
+          271.6794880252112,
+          267.7630477512013,
+          266.86554737766625,
+          272.89181734331277,
+          272.5612868326855,
+          272.8299989103445,
+          272.8320469588794
+        ]
+      },
+      "assertions": [
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 1
+          },
+          "expected": 271.4542105097075,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 2
+          },
+          "expected": 270.9991201639465,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 3
+          },
+          "expected": 271.59932578272566,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 4
+          },
+          "expected": 271.199513555871,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 5
+          },
+          "expected": 270.0067794900013,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 6
+          },
+          "expected": 268.8094396976306,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 7
+          },
+          "expected": 271.4257003698461,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 8
+          },
+          "expected": 271.7460140620227,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 9
+          },
+          "expected": 271.4020791523967,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 10
+          },
+          "expected": 270.3947428212391,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 11
+          },
+          "expected": 269.3827631254254,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 12
+          },
+          "expected": 268.9069010528202,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "step1_sa_pbot",
+      "description": "bilinear atm->ocn map of Sa_pbot at coupling step 1: dst_t = (sum_i w_ij x_i)/normOne_t replayed from the offline ESMF weights (cmeps_map_ocn.csv / cmeps_map_atm.csv / atm2ocn_bilinear.nc) on the 12 traced cells, pinned cell-wise at rel 1e-12",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "x_pbot": [
+          99742.30031399216,
+          99755.95672581423,
+          99825.41650673494,
+          100042.88418118938,
+          99798.37396333361,
+          99784.79460626526,
+          99751.74317330157,
+          99718.72786166891
+        ]
+      },
+      "assertions": [
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 1
+          },
+          "expected": 99753.85917574639,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 2
+          },
+          "expected": 99768.41042848327,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 3
+          },
+          "expected": 99758.01030166127,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 4
+          },
+          "expected": 99769.71836115603,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 5
+          },
+          "expected": 99789.5499594879,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 6
+          },
+          "expected": 99809.42611602205,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 7
+          },
+          "expected": 99759.86996264344,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 8
+          },
+          "expected": 99762.206424543,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 9
+          },
+          "expected": 99771.04047142885,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 10
+          },
+          "expected": 99786.3311892843,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 11
+          },
+          "expected": 99801.66675778315,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 12
+          },
+          "expected": 99843.79217433969,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "step13_sa_tbot",
+      "description": "bilinear atm->ocn map of Sa_tbot at coupling step 13: dst_t = (sum_i w_ij x_i)/normOne_t replayed from the offline ESMF weights (cmeps_map_ocn.csv / cmeps_map_atm.csv / atm2ocn_bilinear.nc) on the 12 traced cells, pinned cell-wise at rel 1e-12",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "x_tbot": [
+          271.28673502152475,
+          270.8761593636264,
+          269.23691071756764,
+          266.8885050886485,
+          273.76371282341825,
+          273.5529847407955,
+          273.2234817087041,
+          273.0312953813906
+        ]
+      },
+      "assertions": [
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 1
+          },
+          "expected": 270.9750750804315,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 2
+          },
+          "expected": 270.61326104351855,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 3
+          },
+          "expected": 271.30061723658366,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 4
+          },
+          "expected": 270.97188346914777,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 5
+          },
+          "expected": 270.4528836220998,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 6
+          },
+          "expected": 269.9292010243585,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 7
+          },
+          "expected": 271.7587767951834,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 8
+          },
+          "expected": 271.6296881726156,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 9
+          },
+          "expected": 271.33439325491173,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 10
+          },
+          "expected": 270.8734258984931,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 11
+          },
+          "expected": 270.4077340487921,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 12
+          },
+          "expected": 269.8267051578843,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "step13_sa_pbot",
+      "description": "bilinear atm->ocn map of Sa_pbot at coupling step 13: dst_t = (sum_i w_ij x_i)/normOne_t replayed from the offline ESMF weights (cmeps_map_ocn.csv / cmeps_map_atm.csv / atm2ocn_bilinear.nc) on the 12 traced cells, pinned cell-wise at rel 1e-12",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "x_pbot": [
+          99808.88190093276,
+          99810.35249806411,
+          99840.53303272135,
+          99945.76225927874,
+          99836.68985468269,
+          99824.34071028838,
+          99816.23649383326,
+          99798.27431891931
+        ]
+      },
+      "assertions": [
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 1
+          },
+          "expected": 99810.25240255841,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 2
+          },
+          "expected": 99815.78890102055,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 3
+          },
+          "expected": 99812.27930121361,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 4
+          },
+          "expected": 99816.67401480967,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 5
+          },
+          "expected": 99825.58954512229,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 6
+          },
+          "expected": 99834.51741499836,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 7
+          },
+          "expected": 99815.0830737908,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 8
+          },
+          "expected": 99814.32817084566,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 9
+          },
+          "expected": 99817.56872296824,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 10
+          },
+          "expected": 99824.78839192427,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 11
+          },
+          "expected": 99832.0204694976,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 12
+          },
+          "expected": 99852.22692562667,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "step24_sa_tbot",
+      "description": "bilinear atm->ocn map of Sa_tbot at coupling step 24: dst_t = (sum_i w_ij x_i)/normOne_t replayed from the offline ESMF weights (cmeps_map_ocn.csv / cmeps_map_atm.csv / atm2ocn_bilinear.nc) on the 12 traced cells, pinned cell-wise at rel 1e-12",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "x_tbot": [
+          272.0637116550117,
+          270.2721592909708,
+          267.78091225149063,
+          266.9089805648413,
+          273.25771647133536,
+          273.1294892116446,
+          273.01540616576125,
+          272.64240006577734
+        ]
+      },
+      "assertions": [
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 1
+          },
+          "expected": 270.6158232056416,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 2
+          },
+          "expected": 269.861413677717,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 3
+          },
+          "expected": 270.9315430129118,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 4
+          },
+          "expected": 270.2656742051836,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 5
+          },
+          "expected": 269.4946675297613,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 6
+          },
+          "expected": 268.7178646153161,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 7
+          },
+          "expected": 271.7363682584975,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 8
+          },
+          "expected": 271.2506851287294,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 9
+          },
+          "expected": 270.67431679619716,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 10
+          },
+          "expected": 270.00862786911176,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 11
+          },
+          "expected": 269.3370919149397,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_tbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 12
+          },
+          "expected": 268.94896455665236,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "step24_sa_pbot",
+      "description": "bilinear atm->ocn map of Sa_pbot at coupling step 24: dst_t = (sum_i w_ij x_i)/normOne_t replayed from the offline ESMF weights (cmeps_map_ocn.csv / cmeps_map_atm.csv / atm2ocn_bilinear.nc) on the 12 traced cells, pinned cell-wise at rel 1e-12",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "x_pbot": [
+          99842.04022496703,
+          99864.75224408676,
+          99945.06774625252,
+          100167.99279985225,
+          99851.28028975884,
+          99838.05785149545,
+          99826.34221603733,
+          99826.31298012057
+        ]
+      },
+      "assertions": [
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 1
+          },
+          "expected": 99860.51492360255,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 2
+          },
+          "expected": 99878.60941069335,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 3
+          },
+          "expected": 99858.01225712543,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 4
+          },
+          "expected": 99873.30258717794,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 5
+          },
+          "expected": 99897.462222111,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 6
+          },
+          "expected": 99921.73293347837,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 7
+          },
+          "expected": 99850.695103285,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 8
+          },
+          "expected": 99855.48246249012,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 9
+          },
+          "expected": 99867.93823927833,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 10
+          },
+          "expected": 99888.02095705655,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 11
+          },
+          "expected": 99908.21567008189,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        },
+        {
+          "variable": "dst_pbot",
+          "time": 0.0,
+          "coords": {
+            "tgt_cells": 12
+          },
+          "expected": 99954.8957746698,
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 0.0
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

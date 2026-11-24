@@ -1,0 +1,33271 @@
+---
+title: "WRFWeselySurfaceResistance"
+slug: "wrfweselysurfaceresistance"
+domains: ["atmospheric_deposition"]
+component_types: ["model"]
+subdomains: ["wrf_wesely"]
+domain: "atmospheric_deposition"
+subdomain: "wrf_wesely"
+component_type: "model"
+esm_version: "1.1.0"
+esm_path: "components/atmospheric_deposition/wrf_wesely/surface_resistance.esm"
+description: "Surface (canopy) resistance Rc of WRF-Chem's dry-deposition scheme, SUBROUTINE rc of chem/module_dep_simple.F (WRF v4.8.0), for every gas on a species axis at ONE surface state."
+tags: ["atmospheric_deposition", "wrf_wesely", "model"]
+---
+
+## Description
+
+Surface (canopy) resistance Rc of WRF-Chem's dry-deposition scheme, SUBROUTINE rc of chem/module_dep_simple.F (WRF v4.8.0), for every gas on a species axis at ONE surface state.
+
+This is a NEW component, not a repair of components/atmospheric_deposition/wesley_dry_gas.esm. That one is a migration of AtmosphericDeposition.jl -- the Wesely (1989) PAPER plus Walmsley & Wesely (1996), over the 11 Wesely land-use categories, with a GEOS-Chem species list -- and WRF's code is a different scheme wearing the same name. Audited against the running model, all 19 overlapping species differ on at least one constant (H2O2's H* by a factor of 671, acetic acid by 235, cresol by 952, and PAN, glyoxal, methylglyoxal and acetic acid have f0 flipped between 0 and 1), it has no dhr temperature correction at all, no Erisman branches, an Rc ceiling of 9999 s/m where WRF has none, and it covers 19 of the 38 gases WRF deposits. Bolting WRF-derived tests onto it would simply have made them red.
+
+Four paths, selected by the gas index. The GENERAL path is Wesely's four parallel resistances with the ground one in series with rac. OZONE differs by using rclo/rgso directly, substituting rluo1/rluo2 outright under dew or rain, and capping rac at 100 s/m. SO2 and NH3 are wholesale ERISMAN ET AL. (1994) replacements: SO2's cuticle resistance is a function of relative humidity, its combination has only three terms and no rac at all, and it collapses to the bare ground resistance over snow, urban/desert soil, water or ice; NH3 bypasses H* and f0 entirely and is read off a table of land class, season, day/night, wetness and temperature. A gas with hstar = 0 never enters the loop and keeps Rc = 1.
+
+`srfres` is what wesely_driver actually passes on, which is Rc except that the last two gas slots -- HO and HO2 for RADM2 -- are zeroed outright so they deposit at the aerodynamic limit.
+
+SCOPE OF THE TESTS, stated plainly. The reference column visits exactly ONE (iland, iseason) pair and never wets the surface: julday 295 puts every call in iseason 2, ivgtyp 2 maps to iland 2, and rhchem never reaches 95 nor is there rain. So the tests below, 7 meteorological states x 43 gases, pin the general path, the O3 path and the dry branches of SO2 and NH3 thoroughly and the wet, rain, snow and other-land-use branches not at all. In particular FORTRAN_BUGS B4 -- the factor-9 disagreement between the two spellings of the cuticle conductance -- lives in the wet branch and is NOT exercised here. A regime sweep that reaches those branches is the next step.
+
+SPECIES AXIS (2026-11-12). The surface state (iland, iseason, T, rad, rh and the wet/rain/high-NH3 flags) and everything built from it alone -- the land-use table reads, rs, rdc, resice, the O3 and SO2 paths -- are shared by every gas, as rc() computes them for one column; the gas index `igas` is per species, and with it the four species constants (looked up by `igas[s]`), the general path (hstary through rc_general), the path selection `rc` and `srfres`. The NH3 class cascade is per species too, but only because its fall-through branch is the species' own rc_general; `rc` reads it at the species whose igas is NH3. The per-species arithmetic is written as plain arithmetic on the [spc] arrays (name-aligned broadcast, esm-spec 4.3.4), so it reads as the one-gas formulas; only the table lookups and the igas-dependent selections index the axis explicitly. A consumer binds NSPEC at the mount edge and supplies `igas` as an [spc] array; the [spc] `srfres` is what WRFWeselyDepositionVelocity.srfres takes. This component's own tests use NSPEC = 10: each ESM_SWEEP regime is one test of its ten gases, and each in-model call's 43 gas slots are five tests of ten (the last test is the call's last ten slots and asserts only the three not already asserted). 1642 assertions, unchanged in number from the one-gas tests they regroup. Deliberately broken on 2026-11-12, each caught: every species reading hstar at igas[1] (1187 fail), dratio looked up in reversed species order (372), every general-path species reading rc_general[1] (1167), srfres reading rc[1] (259). Reading rc_nh3[1] at the NH3 species is NOT caught, and cannot be with these regimes: the only reachable fall-through (season 4 on grass or agricultural land) lands on the 1 s/m floor for NH3 and for species 1 (SO2) alike.
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `igas` | `1` | `6.0` | WRF gas index p_* of each species on the axis, in the slot numbering of the mechanism `mech` selects (chem_opt = 101: 2 = so2, 6 = o3, 16 = nh3, ...; chem_opt = 170: 2 = so2, 6 = o3, 15 = nh3, ...). Selects the species constants and which of the four Rc paths applies, species by species. |
+| `mech` | `1` | `1.0` | Mechanism row of wesely_data's per-gas tables: 1 = chem_opt 101 (RADM2 KPP, WRF's numbering of the gas slots under that mechanism), 2 = chem_opt 170 (CBMZ_MOSAIC_KPP). It selects only DATA -- the five per-gas constants, NH3's slot and the gas-slot count numgas -- because dep_init fills those through the run-time species pointers; every resistance formula is the same under both. |
+| `iland` | `1` | `2.0` | USGS land-use category 1..25, WRF's `iland = luse2usgs(ivgtyp)`. NOT a Wesely 11-category index: the tables are pre-expanded over the USGS set. |
+| `iseason` | `1` | `2.0` | Seasonal category 1..5. wesely_driver produces only 1 (julday 90..270) or 2 for every non-MOZART mechanism. |
+| `T` | `K` | `288.0` | Surface temperature, WRF's tsk(i,j). |
+| `rad` | `W/m^2` | `500.0` | Net downward shortwave at the ground, WRF's gsw(i,j). Its being exactly zero is the day/night switch of the NH3 branch. |
+| `rh` | `%` | `50.0` | Near-surface relative humidity in percent, WRF's rhchem, clamped to [5, 100]. Only the SO2 branch reads it. |
+| `wetflag` | `1` | `0.0` | 1 when the surface is dew-wetted (rhchem >= 95), else 0. |
+| `rainflag` | `1` | `0.0` | 1 when it is raining (qr > 1e-18 or raincv > 0), else 0. |
+| `highnh3` | `1` | `0.0` | 1 when chem(nh3) > 2 chem(so2), else 0. Read by the SO2 and NH3 wet branches. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `r_i` | `s/m` |  | Minimum stomatal resistance for this land use and season. |
+| `r_lu` | `s/m` |  | Cuticle resistance. |
+| `r_ac` | `s/m` |  | In-canopy aerodynamic resistance. |
+| `r_gss` | `s/m` |  | Ground resistance for SO2. |
+| `r_gso` | `s/m` |  | Ground resistance for O3. |
+| `r_cls` | `s/m` |  | Lower-canopy resistance for SO2. |
+| `r_clo` | `s/m` |  | Lower-canopy resistance for O3. |
+| `ixxxlu` | `1` |  | Six-class land-use index for this category. |
+| `hstar` | `M/atm` |  | Effective Henry's law constant at 298 K for this gas. |
+| `f0` | `1` |  | Normalized reactivity. |
+| `dhr` | `K` |  | Temperature coefficient of the Henry's law constant. |
+| `dratio` | `1` |  | Diffusivity ratio to water vapour. |
+| `tc` | `K` |  | Surface temperature in Celsius. |
+| `z_rad` | `1` |  | Stomatal radiation factor 200/(rad+0.1). |
+| `rs_open` | `s/m` |  | Stomatal resistance inside the 0-40 C window. |
+| `rs` | `s/m` |  | Bulk stomatal resistance. |
+| `rdc` | `s/m` |  | In-canopy buoyant-convection resistance. The Wesely terrain-slope factor is absent because WRF's rdtheta is set to 0 and never assigned (FORTRAN_BUGS B5). |
+| `rluo1` | `s/m` |  | O3 reference cuticle resistance under dew. |
+| `rluo2` | `s/m` |  | O3 reference cuticle resistance under rain. |
+| `resice` | `s/m` |  | Ice resistance added to rclx, rgsx and the DRY rlux -- but NOT to the wet or rain rlux, which WRF omits it from. |
+| `wrk` | `1/K` |  | (t0 - T)/(t0 T), the Henry's law exponent argument. |
+| `hstary` | `M/atm` |  | Temperature-corrected Henry's law constant, hstar exp(dhr wrk). |
+| `hstary_d` | `M/atm` |  | hstary floored so a discarded branch stays finite. |
+| `wet_or_rain` | `1` |  | 1 when either the wet or the rain flag is set. |
+| `rmx` | `s/m` |  | Mesophyll resistance. |
+| `rsmx` | `s/m` |  | Stomatal + mesophyll resistance, rs dratio + rmx. |
+| `rclx` | `s/m` |  | Lower-canopy resistance for this gas. |
+| `rgsx` | `s/m` |  | Ground resistance for this gas. |
+| `rlux_dry` | `s/m` |  | Cuticle resistance on a dry surface. |
+| `rlux_wet` | `s/m` |  | Cuticle resistance under dew. |
+| `rlux_rain` | `s/m` |  | Cuticle resistance under rain. |
+| `rlux` | `s/m` |  | Cuticle resistance actually used; rain wins over dew, as in WRF's order of assignment. |
+| `rc_general` | `s/m` |  | Surface resistance on the general-gas path: four resistances in parallel, the ground one in series with rac. |
+| `hstary_o3` | `M/atm` |  | Temperature-corrected Henry's law constant of O3. |
+| `f0_o3` | `1` |  | Reactivity of O3 (1.0). |
+| `rmx_o3` | `s/m` |  | Mesophyll resistance of O3. |
+| `rsmx_o3` | `s/m` |  | Stomatal + mesophyll resistance of O3. |
+| `rlux_o3` | `s/m` |  | Cuticle resistance of O3; under dew or rain it becomes rluo1 or rluo2 OUTRIGHT, not blended. |
+| `rc_o3` | `s/m` |  | Surface resistance of O3. Differs from the general path in using rclo/rgso directly and in capping rac at 100 s/m. |
+| `rsmx_so2` | `s/m` |  | Stomatal resistance of SO2 -- with NO mesophyll term, unlike every general gas. |
+| `rlux_so2_rh` | `s/m` |  | Humidity-dependent SO2 cuticle resistance. |
+| `rlux_so2` | `s/m` |  | SO2 cuticle resistance. |
+| `rgsx_snow` | `s/m` |  | Snow/ice ground resistance ramp, shared by SO2 and NH3. |
+| `rgsx_so2_sfc` | `s/m` |  | SO2 ground resistance from the wetness and high-NH3 state alone. |
+| `rgsx_so2` | `s/m` |  | SO2 ground resistance after the water and snow overrides. |
+| `rclx_so2_r` | `s/m` |  | SO2 lower-canopy resistance; the Erisman branch uses rcls directly. |
+| `rc_so2_canopy` | `s/m` |  | The three-term SO2 combination: stomatal and cuticle in parallel with the SERIES chain rcls + rdc + rgsx. Note there is no rac term at all, unlike every other path. |
+| `rc_so2` | `s/m` |  | Surface resistance of SO2, Erisman et al. (1994). Over snow, bare/urban soil, water or ice it collapses to the ground resistance alone. |
+| `rsmx_nh3` | `s/m` |  | Stomatal resistance of NH3, again with no mesophyll term. |
+| `is_winter` | `1` |  | 1 for seasonal categories 2, 3 and 5, which the NH3 branch treats together as 'winter, no snow'. |
+| `nh3_cold` | `s/m` |  | NH3 resistance below -1 C in the winter branches. |
+| `nh3_grass` | `s/m` |  | NH3 over grassland. Per species only because its fall-through branch is the species' own general-path rc_general; rc reads it at the species whose igas is NH3, where that is NH3's. |
+| `nh3_agri` | `s/m` |  | NH3 over agricultural land. Per species only because its fall-through branch is the species' own general-path rc_general; rc reads it at the species whose igas is NH3, where that is NH3's. |
+| `nh3_forest` | `s/m` |  | NH3 over forest and semi-natural ecosystems. |
+| `nh3_urban` | `s/m` |  | NH3 over urban and desert soils. |
+| `nh3_class` | `s/m` |  | NH3 resistance selected by the six-class land-use index. Per species only because its fall-through branch is the species' own general-path rc_general; rc reads it at the species whose igas is NH3, where that is NH3's. |
+| `nh3_snow` | `s/m` |  | NH3 snow/ice ramp. |
+| `rc_nh3` | `s/m` |  | Surface resistance of NH3, Erisman et al. (1994). It bypasses H* and f0 entirely. Per species only because its fall-through branch is the species' own general-path rc_general; rc reads it at the species whose igas is NH3, where that is NH3's. |
+| `rc` | `s/m` |  | Surface resistance of this gas, rcx(igas) as rc() returns it. |
+| `srfres` | `s/m` |  | Rc as wesely_driver passes it on: rcx, except that the last two gas slots, numgas-1 and numgas, are set to ZERO (module_dep_simple.F:242-247, `if( .not. chm_is_moz ) srfres(numgas-1:numgas) = 0.`), so those two deposit at the aerodynamic limit 1/(Ra+Rb). For RADM2 (chem_opt = 101) those slots are HO (43) and HO2 (44), which is the intent. WRF BEHAVIOR, reproduced as-is: for CBM-Z (chem_opt = 170, numgas = 65) the same code zeroes slots 64 and 65, LIM and ISOPO2, while HO (33) and HO2 (34) keep their computed Rc. WRF's own comment a few lines below (`wig: CBMZ does not have HO and HO2 last so need to copy all species`) acknowledges the ordering for ddvel but the srfres zeroing was not adjusted. Correct behavior would zero srfres at p_ho and p_ho2 (by species pointer) rather than at the last two slots, leaving LIM and ISOPO2 with their resistance-limited Rc. |
+| `n_gas` | `1` |  | Number of gas slots under the selected mechanism, WRF's numgas = get_last_gas(chem_opt): 44 for chem_opt = 101, 65 for chem_opt = 170, from wesely_data's numgas_table so it follows `mech` like the per-gas data and p_nh3 do. wesely_driver zeroes Rc for the LAST TWO slots, so this is what selects which gases get srfres = 0. |
+| `p_nh3` | `1` |  | Gas slot of NH3 under the selected mechanism (16 for chem_opt = 101, 15 for chem_opt = 170): which slot takes the Erisman NH3 path. |
+
+## Observed expressions
+
+$$
+r_{i} = \mathrm{index}\left(dat.ri_{table}, iland, iseason\right)
+$$
+_Minimum stomatal resistance for this land use and season._
+
+$$
+r_{lu} = \mathrm{index}\left(dat.rlu_{table}, iland, iseason\right)
+$$
+_Cuticle resistance._
+
+$$
+r_{ac} = \mathrm{index}\left(dat.rac_{table}, iland, iseason\right)
+$$
+_In-canopy aerodynamic resistance._
+
+$$
+r_{gss} = \mathrm{index}\left(dat.rgss_{table}, iland, iseason\right)
+$$
+_Ground resistance for SO2._
+
+$$
+r_{gso} = \mathrm{index}\left(dat.rgso_{table}, iland, iseason\right)
+$$
+_Ground resistance for O3._
+
+$$
+r_{cls} = \mathrm{index}\left(dat.rcls_{table}, iland, iseason\right)
+$$
+_Lower-canopy resistance for SO2._
+
+$$
+r_{clo} = \mathrm{index}\left(dat.rclo_{table}, iland, iseason\right)
+$$
+_Lower-canopy resistance for O3._
+
+$$
+ixxxlu = \mathrm{index}\left(dat.ixxxlu_{table}, iland\right)
+$$
+_Six-class land-use index for this category._
+
+$$
+hstar = \mathrm{faq}\left(\right)
+$$
+_Effective Henry's law constant at 298 K for this gas._
+
+$$
+f0 = \mathrm{faq}\left(\right)
+$$
+_Normalized reactivity._
+
+$$
+dhr = \mathrm{faq}\left(\right)
+$$
+_Temperature coefficient of the Henry's law constant._
+
+$$
+dratio = \mathrm{faq}\left(\right)
+$$
+_Diffusivity ratio to water vapour._
+
+$$
+tc = T - par.t_{celsius}
+$$
+_Surface temperature in Celsius._
+
+$$
+z_{rad} = \frac{par.rs_{rad\,num}}{rad + par.rs_{rad\,eps}}
+$$
+_Stomatal radiation factor 200/(rad+0.1)._
+
+$$
+rs_{open} = r_{i} \cdot \left(1 + z_{rad}^{2}\right) \cdot \frac{par.rs_{t\,num}}{\mathrm{max}\left(par.rs_{t\,eps}, tc \cdot \left(par.rs_{t\,hi} - tc\right)\right)}
+$$
+_Stomatal resistance inside the 0-40 C window._
+
+$$
+rs = \mathrm{ifelse}\left(\mathrm{<=}\left(tc, 0\right), par.r_{big}, \mathrm{ifelse}\left(\mathrm{>=}\left(tc, par.rs_{t\,hi}\right), par.r_{big}, rs_{open}\right)\right)
+$$
+_Bulk stomatal resistance._
+
+$$
+rdc = par.rdc_{a} \cdot \left(1 + \frac{par.rdc_{b}}{rad + par.rdc_{c}}\right)
+$$
+_In-canopy buoyant-convection resistance. The Wesely terrain-slope factor is absent because WRF's rdtheta is set to 0 and never assigned (FORTRAN_BUGS B5)._
+
+$$
+rluo1 = \frac{1}{\frac{1}{par.rluo1_{r}} + \frac{par.rluo_{mult}}{r_{lu}}}
+$$
+_O3 reference cuticle resistance under dew._
+
+$$
+rluo2 = \frac{1}{\frac{1}{par.rluo2_{r}} + \frac{par.rluo_{mult}}{r_{lu}}}
+$$
+_O3 reference cuticle resistance under rain._
+
+$$
+resice = par.resice_{a} \cdot e^{-\frac{tc + par.resice_{b}}{par.resice_{tscale}}}
+$$
+_Ice resistance added to rclx, rgsx and the DRY rlux -- but NOT to the wet or rain rlux, which WRF omits it from._
+
+$$
+wrk = \frac{par.t_{ref} - T}{par.t_{ref} \cdot T}
+$$
+_(t0 - T)/(t0 T), the Henry's law exponent argument._
+
+$$
+hstary = hstar \cdot e^{dhr \cdot wrk}
+$$
+_Temperature-corrected Henry's law constant, hstar exp(dhr wrk)._
+
+$$
+hstary_{d} = \mathrm{max}\left(hstary, par.hstar_{eps}\right)
+$$
+_hstary floored so a discarded branch stays finite._
+
+$$
+wet_{or\,rain} = \mathrm{max}\left(wetflag, rainflag\right)
+$$
+_1 when either the wet or the rain flag is set._
+
+$$
+rmx = \frac{1}{\frac{hstary_{d}}{par.rmx_{h}} + par.rmx_{f} \cdot f0}
+$$
+_Mesophyll resistance._
+
+$$
+rsmx = rs \cdot dratio + rmx
+$$
+_Stomatal + mesophyll resistance, rs dratio + rmx._
+
+$$
+rclx = \frac{1}{\frac{par.hstar_{scale} \cdot hstary_{d}}{r_{cls}} + \frac{f0}{r_{clo}}} + resice
+$$
+_Lower-canopy resistance for this gas._
+
+$$
+rgsx = \frac{1}{\frac{par.hstar_{scale} \cdot hstary_{d}}{r_{gss}} + \frac{f0}{r_{gso}}} + resice
+$$
+_Ground resistance for this gas._
+
+$$
+rlux_{dry} = \frac{r_{lu}}{par.hstar_{scale} \cdot hstary_{d} + f0} + resice
+$$
+_Cuticle resistance on a dry surface._
+
+$$
+rlux_{wet} = \frac{1}{\frac{1}{par.rluo_{mult} \cdot r_{lu}} + par.hstar_{scale\,wet} \cdot hstary + \frac{f0}{rluo1}}
+$$
+_Cuticle resistance under dew._
+
+$$
+rlux_{rain} = \frac{1}{\frac{1}{par.rluo_{mult} \cdot r_{lu}} + par.hstar_{scale\,wet} \cdot hstary + \frac{f0}{rluo2}}
+$$
+_Cuticle resistance under rain._
+
+$$
+rlux = \mathrm{ifelse}\left(\mathrm{>}\left(rainflag, 0\right), rlux_{rain}, \mathrm{ifelse}\left(\mathrm{>}\left(wetflag, 0\right), rlux_{wet}, rlux_{dry}\right)\right)
+$$
+_Cuticle resistance actually used; rain wins over dew, as in WRF's order of assignment._
+
+$$
+rc_{general} = \mathrm{max}\left(par.rc_{floor}, \frac{1}{\frac{1}{rsmx} + \frac{1}{rlux} + \frac{1}{rdc + rclx} + \frac{1}{r_{ac} + rgsx}}\right)
+$$
+_Surface resistance on the general-gas path: four resistances in parallel, the ground one in series with rac._
+
+$$
+hstary_{o3} = \mathrm{index}\left(dat.hstar_{table}, mech, par.p_{o3}\right) \cdot e^{\mathrm{index}\left(dat.dhr_{table}, mech, par.p_{o3}\right) \cdot wrk}
+$$
+_Temperature-corrected Henry's law constant of O3._
+
+$$
+f0_{o3} = \mathrm{index}\left(dat.f0_{table}, mech, par.p_{o3}\right)
+$$
+_Reactivity of O3 (1.0)._
+
+$$
+rmx_{o3} = \frac{1}{\frac{hstary_{o3}}{par.rmx_{h}} + par.rmx_{f} \cdot f0_{o3}}
+$$
+_Mesophyll resistance of O3._
+
+$$
+rsmx_{o3} = rs \cdot \mathrm{index}\left(dat.dratio_{table}, mech, par.p_{o3}\right) + rmx_{o3}
+$$
+_Stomatal + mesophyll resistance of O3._
+
+$$
+rlux_{o3} = \mathrm{ifelse}\left(\mathrm{>}\left(rainflag, 0\right), rluo2, \mathrm{ifelse}\left(\mathrm{>}\left(wetflag, 0\right), rluo1, \frac{r_{lu}}{par.hstar_{scale} \cdot hstary_{o3} + f0_{o3}} + resice\right)\right)
+$$
+_Cuticle resistance of O3; under dew or rain it becomes rluo1 or rluo2 OUTRIGHT, not blended._
+
+$$
+rc_{o3} = \mathrm{max}\left(par.rc_{floor}, \frac{1}{\frac{1}{rsmx_{o3}} + \frac{1}{rlux_{o3}} + \frac{1}{rdc + r_{clo} + resice} + \frac{1}{\mathrm{min}\left(par.o3_{rac\,cap}, r_{ac}\right) + r_{gso} + resice}}\right)
+$$
+_Surface resistance of O3. Differs from the general path in using rclo/rgso directly and in capping rac at 100 s/m._
+
+$$
+rsmx_{so2} = rs \cdot \mathrm{index}\left(dat.dratio_{table}, mech, par.p_{so2}\right)
+$$
+_Stomatal resistance of SO2 -- with NO mesophyll term, unlike every general gas._
+
+$$
+rlux_{so2\,rh} = \mathrm{ifelse}\left(\mathrm{<}\left(rh, par.so2_{rh\,split}\right), par.so2_{rh\,a1} \cdot e^{par.so2_{rh\,b1} \cdot rh}, par.so2_{rh\,a2} \cdot e^{par.so2_{rh\,b2} \cdot rh}\right)
+$$
+_Humidity-dependent SO2 cuticle resistance._
+
+$$
+rlux_{so2} = \mathrm{ifelse}\left(\mathrm{>}\left(tc, par.tc_{warm}\right), \mathrm{ifelse}\left(\mathrm{>}\left(wet_{or\,rain}, 0\right), par.so2_{rlux\,wet}, rlux_{so2\,rh}\right), \mathrm{ifelse}\left(\mathrm{>=}\left(tc, par.tc_{cold}\right), par.so2_{rlux\,cool}, par.so2_{rlux\,cold}\right)\right)
+$$
+_SO2 cuticle resistance._
+
+$$
+rgsx_{snow} = \mathrm{ifelse}\left(\mathrm{>}\left(tc, par.snow_{tc\,hi}\right), 0, \mathrm{ifelse}\left(\mathrm{>=}\left(tc, par.tc_{warm}\right), par.snow_{a} \cdot \left(par.snow_{tc\,hi} - tc\right), par.snow_{cold}\right)\right)
+$$
+_Snow/ice ground resistance ramp, shared by SO2 and NH3._
+
+$$
+rgsx_{so2\,sfc} = \mathrm{ifelse}\left(\mathrm{>}\left(wet_{or\,rain}, 0\right), \mathrm{ifelse}\left(\mathrm{>}\left(highnh3, 0\right), 0, par.so2_{rgs\,wet}\right), par.so2_{rgs\,dry}\right)
+$$
+_SO2 ground resistance from the wetness and high-NH3 state alone._
+
+$$
+rgsx_{so2} = \mathrm{ifelse}\left(iseason = par.season_{snow}, rgsx_{snow}, \mathrm{ifelse}\left(iland = par.usgs_{ice}, rgsx_{snow}, \mathrm{ifelse}\left(iland = par.usgs_{water}, 0, rgsx_{so2\,sfc}\right)\right)\right)
+$$
+_SO2 ground resistance after the water and snow overrides._
+
+$$
+rclx_{so2\,r} = r_{cls}
+$$
+_SO2 lower-canopy resistance; the Erisman branch uses rcls directly._
+
+$$
+rc_{so2\,canopy} = \frac{1}{\frac{1}{rsmx_{so2}} + \frac{1}{rlux_{so2}} + \frac{1}{rclx_{so2\,r} + rdc + rgsx_{so2}}}
+$$
+_The three-term SO2 combination: stomatal and cuticle in parallel with the SERIES chain rcls + rdc + rgsx. Note there is no rac term at all, unlike every other path._
+
+$$
+rc_{so2} = \mathrm{max}\left(par.rc_{floor}, \mathrm{ifelse}\left(iseason = par.season_{snow}, rgsx_{so2}, \mathrm{ifelse}\left(ixxxlu = 1, rgsx_{so2}, \mathrm{ifelse}\left(iland = par.usgs_{water}, rgsx_{so2}, \mathrm{ifelse}\left(iland = par.usgs_{ice}, rgsx_{so2}, rc_{so2\,canopy}\right)\right)\right)\right)\right)
+$$
+_Surface resistance of SO2, Erisman et al. (1994). Over snow, bare/urban soil, water or ice it collapses to the ground resistance alone._
+
+$$
+rsmx_{nh3} = rs \cdot \mathrm{index}\left(dat.dratio_{table}, mech, p_{nh3}\right)
+$$
+_Stomatal resistance of NH3, again with no mesophyll term._
+
+$$
+is_{winter} = \mathrm{ifelse}\left(iseason = 2, 1, \mathrm{ifelse}\left(iseason = 3, 1, \mathrm{ifelse}\left(iseason = 5, 1, 0\right)\right)\right)
+$$
+_1 for seasonal categories 2, 3 and 5, which the NH3 branch treats together as 'winter, no snow'._
+
+$$
+nh3_{cold} = \mathrm{ifelse}\left(\mathrm{>=}\left(tc, par.tc_{cold}\right), par.nh3_{cool}, par.nh3_{verycold}\right)
+$$
+_NH3 resistance below -1 C in the winter branches._
+
+$$
+nh3_{grass} = \mathrm{ifelse}\left(iseason = 1, par.nh3_{grass\,summer}, \mathrm{ifelse}\left(\mathrm{>}\left(is_{winter}, 0\right), \mathrm{ifelse}\left(\mathrm{>}\left(tc, par.tc_{warm}\right), \mathrm{ifelse}\left(\mathrm{>}\left(wet_{or\,rain}, 0\right), par.nh3_{grass\,wet}, \mathrm{ifelse}\left(\mathrm{!=}\left(rad, 0\right), par.nh3_{grass\,day}, par.nh3_{grass\,night}\right)\right), nh3_{cold}\right), rc_{general}\right)\right)
+$$
+_NH3 over grassland. Per species only because its fall-through branch is the species' own general-path rc_general; rc reads it at the species whose igas is NH3, where that is NH3's._
+
+$$
+nh3_{agri} = \mathrm{ifelse}\left(iseason = 1, \mathrm{ifelse}\left(\mathrm{>}\left(wet_{or\,rain}, 0\right), par.nh3_{agri\,wet\,s}, \mathrm{ifelse}\left(\mathrm{!=}\left(rad, 0\right), rsmx_{nh3}, par.nh3_{agri\,night\,s}\right)\right), \mathrm{ifelse}\left(\mathrm{>}\left(is_{winter}, 0\right), \mathrm{ifelse}\left(\mathrm{>}\left(tc, par.tc_{warm}\right), \mathrm{ifelse}\left(\mathrm{>}\left(wet_{or\,rain}, 0\right), par.nh3_{agri\,wet\,w}, \mathrm{ifelse}\left(\mathrm{!=}\left(rad, 0\right), rsmx_{nh3}, par.nh3_{agri\,night\,w}\right)\right), nh3_{cold}\right), rc_{general}\right)\right)
+$$
+_NH3 over agricultural land. Per species only because its fall-through branch is the species' own general-path rc_general; rc reads it at the species whose igas is NH3, where that is NH3's._
+
+$$
+nh3_{forest} = \mathrm{ifelse}\left(\mathrm{>}\left(is_{winter} \cdot \mathrm{ifelse}\left(\mathrm{<=}\left(tc, par.tc_{warm}\right), 1, 0\right), 0\right), nh3_{cold}, \mathrm{ifelse}\left(\mathrm{>}\left(wet_{or\,rain}, 0\right), \mathrm{ifelse}\left(\mathrm{>}\left(highnh3, 0\right), par.nh3_{forest\,wet\,hi}, 0\right), \mathrm{ifelse}\left(\mathrm{!=}\left(rad, 0\right), par.nh3_{forest\,day}, par.nh3_{forest\,night}\right)\right)\right)
+$$
+_NH3 over forest and semi-natural ecosystems._
+
+$$
+nh3_{urban} = \mathrm{ifelse}\left(\mathrm{>}\left(wetflag, 0\right), 0, par.nh3_{urban\,dry}\right)
+$$
+_NH3 over urban and desert soils._
+
+$$
+nh3_{class} = \mathrm{ifelse}\left(ixxxlu = 3, nh3_{grass}, \mathrm{ifelse}\left(ixxxlu = 2, nh3_{agri}, \mathrm{ifelse}\left(\mathrm{>=}\left(ixxxlu, 4\right), nh3_{forest}, \mathrm{ifelse}\left(ixxxlu = 1, nh3_{urban}, rc_{general}\right)\right)\right)\right)
+$$
+_NH3 resistance selected by the six-class land-use index. Per species only because its fall-through branch is the species' own general-path rc_general; rc reads it at the species whose igas is NH3, where that is NH3's._
+
+$$
+nh3_{snow} = \mathrm{ifelse}\left(\mathrm{>}\left(tc, par.snow_{tc\,hi}\right), 0, \mathrm{ifelse}\left(\mathrm{>=}\left(tc, par.tc_{warm}\right), par.snow_{a} \cdot \left(par.snow_{tc\,hi} - tc\right), par.snow_{cold}\right)\right)
+$$
+_NH3 snow/ice ramp._
+
+$$
+rc_{nh3} = \mathrm{max}\left(par.rc_{floor}, \mathrm{ifelse}\left(iseason = par.season_{snow}, nh3_{snow}, \mathrm{ifelse}\left(iland = par.usgs_{ice}, nh3_{snow}, \mathrm{ifelse}\left(iland = par.usgs_{water}, 0, nh3_{class}\right)\right)\right)\right)
+$$
+_Surface resistance of NH3, Erisman et al. (1994). It bypasses H* and f0 entirely. Per species only because its fall-through branch is the species' own general-path rc_general; rc reads it at the species whose igas is NH3, where that is NH3's._
+
+$$
+rc = \mathrm{faq}\left(\right)
+$$
+_Surface resistance of this gas, rcx(igas) as rc() returns it._
+
+$$
+srfres = \mathrm{faq}\left(\right)
+$$
+_Rc as wesely_driver passes it on: rcx, except that the last two gas slots, numgas-1 and numgas, are set to ZERO (module_dep_simple.F:242-247, `if( .not. chm_is_moz ) srfres(numgas-1:numgas) = 0.`), so those two deposit at the aerodynamic limit 1/(Ra+Rb). For RADM2 (chem_opt = 101) those slots are HO (43) and HO2 (44), which is the intent. WRF BEHAVIOR, reproduced as-is: for CBM-Z (chem_opt = 170, numgas = 65) the same code zeroes slots 64 and 65, LIM and ISOPO2, while HO (33) and HO2 (34) keep their computed Rc. WRF's own comment a few lines below (`wig: CBMZ does not have HO and HO2 last so need to copy all species`) acknowledges the ordering for ddvel but the srfres zeroing was not adjusted. Correct behavior would zero srfres at p_ho and p_ho2 (by species pointer) rather than at the last two slots, leaving LIM and ISOPO2 with their resistance-limited Rc._
+
+$$
+n_{gas} = \mathrm{index}\left(dat.numgas_{table}, mech\right)
+$$
+_Number of gas slots under the selected mechanism, WRF's numgas = get_last_gas(chem_opt): 44 for chem_opt = 101, 65 for chem_opt = 170, from wesely_data's numgas_table so it follows `mech` like the per-gas data and p_nh3 do. wesely_driver zeroes Rc for the LAST TWO slots, so this is what selects which gases get srfres = 0._
+
+$$
+p_{nh3} = \mathrm{index}\left(dat.p_{nh3\,table}, mech\right)
+$$
+_Gas slot of NH3 under the selected mechanism (16 for chem_opt = 101, 15 for chem_opt = 170): which slot takes the Erisman NH3 path._
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "subsystems": {
+    "dat": {
+      "ref": "./wesely_data.esm"
+    },
+    "par": {
+      "ref": "./wesely_parameters.esm"
+    }
+  },
+  "variables": {
+    "igas": {
+      "type": "parameter",
+      "units": "1",
+      "default": 6.0,
+      "description": "WRF gas index p_* of each species on the axis, in the slot numbering of the mechanism `mech` selects (chem_opt = 101: 2 = so2, 6 = o3, 16 = nh3, ...; chem_opt = 170: 2 = so2, 6 = o3, 15 = nh3, ...). Selects the species constants and which of the four Rc paths applies, species by species.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "mech": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "Mechanism row of wesely_data's per-gas tables: 1 = chem_opt 101 (RADM2 KPP, WRF's numbering of the gas slots under that mechanism), 2 = chem_opt 170 (CBMZ_MOSAIC_KPP). It selects only DATA -- the five per-gas constants, NH3's slot and the gas-slot count numgas -- because dep_init fills those through the run-time species pointers; every resistance formula is the same under both."
+    },
+    "iland": {
+      "type": "parameter",
+      "units": "1",
+      "default": 2.0,
+      "description": "USGS land-use category 1..25, WRF's `iland = luse2usgs(ivgtyp)`. NOT a Wesely 11-category index: the tables are pre-expanded over the USGS set."
+    },
+    "iseason": {
+      "type": "parameter",
+      "units": "1",
+      "default": 2.0,
+      "description": "Seasonal category 1..5. wesely_driver produces only 1 (julday 90..270) or 2 for every non-MOZART mechanism."
+    },
+    "T": {
+      "type": "parameter",
+      "units": "K",
+      "default": 288.0,
+      "description": "Surface temperature, WRF's tsk(i,j)."
+    },
+    "rad": {
+      "type": "parameter",
+      "units": "W/m^2",
+      "default": 500.0,
+      "description": "Net downward shortwave at the ground, WRF's gsw(i,j). Its being exactly zero is the day/night switch of the NH3 branch."
+    },
+    "rh": {
+      "type": "parameter",
+      "units": "%",
+      "default": 50.0,
+      "description": "Near-surface relative humidity in percent, WRF's rhchem, clamped to [5, 100]. Only the SO2 branch reads it."
+    },
+    "wetflag": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "1 when the surface is dew-wetted (rhchem >= 95), else 0."
+    },
+    "rainflag": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "1 when it is raining (qr > 1e-18 or raincv > 0), else 0."
+    },
+    "highnh3": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "1 when chem(nh3) > 2 chem(so2), else 0. Read by the SO2 and NH3 wet branches."
+    },
+    "r_i": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Minimum stomatal resistance for this land use and season."
+    },
+    "r_lu": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Cuticle resistance."
+    },
+    "r_ac": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "In-canopy aerodynamic resistance."
+    },
+    "r_gss": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Ground resistance for SO2."
+    },
+    "r_gso": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Ground resistance for O3."
+    },
+    "r_cls": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Lower-canopy resistance for SO2."
+    },
+    "r_clo": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Lower-canopy resistance for O3."
+    },
+    "ixxxlu": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Six-class land-use index for this category."
+    },
+    "hstar": {
+      "type": "unknown",
+      "units": "M/atm",
+      "description": "Effective Henry's law constant at 298 K for this gas.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "f0": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Normalized reactivity.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "dhr": {
+      "type": "unknown",
+      "units": "K",
+      "description": "Temperature coefficient of the Henry's law constant.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "dratio": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Diffusivity ratio to water vapour.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "tc": {
+      "type": "unknown",
+      "units": "K",
+      "description": "Surface temperature in Celsius."
+    },
+    "z_rad": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Stomatal radiation factor 200/(rad+0.1)."
+    },
+    "rs_open": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Stomatal resistance inside the 0-40 C window."
+    },
+    "rs": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Bulk stomatal resistance."
+    },
+    "rdc": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "In-canopy buoyant-convection resistance. The Wesely terrain-slope factor is absent because WRF's rdtheta is set to 0 and never assigned (FORTRAN_BUGS B5)."
+    },
+    "rluo1": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "O3 reference cuticle resistance under dew."
+    },
+    "rluo2": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "O3 reference cuticle resistance under rain."
+    },
+    "resice": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Ice resistance added to rclx, rgsx and the DRY rlux -- but NOT to the wet or rain rlux, which WRF omits it from."
+    },
+    "wrk": {
+      "type": "unknown",
+      "units": "1/K",
+      "description": "(t0 - T)/(t0 T), the Henry's law exponent argument."
+    },
+    "hstary": {
+      "type": "unknown",
+      "units": "M/atm",
+      "description": "Temperature-corrected Henry's law constant, hstar exp(dhr wrk).",
+      "shape": [
+        "spc"
+      ]
+    },
+    "hstary_d": {
+      "type": "unknown",
+      "units": "M/atm",
+      "description": "hstary floored so a discarded branch stays finite.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "wet_or_rain": {
+      "type": "unknown",
+      "units": "1",
+      "description": "1 when either the wet or the rain flag is set."
+    },
+    "rmx": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Mesophyll resistance.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "rsmx": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Stomatal + mesophyll resistance, rs dratio + rmx.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "rclx": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Lower-canopy resistance for this gas.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "rgsx": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Ground resistance for this gas.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "rlux_dry": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Cuticle resistance on a dry surface.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "rlux_wet": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Cuticle resistance under dew.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "rlux_rain": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Cuticle resistance under rain.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "rlux": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Cuticle resistance actually used; rain wins over dew, as in WRF's order of assignment.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "rc_general": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Surface resistance on the general-gas path: four resistances in parallel, the ground one in series with rac.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "hstary_o3": {
+      "type": "unknown",
+      "units": "M/atm",
+      "description": "Temperature-corrected Henry's law constant of O3."
+    },
+    "f0_o3": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Reactivity of O3 (1.0)."
+    },
+    "rmx_o3": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Mesophyll resistance of O3."
+    },
+    "rsmx_o3": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Stomatal + mesophyll resistance of O3."
+    },
+    "rlux_o3": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Cuticle resistance of O3; under dew or rain it becomes rluo1 or rluo2 OUTRIGHT, not blended."
+    },
+    "rc_o3": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Surface resistance of O3. Differs from the general path in using rclo/rgso directly and in capping rac at 100 s/m."
+    },
+    "rsmx_so2": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Stomatal resistance of SO2 -- with NO mesophyll term, unlike every general gas."
+    },
+    "rlux_so2_rh": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Humidity-dependent SO2 cuticle resistance."
+    },
+    "rlux_so2": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "SO2 cuticle resistance."
+    },
+    "rgsx_snow": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Snow/ice ground resistance ramp, shared by SO2 and NH3."
+    },
+    "rgsx_so2_sfc": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "SO2 ground resistance from the wetness and high-NH3 state alone."
+    },
+    "rgsx_so2": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "SO2 ground resistance after the water and snow overrides."
+    },
+    "rclx_so2_r": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "SO2 lower-canopy resistance; the Erisman branch uses rcls directly."
+    },
+    "rc_so2_canopy": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "The three-term SO2 combination: stomatal and cuticle in parallel with the SERIES chain rcls + rdc + rgsx. Note there is no rac term at all, unlike every other path."
+    },
+    "rc_so2": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Surface resistance of SO2, Erisman et al. (1994). Over snow, bare/urban soil, water or ice it collapses to the ground resistance alone."
+    },
+    "rsmx_nh3": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Stomatal resistance of NH3, again with no mesophyll term."
+    },
+    "is_winter": {
+      "type": "unknown",
+      "units": "1",
+      "description": "1 for seasonal categories 2, 3 and 5, which the NH3 branch treats together as 'winter, no snow'."
+    },
+    "nh3_cold": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "NH3 resistance below -1 C in the winter branches."
+    },
+    "nh3_grass": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "NH3 over grassland. Per species only because its fall-through branch is the species' own general-path rc_general; rc reads it at the species whose igas is NH3, where that is NH3's.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "nh3_agri": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "NH3 over agricultural land. Per species only because its fall-through branch is the species' own general-path rc_general; rc reads it at the species whose igas is NH3, where that is NH3's.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "nh3_forest": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "NH3 over forest and semi-natural ecosystems."
+    },
+    "nh3_urban": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "NH3 over urban and desert soils."
+    },
+    "nh3_class": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "NH3 resistance selected by the six-class land-use index. Per species only because its fall-through branch is the species' own general-path rc_general; rc reads it at the species whose igas is NH3, where that is NH3's.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "nh3_snow": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "NH3 snow/ice ramp."
+    },
+    "rc_nh3": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Surface resistance of NH3, Erisman et al. (1994). It bypasses H* and f0 entirely. Per species only because its fall-through branch is the species' own general-path rc_general; rc reads it at the species whose igas is NH3, where that is NH3's.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "rc": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Surface resistance of this gas, rcx(igas) as rc() returns it.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "srfres": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Rc as wesely_driver passes it on: rcx, except that the last two gas slots, numgas-1 and numgas, are set to ZERO (module_dep_simple.F:242-247, `if( .not. chm_is_moz ) srfres(numgas-1:numgas) = 0.`), so those two deposit at the aerodynamic limit 1/(Ra+Rb). For RADM2 (chem_opt = 101) those slots are HO (43) and HO2 (44), which is the intent. WRF BEHAVIOR, reproduced as-is: for CBM-Z (chem_opt = 170, numgas = 65) the same code zeroes slots 64 and 65, LIM and ISOPO2, while HO (33) and HO2 (34) keep their computed Rc. WRF's own comment a few lines below (`wig: CBMZ does not have HO and HO2 last so need to copy all species`) acknowledges the ordering for ddvel but the srfres zeroing was not adjusted. Correct behavior would zero srfres at p_ho and p_ho2 (by species pointer) rather than at the last two slots, leaving LIM and ISOPO2 with their resistance-limited Rc.",
+      "shape": [
+        "spc"
+      ]
+    },
+    "n_gas": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Number of gas slots under the selected mechanism, WRF's numgas = get_last_gas(chem_opt): 44 for chem_opt = 101, 65 for chem_opt = 170, from wesely_data's numgas_table so it follows `mech` like the per-gas data and p_nh3 do. wesely_driver zeroes Rc for the LAST TWO slots, so this is what selects which gases get srfres = 0."
+    },
+    "p_nh3": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Gas slot of NH3 under the selected mechanism (16 for chem_opt = 101, 15 for chem_opt = 170): which slot takes the Erisman NH3 path."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "r_i",
+      "rhs": {
+        "op": "index",
+        "args": [
+          "dat.ri_table",
+          "iland",
+          "iseason"
+        ]
+      }
+    },
+    {
+      "lhs": "r_lu",
+      "rhs": {
+        "op": "index",
+        "args": [
+          "dat.rlu_table",
+          "iland",
+          "iseason"
+        ]
+      }
+    },
+    {
+      "lhs": "r_ac",
+      "rhs": {
+        "op": "index",
+        "args": [
+          "dat.rac_table",
+          "iland",
+          "iseason"
+        ]
+      }
+    },
+    {
+      "lhs": "r_gss",
+      "rhs": {
+        "op": "index",
+        "args": [
+          "dat.rgss_table",
+          "iland",
+          "iseason"
+        ]
+      }
+    },
+    {
+      "lhs": "r_gso",
+      "rhs": {
+        "op": "index",
+        "args": [
+          "dat.rgso_table",
+          "iland",
+          "iseason"
+        ]
+      }
+    },
+    {
+      "lhs": "r_cls",
+      "rhs": {
+        "op": "index",
+        "args": [
+          "dat.rcls_table",
+          "iland",
+          "iseason"
+        ]
+      }
+    },
+    {
+      "lhs": "r_clo",
+      "rhs": {
+        "op": "index",
+        "args": [
+          "dat.rclo_table",
+          "iland",
+          "iseason"
+        ]
+      }
+    },
+    {
+      "lhs": "ixxxlu",
+      "rhs": {
+        "op": "index",
+        "args": [
+          "dat.ixxxlu_table",
+          "iland"
+        ]
+      }
+    },
+    {
+      "lhs": "hstar",
+      "rhs": {
+        "op": "faq",
+        "output_idx": [
+          "s"
+        ],
+        "args": [],
+        "ranges": {
+          "s": {
+            "from": "spc"
+          }
+        },
+        "expr": {
+          "op": "index",
+          "args": [
+            "dat.hstar_table",
+            "mech",
+            {
+              "op": "index",
+              "args": [
+                "igas",
+                "s"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "lhs": "f0",
+      "rhs": {
+        "op": "faq",
+        "output_idx": [
+          "s"
+        ],
+        "args": [],
+        "ranges": {
+          "s": {
+            "from": "spc"
+          }
+        },
+        "expr": {
+          "op": "index",
+          "args": [
+            "dat.f0_table",
+            "mech",
+            {
+              "op": "index",
+              "args": [
+                "igas",
+                "s"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "lhs": "dhr",
+      "rhs": {
+        "op": "faq",
+        "output_idx": [
+          "s"
+        ],
+        "args": [],
+        "ranges": {
+          "s": {
+            "from": "spc"
+          }
+        },
+        "expr": {
+          "op": "index",
+          "args": [
+            "dat.dhr_table",
+            "mech",
+            {
+              "op": "index",
+              "args": [
+                "igas",
+                "s"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "lhs": "dratio",
+      "rhs": {
+        "op": "faq",
+        "output_idx": [
+          "s"
+        ],
+        "args": [],
+        "ranges": {
+          "s": {
+            "from": "spc"
+          }
+        },
+        "expr": {
+          "op": "index",
+          "args": [
+            "dat.dratio_table",
+            "mech",
+            {
+              "op": "index",
+              "args": [
+                "igas",
+                "s"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "lhs": "tc",
+      "rhs": {
+        "op": "-",
+        "args": [
+          "T",
+          "par.t_celsius"
+        ]
+      }
+    },
+    {
+      "lhs": "z_rad",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "par.rs_rad_num",
+          {
+            "op": "+",
+            "args": [
+              "rad",
+              "par.rs_rad_eps"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rs_open",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "r_i",
+          {
+            "op": "+",
+            "args": [
+              1,
+              {
+                "op": "^",
+                "args": [
+                  "z_rad",
+                  2
+                ]
+              }
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              "par.rs_t_num",
+              {
+                "op": "max",
+                "args": [
+                  "par.rs_t_eps",
+                  {
+                    "op": "*",
+                    "args": [
+                      "tc",
+                      {
+                        "op": "-",
+                        "args": [
+                          "par.rs_t_hi",
+                          "tc"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rs",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<=",
+            "args": [
+              "tc",
+              0
+            ]
+          },
+          "par.r_big",
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "tc",
+                  "par.rs_t_hi"
+                ]
+              },
+              "par.r_big",
+              "rs_open"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rdc",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "par.rdc_a",
+          {
+            "op": "+",
+            "args": [
+              1,
+              {
+                "op": "/",
+                "args": [
+                  "par.rdc_b",
+                  {
+                    "op": "+",
+                    "args": [
+                      "rad",
+                      "par.rdc_c"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rluo1",
+      "rhs": {
+        "op": "/",
+        "args": [
+          1,
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1,
+                  "par.rluo1_r"
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  "par.rluo_mult",
+                  "r_lu"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rluo2",
+      "rhs": {
+        "op": "/",
+        "args": [
+          1,
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1,
+                  "par.rluo2_r"
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  "par.rluo_mult",
+                  "r_lu"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "resice",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "par.resice_a",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "-",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          "tc",
+                          "par.resice_b"
+                        ]
+                      },
+                      "par.resice_tscale"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "wrk",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "-",
+            "args": [
+              "par.t_ref",
+              "T"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "par.t_ref",
+              "T"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "hstary",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "hstar",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "dhr",
+                  "wrk"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "hstary_d",
+      "rhs": {
+        "op": "max",
+        "args": [
+          "hstary",
+          "par.hstar_eps"
+        ]
+      }
+    },
+    {
+      "lhs": "wet_or_rain",
+      "rhs": {
+        "op": "max",
+        "args": [
+          "wetflag",
+          "rainflag"
+        ]
+      }
+    },
+    {
+      "lhs": "rmx",
+      "rhs": {
+        "op": "/",
+        "args": [
+          1,
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "hstary_d",
+                  "par.rmx_h"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "par.rmx_f",
+                  "f0"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rsmx",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "rs",
+              "dratio"
+            ]
+          },
+          "rmx"
+        ]
+      }
+    },
+    {
+      "lhs": "rclx",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              1,
+              {
+                "op": "+",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          "par.hstar_scale",
+                          "hstary_d"
+                        ]
+                      },
+                      "r_cls"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      "f0",
+                      "r_clo"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "resice"
+        ]
+      }
+    },
+    {
+      "lhs": "rgsx",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              1,
+              {
+                "op": "+",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          "par.hstar_scale",
+                          "hstary_d"
+                        ]
+                      },
+                      "r_gss"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      "f0",
+                      "r_gso"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "resice"
+        ]
+      }
+    },
+    {
+      "lhs": "rlux_dry",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              "r_lu",
+              {
+                "op": "+",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      "par.hstar_scale",
+                      "hstary_d"
+                    ]
+                  },
+                  "f0"
+                ]
+              }
+            ]
+          },
+          "resice"
+        ]
+      }
+    },
+    {
+      "lhs": "rlux_wet",
+      "rhs": {
+        "op": "/",
+        "args": [
+          1,
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1,
+                  {
+                    "op": "*",
+                    "args": [
+                      "par.rluo_mult",
+                      "r_lu"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "par.hstar_scale_wet",
+                  "hstary"
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  "f0",
+                  "rluo1"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rlux_rain",
+      "rhs": {
+        "op": "/",
+        "args": [
+          1,
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1,
+                  {
+                    "op": "*",
+                    "args": [
+                      "par.rluo_mult",
+                      "r_lu"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "par.hstar_scale_wet",
+                  "hstary"
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  "f0",
+                  "rluo2"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rlux",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "rainflag",
+              0
+            ]
+          },
+          "rlux_rain",
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "wetflag",
+                  0
+                ]
+              },
+              "rlux_wet",
+              "rlux_dry"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rc_general",
+      "rhs": {
+        "op": "max",
+        "args": [
+          "par.rc_floor",
+          {
+            "op": "/",
+            "args": [
+              1,
+              {
+                "op": "+",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      1,
+                      "rsmx"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1,
+                      "rlux"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1,
+                      {
+                        "op": "+",
+                        "args": [
+                          "rdc",
+                          "rclx"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1,
+                      {
+                        "op": "+",
+                        "args": [
+                          "r_ac",
+                          "rgsx"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "hstary_o3",
+      "rhs": {
+        "op": "*",
+        "args": [
+          {
+            "op": "index",
+            "args": [
+              "dat.hstar_table",
+              "mech",
+              "par.p_o3"
+            ]
+          },
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "index",
+                    "args": [
+                      "dat.dhr_table",
+                      "mech",
+                      "par.p_o3"
+                    ]
+                  },
+                  "wrk"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "f0_o3",
+      "rhs": {
+        "op": "index",
+        "args": [
+          "dat.f0_table",
+          "mech",
+          "par.p_o3"
+        ]
+      }
+    },
+    {
+      "lhs": "rmx_o3",
+      "rhs": {
+        "op": "/",
+        "args": [
+          1,
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "hstary_o3",
+                  "par.rmx_h"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "par.rmx_f",
+                  "f0_o3"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rsmx_o3",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "rs",
+              {
+                "op": "index",
+                "args": [
+                  "dat.dratio_table",
+                  "mech",
+                  "par.p_o3"
+                ]
+              }
+            ]
+          },
+          "rmx_o3"
+        ]
+      }
+    },
+    {
+      "lhs": "rlux_o3",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "rainflag",
+              0
+            ]
+          },
+          "rluo2",
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "wetflag",
+                  0
+                ]
+              },
+              "rluo1",
+              {
+                "op": "+",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "r_lu",
+                      {
+                        "op": "+",
+                        "args": [
+                          {
+                            "op": "*",
+                            "args": [
+                              "par.hstar_scale",
+                              "hstary_o3"
+                            ]
+                          },
+                          "f0_o3"
+                        ]
+                      }
+                    ]
+                  },
+                  "resice"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rc_o3",
+      "rhs": {
+        "op": "max",
+        "args": [
+          "par.rc_floor",
+          {
+            "op": "/",
+            "args": [
+              1,
+              {
+                "op": "+",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      1,
+                      "rsmx_o3"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1,
+                      "rlux_o3"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1,
+                      {
+                        "op": "+",
+                        "args": [
+                          "rdc",
+                          {
+                            "op": "+",
+                            "args": [
+                              "r_clo",
+                              "resice"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1,
+                      {
+                        "op": "+",
+                        "args": [
+                          {
+                            "op": "min",
+                            "args": [
+                              "par.o3_rac_cap",
+                              "r_ac"
+                            ]
+                          },
+                          {
+                            "op": "+",
+                            "args": [
+                              "r_gso",
+                              "resice"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rsmx_so2",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "rs",
+          {
+            "op": "index",
+            "args": [
+              "dat.dratio_table",
+              "mech",
+              "par.p_so2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rlux_so2_rh",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "rh",
+              "par.so2_rh_split"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "par.so2_rh_a1",
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      "par.so2_rh_b1",
+                      "rh"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "par.so2_rh_a2",
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      "par.so2_rh_b2",
+                      "rh"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rlux_so2",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "tc",
+              "par.tc_warm"
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "wet_or_rain",
+                  0
+                ]
+              },
+              "par.so2_rlux_wet",
+              "rlux_so2_rh"
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "tc",
+                  "par.tc_cold"
+                ]
+              },
+              "par.so2_rlux_cool",
+              "par.so2_rlux_cold"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rgsx_snow",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "tc",
+              "par.snow_tc_hi"
+            ]
+          },
+          0,
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "tc",
+                  "par.tc_warm"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "par.snow_a",
+                  {
+                    "op": "-",
+                    "args": [
+                      "par.snow_tc_hi",
+                      "tc"
+                    ]
+                  }
+                ]
+              },
+              "par.snow_cold"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rgsx_so2_sfc",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "wet_or_rain",
+              0
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "highnh3",
+                  0
+                ]
+              },
+              0,
+              "par.so2_rgs_wet"
+            ]
+          },
+          "par.so2_rgs_dry"
+        ]
+      }
+    },
+    {
+      "lhs": "rgsx_so2",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "==",
+            "args": [
+              "iseason",
+              "par.season_snow"
+            ]
+          },
+          "rgsx_snow",
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "==",
+                "args": [
+                  "iland",
+                  "par.usgs_ice"
+                ]
+              },
+              "rgsx_snow",
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": "==",
+                    "args": [
+                      "iland",
+                      "par.usgs_water"
+                    ]
+                  },
+                  0,
+                  "rgsx_so2_sfc"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rc_so2_canopy",
+      "rhs": {
+        "op": "/",
+        "args": [
+          1,
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1,
+                  "rsmx_so2"
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  1,
+                  "rlux_so2"
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  1,
+                  {
+                    "op": "+",
+                    "args": [
+                      "rclx_so2_r",
+                      "rdc",
+                      "rgsx_so2"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rclx_so2_r",
+      "rhs": "r_cls"
+    },
+    {
+      "lhs": "rc_so2",
+      "rhs": {
+        "op": "max",
+        "args": [
+          "par.rc_floor",
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "==",
+                "args": [
+                  "iseason",
+                  "par.season_snow"
+                ]
+              },
+              "rgsx_so2",
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": "==",
+                    "args": [
+                      "ixxxlu",
+                      1
+                    ]
+                  },
+                  "rgsx_so2",
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "==",
+                        "args": [
+                          "iland",
+                          "par.usgs_water"
+                        ]
+                      },
+                      "rgsx_so2",
+                      {
+                        "op": "ifelse",
+                        "args": [
+                          {
+                            "op": "==",
+                            "args": [
+                              "iland",
+                              "par.usgs_ice"
+                            ]
+                          },
+                          "rgsx_so2",
+                          "rc_so2_canopy"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rsmx_nh3",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "rs",
+          {
+            "op": "index",
+            "args": [
+              "dat.dratio_table",
+              "mech",
+              "p_nh3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "is_winter",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "==",
+            "args": [
+              "iseason",
+              2
+            ]
+          },
+          1,
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "==",
+                "args": [
+                  "iseason",
+                  3
+                ]
+              },
+              1,
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": "==",
+                    "args": [
+                      "iseason",
+                      5
+                    ]
+                  },
+                  1,
+                  0
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "nh3_cold",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">=",
+            "args": [
+              "tc",
+              "par.tc_cold"
+            ]
+          },
+          "par.nh3_cool",
+          "par.nh3_verycold"
+        ]
+      }
+    },
+    {
+      "lhs": "nh3_grass",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "==",
+            "args": [
+              "iseason",
+              1
+            ]
+          },
+          "par.nh3_grass_summer",
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "is_winter",
+                  0
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": ">",
+                    "args": [
+                      "tc",
+                      "par.tc_warm"
+                    ]
+                  },
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": ">",
+                        "args": [
+                          "wet_or_rain",
+                          0
+                        ]
+                      },
+                      "par.nh3_grass_wet",
+                      {
+                        "op": "ifelse",
+                        "args": [
+                          {
+                            "op": "!=",
+                            "args": [
+                              "rad",
+                              0
+                            ]
+                          },
+                          "par.nh3_grass_day",
+                          "par.nh3_grass_night"
+                        ]
+                      }
+                    ]
+                  },
+                  "nh3_cold"
+                ]
+              },
+              "rc_general"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "nh3_agri",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "==",
+            "args": [
+              "iseason",
+              1
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "wet_or_rain",
+                  0
+                ]
+              },
+              "par.nh3_agri_wet_s",
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": "!=",
+                    "args": [
+                      "rad",
+                      0
+                    ]
+                  },
+                  "rsmx_nh3",
+                  "par.nh3_agri_night_s"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "is_winter",
+                  0
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": ">",
+                    "args": [
+                      "tc",
+                      "par.tc_warm"
+                    ]
+                  },
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": ">",
+                        "args": [
+                          "wet_or_rain",
+                          0
+                        ]
+                      },
+                      "par.nh3_agri_wet_w",
+                      {
+                        "op": "ifelse",
+                        "args": [
+                          {
+                            "op": "!=",
+                            "args": [
+                              "rad",
+                              0
+                            ]
+                          },
+                          "rsmx_nh3",
+                          "par.nh3_agri_night_w"
+                        ]
+                      }
+                    ]
+                  },
+                  "nh3_cold"
+                ]
+              },
+              "rc_general"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "nh3_forest",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "is_winter",
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "<=",
+                        "args": [
+                          "tc",
+                          "par.tc_warm"
+                        ]
+                      },
+                      1,
+                      0
+                    ]
+                  }
+                ]
+              },
+              0
+            ]
+          },
+          "nh3_cold",
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "wet_or_rain",
+                  0
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": ">",
+                    "args": [
+                      "highnh3",
+                      0
+                    ]
+                  },
+                  "par.nh3_forest_wet_hi",
+                  0
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": "!=",
+                    "args": [
+                      "rad",
+                      0
+                    ]
+                  },
+                  "par.nh3_forest_day",
+                  "par.nh3_forest_night"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "nh3_urban",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "wetflag",
+              0
+            ]
+          },
+          0,
+          "par.nh3_urban_dry"
+        ]
+      }
+    },
+    {
+      "lhs": "nh3_class",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "==",
+            "args": [
+              "ixxxlu",
+              3
+            ]
+          },
+          "nh3_grass",
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "==",
+                "args": [
+                  "ixxxlu",
+                  2
+                ]
+              },
+              "nh3_agri",
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": ">=",
+                    "args": [
+                      "ixxxlu",
+                      4
+                    ]
+                  },
+                  "nh3_forest",
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "==",
+                        "args": [
+                          "ixxxlu",
+                          1
+                        ]
+                      },
+                      "nh3_urban",
+                      "rc_general"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "nh3_snow",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "tc",
+              "par.snow_tc_hi"
+            ]
+          },
+          0,
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "tc",
+                  "par.tc_warm"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "par.snow_a",
+                  {
+                    "op": "-",
+                    "args": [
+                      "par.snow_tc_hi",
+                      "tc"
+                    ]
+                  }
+                ]
+              },
+              "par.snow_cold"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rc_nh3",
+      "rhs": {
+        "op": "max",
+        "args": [
+          "par.rc_floor",
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "==",
+                "args": [
+                  "iseason",
+                  "par.season_snow"
+                ]
+              },
+              "nh3_snow",
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": "==",
+                    "args": [
+                      "iland",
+                      "par.usgs_ice"
+                    ]
+                  },
+                  "nh3_snow",
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "==",
+                        "args": [
+                          "iland",
+                          "par.usgs_water"
+                        ]
+                      },
+                      0,
+                      "nh3_class"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rc",
+      "rhs": {
+        "op": "faq",
+        "output_idx": [
+          "s"
+        ],
+        "args": [],
+        "ranges": {
+          "s": {
+            "from": "spc"
+          }
+        },
+        "expr": {
+          "op": "ifelse",
+          "args": [
+            {
+              "op": "==",
+              "args": [
+                {
+                  "op": "index",
+                  "args": [
+                    "hstar",
+                    "s"
+                  ]
+                },
+                0
+              ]
+            },
+            "par.rc_floor",
+            {
+              "op": "ifelse",
+              "args": [
+                {
+                  "op": "==",
+                  "args": [
+                    {
+                      "op": "index",
+                      "args": [
+                        "igas",
+                        "s"
+                      ]
+                    },
+                    "par.p_o3"
+                  ]
+                },
+                "rc_o3",
+                {
+                  "op": "ifelse",
+                  "args": [
+                    {
+                      "op": "==",
+                      "args": [
+                        {
+                          "op": "index",
+                          "args": [
+                            "igas",
+                            "s"
+                          ]
+                        },
+                        "par.p_so2"
+                      ]
+                    },
+                    "rc_so2",
+                    {
+                      "op": "ifelse",
+                      "args": [
+                        {
+                          "op": "==",
+                          "args": [
+                            {
+                              "op": "index",
+                              "args": [
+                                "igas",
+                                "s"
+                              ]
+                            },
+                            "p_nh3"
+                          ]
+                        },
+                        {
+                          "op": "index",
+                          "args": [
+                            "rc_nh3",
+                            "s"
+                          ]
+                        },
+                        {
+                          "op": "index",
+                          "args": [
+                            "rc_general",
+                            "s"
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "lhs": "srfres",
+      "rhs": {
+        "op": "faq",
+        "output_idx": [
+          "s"
+        ],
+        "args": [],
+        "ranges": {
+          "s": {
+            "from": "spc"
+          }
+        },
+        "expr": {
+          "op": "ifelse",
+          "args": [
+            {
+              "op": ">=",
+              "args": [
+                {
+                  "op": "index",
+                  "args": [
+                    "igas",
+                    "s"
+                  ]
+                },
+                {
+                  "op": "-",
+                  "args": [
+                    "n_gas",
+                    1
+                  ]
+                }
+              ]
+            },
+            0,
+            {
+              "op": "index",
+              "args": [
+                "rc",
+                "s"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "lhs": "p_nh3",
+      "rhs": {
+        "op": "index",
+        "args": [
+          "dat.p_nh3_table",
+          "mech"
+        ]
+      }
+    },
+    {
+      "lhs": "n_gas",
+      "rhs": {
+        "op": "index",
+        "args": [
+          "dat.numgas_table",
+          "mech"
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "wesely_rc_call3_part1",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 3 (iland 2, iseason 2, ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent, dry). Gas slots 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          7.0,
+          8.0,
+          9.0,
+          10.0,
+          11.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 2401.579833984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 2401.579833984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1183.732177734375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1183.732177734375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 5923855872.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 5923855872.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 186.16810607910156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 186.16810607910156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 159.20587158203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 159.20587158203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 738973.375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 738973.375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2649.905029296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2649.905029296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1156.4632568359375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1156.4632568359375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call3_part2",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 3 (iland 2, iseason 2, ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent, dry). Gas slots 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          12.0,
+          13.0,
+          14.0,
+          15.0,
+          16.0,
+          17.0,
+          18.0,
+          19.0,
+          20.0,
+          21.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 64.19109344482422,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 64.19109344482422,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1122.9561767578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1122.9561767578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 31.18625259399414,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 31.18625259399414,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 90.93496704101562,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 90.93496704101562,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 16674034688.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 16674034688.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 212.53843688964844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 212.53843688964844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1183.3489990234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1183.3489990234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 8768358400.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 8768358400.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 11088419840.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 11088419840.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call3_part3",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 3 (iland 2, iseason 2, ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent, dry). Gas slots 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          22.0,
+          23.0,
+          24.0,
+          25.0,
+          26.0,
+          27.0,
+          28.0,
+          29.0,
+          30.0,
+          31.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 10102124544.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 10102124544.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 6544947712.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 6544947712.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 2091371520.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 2091371520.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 3403559680.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 3403559680.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 3457054976.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 3457054976.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 9759336448.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 9759336448.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 126373952.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 126373952.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 131616328.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 131616328.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 212.5315704345703,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 212.5315704345703,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1183.3489990234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1183.3489990234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call3_part4",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 3 (iland 2, iseason 2, ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent, dry). Gas slots 32, 33, 34, 35, 36, 37, 38, 39, 40, 41 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          32.0,
+          33.0,
+          34.0,
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 148.7357940673828,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 148.7357940673828,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 272414.6875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 272414.6875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 116.17759704589844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 116.17759704589844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 2058.217529296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 2058.217529296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 116.17759704589844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 116.17759704589844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 8253728.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 8253728.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 171.74037170410156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 171.74037170410156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3564485888.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3564485888.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 82807448.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 82807448.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call3_part5",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 3 (iland 2, iseason 2, ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent, dry). Gas slots 35, 36, 37, 38, 39, 40, 41, 42, 43, 44 on the species axis, in that order; only the last 3 are asserted here, the first 7 are the call's preceding slots, already asserted in the previous test, filling the ten-wide axis. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0,
+          42.0,
+          43.0,
+          44.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6926420992.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6926420992.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call62_part1",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 62 (iland 2, iseason 2, ta 285.70 K, gsw 315.5 W/m^2, rh 35.0 percent, dry). Gas slots 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 285.70428466796875,
+        "rad": 315.46209716796875,
+        "rh": 34.964874267578125,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          7.0,
+          8.0,
+          9.0,
+          10.0,
+          11.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1827.1431884765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1827.1431884765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1184.7349853515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1184.7349853515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 5953060864.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 5953060864.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 186.9202423095703,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 186.9202423095703,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 157.44618225097656,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 157.44618225097656,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 679695.0625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 679695.0625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2419.958251953125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2419.958251953125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1155.3607177734375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1155.3607177734375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call62_part2",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 62 (iland 2, iseason 2, ta 285.70 K, gsw 315.5 W/m^2, rh 35.0 percent, dry). Gas slots 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 285.70428466796875,
+        "rad": 315.46209716796875,
+        "rh": 34.964874267578125,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          12.0,
+          13.0,
+          14.0,
+          15.0,
+          16.0,
+          17.0,
+          18.0,
+          19.0,
+          20.0,
+          21.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 60.051753997802734,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 60.051753997802734,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1118.9678955078125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1118.9678955078125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 29.5427188873291,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 29.5427188873291,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 87.37027740478516,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 87.37027740478516,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 17868505088.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 17868505088.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 213.51930236816406,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 213.51930236816406,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1184.3203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1184.3203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 8978270208.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 8978270208.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 11350675456.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 11350675456.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call62_part3",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 62 (iland 2, iseason 2, ta 285.70 K, gsw 315.5 W/m^2, rh 35.0 percent, dry). Gas slots 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 285.70428466796875,
+        "rad": 315.46209716796875,
+        "rh": 34.964874267578125,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          22.0,
+          23.0,
+          24.0,
+          25.0,
+          26.0,
+          27.0,
+          28.0,
+          29.0,
+          30.0,
+          31.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 10274419712.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 10274419712.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 6686366720.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 6686366720.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 2106073216.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 2106073216.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 3442669312.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 3442669312.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 3489867008.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 3489867008.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 9967181824.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 9967181824.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 126403288.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 126403288.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 131646016.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 131646016.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 213.51095581054688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 213.51095581054688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1184.3203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1184.3203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call62_part4",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 62 (iland 2, iseason 2, ta 285.70 K, gsw 315.5 W/m^2, rh 35.0 percent, dry). Gas slots 32, 33, 34, 35, 36, 37, 38, 39, 40, 41 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 285.70428466796875,
+        "rad": 315.46209716796875,
+        "rh": 34.964874267578125,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          32.0,
+          33.0,
+          34.0,
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 146.6995849609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 146.6995849609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 252221.96875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 252221.96875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 116.34957122802734,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 116.34957122802734,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1874.2388916015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1874.2388916015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 116.34957122802734,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 116.34957122802734,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 7671044.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 7671044.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 171.7985382080078,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 171.7985382080078,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3591845120.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3591845120.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 81042080.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 81042080.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call62_part5",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 62 (iland 2, iseason 2, ta 285.70 K, gsw 315.5 W/m^2, rh 35.0 percent, dry). Gas slots 35, 36, 37, 38, 39, 40, 41, 42, 43, 44 on the species axis, in that order; only the last 3 are asserted here, the first 7 are the call's preceding slots, already asserted in the previous test, filling the ten-wide axis. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 285.70428466796875,
+        "rad": 315.46209716796875,
+        "rh": 34.964874267578125,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0,
+          42.0,
+          43.0,
+          44.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 7144871424.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 7144871424.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call302_part1",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 302 (iland 2, iseason 2, ta 281.47 K, gsw 0.0 W/m^2, rh 49.9 percent, dry). Gas slots 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 281.47344970703125,
+        "rad": 0.0,
+        "rh": 49.901424407958984,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          7.0,
+          8.0,
+          9.0,
+          10.0,
+          11.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 757.5171508789062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 757.5171508789062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1453.2928466796875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1453.2928466796875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 7529219072.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 7529219072.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 237.73988342285156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 237.73988342285156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 180.6738739013672,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 180.6738739013672,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 488872.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 488872.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1705.4381103515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1705.4381103515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1395.9990234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1395.9990234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call302_part2",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 302 (iland 2, iseason 2, ta 281.47 K, gsw 0.0 W/m^2, rh 49.9 percent, dry). Gas slots 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 281.47344970703125,
+        "rad": 0.0,
+        "rh": 49.901424407958984,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          12.0,
+          13.0,
+          14.0,
+          15.0,
+          16.0,
+          17.0,
+          18.0,
+          19.0,
+          20.0,
+          21.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 48.2093620300293,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 48.2093620300293,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1324.1270751953125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1324.1270751953125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 24.701610565185547,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 24.701610565185547,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 82.22384643554688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 82.22384643554688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 300.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 300.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 282.49884033203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 282.49884033203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1452.4647216796875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1452.4647216796875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 13485164544.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 13485164544.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 16945959936.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 16945959936.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call302_part3",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 302 (iland 2, iseason 2, ta 281.47 K, gsw 0.0 W/m^2, rh 49.9 percent, dry). Gas slots 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 281.47344970703125,
+        "rad": 0.0,
+        "rh": 49.901424407958984,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          22.0,
+          23.0,
+          24.0,
+          25.0,
+          26.0,
+          27.0,
+          28.0,
+          29.0,
+          30.0,
+          31.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 13485166592.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 13485166592.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 9574466560.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 9574466560.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 2335236352.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 2335236352.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 4100414464.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 4100414464.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 4022885888.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 4022885888.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 14184395776.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 14184395776.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 126814296.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 126814296.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 132061776.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 132061776.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 282.4726257324219,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 282.4726257324219,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1452.4647216796875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1452.4647216796875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call302_part4",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 302 (iland 2, iseason 2, ta 281.47 K, gsw 0.0 W/m^2, rh 49.9 percent, dry). Gas slots 32, 33, 34, 35, 36, 37, 38, 39, 40, 41 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 281.47344970703125,
+        "rad": 0.0,
+        "rh": 49.901424407958984,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          32.0,
+          33.0,
+          34.0,
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 152.31214904785156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 152.31214904785156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 186198.640625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 186198.640625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 129.2754364013672,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 129.2754364013672,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1309.7855224609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1309.7855224609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 129.2754364013672,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 129.2754364013672,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 5748622.5,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 5748622.5,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 180.9855194091797,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 180.9855194091797,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 4022885888.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 4022885888.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 74583512.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 74583512.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call302_part5",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 302 (iland 2, iseason 2, ta 281.47 K, gsw 0.0 W/m^2, rh 49.9 percent, dry). Gas slots 35, 36, 37, 38, 39, 40, 41, 42, 43, 44 on the species axis, in that order; only the last 3 are asserted here, the first 7 are the call's preceding slots, already asserted in the previous test, filling the ten-wide axis. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 281.47344970703125,
+        "rad": 0.0,
+        "rh": 49.901424407958984,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0,
+          42.0,
+          43.0,
+          44.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 12765955072.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 12765955072.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call722_part1",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 722 (iland 2, iseason 2, ta 278.37 K, gsw 0.0 W/m^2, rh 67.5 percent, dry). Gas slots 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 278.36749267578125,
+        "rad": 0.0,
+        "rh": 67.48494720458984,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          7.0,
+          8.0,
+          9.0,
+          10.0,
+          11.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 230.0763702392578,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 230.0763702392578,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1453.3675537109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1453.3675537109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 7100203520.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 7100203520.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 237.8257598876953,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 237.8257598876953,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 171.21812438964844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 171.21812438964844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 381379.6875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 381379.6875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1317.6240234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1317.6240234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1382.5828857421875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1382.5828857421875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call722_part2",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 722 (iland 2, iseason 2, ta 278.37 K, gsw 0.0 W/m^2, rh 67.5 percent, dry). Gas slots 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 278.36749267578125,
+        "rad": 0.0,
+        "rh": 67.48494720458984,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          12.0,
+          13.0,
+          14.0,
+          15.0,
+          16.0,
+          17.0,
+          18.0,
+          19.0,
+          20.0,
+          21.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 36.03984451293945,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 36.03984451293945,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1292.7913818359375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1292.7913818359375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 20.451440811157227,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 20.451440811157227,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 69.47544860839844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 69.47544860839844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 300.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 300.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 282.5830993652344,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 282.5830993652344,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1452.3267822265625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1452.3267822265625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 13485166592.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 13485166592.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 16945959936.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 16945959936.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call722_part3",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 722 (iland 2, iseason 2, ta 278.37 K, gsw 0.0 W/m^2, rh 67.5 percent, dry). Gas slots 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 278.36749267578125,
+        "rad": 0.0,
+        "rh": 67.48494720458984,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          22.0,
+          23.0,
+          24.0,
+          25.0,
+          26.0,
+          27.0,
+          28.0,
+          29.0,
+          30.0,
+          31.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 13485166592.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 13485166592.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 9574467584.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 9574467584.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 2335236352.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 2335236352.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 4100414464.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 4100414464.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 4022885888.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 4022885888.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 14184396800.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 14184396800.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 126814296.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 126814296.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 132061776.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 132061776.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 282.54486083984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 282.54486083984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1452.3267822265625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1452.3267822265625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call722_part4",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 722 (iland 2, iseason 2, ta 278.37 K, gsw 0.0 W/m^2, rh 67.5 percent, dry). Gas slots 32, 33, 34, 35, 36, 37, 38, 39, 40, 41 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 278.36749267578125,
+        "rad": 0.0,
+        "rh": 67.48494720458984,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          32.0,
+          33.0,
+          34.0,
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 146.75364685058594,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 146.75364685058594,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 148141.234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 148141.234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 129.33799743652344,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 129.33799743652344,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1007.8839111328125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1007.8839111328125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 129.33799743652344,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 129.33799743652344,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 4624918.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 4624918.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 181.06381225585938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 181.06381225585938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 4022885888.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 4022885888.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 69900144.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 69900144.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call722_part5",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 722 (iland 2, iseason 2, ta 278.37 K, gsw 0.0 W/m^2, rh 67.5 percent, dry). Gas slots 35, 36, 37, 38, 39, 40, 41, 42, 43, 44 on the species axis, in that order; only the last 3 are asserted here, the first 7 are the call's preceding slots, already asserted in the previous test, filling the ten-wide axis. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 278.36749267578125,
+        "rad": 0.0,
+        "rh": 67.48494720458984,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0,
+          42.0,
+          43.0,
+          44.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 12765955072.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 12765955072.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call902_part1",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 902 (iland 2, iseason 2, ta 277.69 K, gsw 0.0 W/m^2, rh 72.2 percent, dry). Gas slots 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 277.6850280761719,
+        "rad": 0.0,
+        "rh": 72.20880126953125,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          7.0,
+          8.0,
+          9.0,
+          10.0,
+          11.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 166.37579345703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 166.37579345703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1453.44384765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1453.44384765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 7008029184.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 7008029184.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 237.91371154785156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 237.91371154785156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 169.23324584960938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 169.23324584960938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 360861.625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 360861.625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1245.3577880859375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1245.3577880859375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1379.2706298828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1379.2706298828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call902_part2",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 902 (iland 2, iseason 2, ta 277.69 K, gsw 0.0 W/m^2, rh 72.2 percent, dry). Gas slots 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 277.6850280761719,
+        "rad": 0.0,
+        "rh": 72.20880126953125,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          12.0,
+          13.0,
+          14.0,
+          15.0,
+          16.0,
+          17.0,
+          18.0,
+          19.0,
+          20.0,
+          21.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 33.69269943237305,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 33.69269943237305,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1285.0328369140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1285.0328369140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 19.655784606933594,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 19.655784606933594,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 66.72765350341797,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 66.72765350341797,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 300.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 300.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 282.66943359375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 282.66943359375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1452.348876953125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1452.348876953125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 13485166592.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 13485166592.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 16945959936.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 16945959936.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call902_part3",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 902 (iland 2, iseason 2, ta 277.69 K, gsw 0.0 W/m^2, rh 72.2 percent, dry). Gas slots 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 277.6850280761719,
+        "rad": 0.0,
+        "rh": 72.20880126953125,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          22.0,
+          23.0,
+          24.0,
+          25.0,
+          26.0,
+          27.0,
+          28.0,
+          29.0,
+          30.0,
+          31.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 13485166592.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 13485166592.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 9574467584.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 9574467584.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 2335236352.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 2335236352.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 4100414464.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 4100414464.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 4022885888.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 4022885888.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 14184396800.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 14184396800.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 126814296.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 126814296.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 132061776.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 132061776.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 282.6280822753906,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 282.6280822753906,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1452.348876953125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1452.348876953125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call902_part4",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 902 (iland 2, iseason 2, ta 277.69 K, gsw 0.0 W/m^2, rh 72.2 percent, dry). Gas slots 32, 33, 34, 35, 36, 37, 38, 39, 40, 41 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 277.6850280761719,
+        "rad": 0.0,
+        "rh": 72.20880126953125,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          32.0,
+          33.0,
+          34.0,
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 145.60365295410156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 145.60365295410156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 140786.921875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 140786.921875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 129.40211486816406,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 129.40211486816406,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 952.1323852539062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 952.1323852539062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 129.40211486816406,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 129.40211486816406,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 4406213.5,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 4406213.5,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 181.14402770996094,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 181.14402770996094,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 4022885888.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 4022885888.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 68897744.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 68897744.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call902_part5",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 902 (iland 2, iseason 2, ta 277.69 K, gsw 0.0 W/m^2, rh 72.2 percent, dry). Gas slots 35, 36, 37, 38, 39, 40, 41, 42, 43, 44 on the species axis, in that order; only the last 3 are asserted here, the first 7 are the call's preceding slots, already asserted in the previous test, filling the ten-wide axis. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 277.6850280761719,
+        "rad": 0.0,
+        "rh": 72.20880126953125,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0,
+          42.0,
+          43.0,
+          44.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 12765956096.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 12765956096.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call1202_part1",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 1202 (iland 2, iseason 2, ta 282.16 K, gsw 304.9 W/m^2, rh 69.0 percent, dry). Gas slots 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 282.1641540527344,
+        "rad": 304.9364318847656,
+        "rh": 69.03053283691406,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          7.0,
+          8.0,
+          9.0,
+          10.0,
+          11.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 204.98599243164062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 204.98599243164062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1185.476806640625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1185.476806640625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 5989193728.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 5989193728.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 187.46682739257812,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 187.46682739257812,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 150.09291076660156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 150.09291076660156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 516231.3125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 516231.3125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1801.8184814453125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1801.8184814453125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1148.1500244140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1148.1500244140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call1202_part2",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 1202 (iland 2, iseason 2, ta 282.16 K, gsw 304.9 W/m^2, rh 69.0 percent, dry). Gas slots 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 282.1641540527344,
+        "rad": 304.9364318847656,
+        "rh": 69.03053283691406,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          12.0,
+          13.0,
+          14.0,
+          15.0,
+          16.0,
+          17.0,
+          18.0,
+          19.0,
+          20.0,
+          21.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 46.582359313964844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 46.582359313964844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1100.7947998046875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1100.7947998046875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 24.40340805053711,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 24.40340805053711,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 75.19586181640625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 75.19586181640625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 22486247424.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 22486247424.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 214.23231506347656,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 214.23231506347656,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1184.9423828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1184.9423828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 9639841792.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 9639841792.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 12176248832.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 12176248832.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call1202_part3",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 1202 (iland 2, iseason 2, ta 282.16 K, gsw 304.9 W/m^2, rh 69.0 percent, dry). Gas slots 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 282.1641540527344,
+        "rad": 304.9364318847656,
+        "rh": 69.03053283691406,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          22.0,
+          23.0,
+          24.0,
+          25.0,
+          26.0,
+          27.0,
+          28.0,
+          29.0,
+          30.0,
+          31.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 10802589696.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 10802589696.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 7127883776.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 7127883776.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 2149388032.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 2149388032.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 3559935744.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 3559935744.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 3587478016.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 3587478016.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 10615272448.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 10615272448.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 126487472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 126487472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 131731176.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 131731176.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 214.21826171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 214.21826171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1184.9423828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1184.9423828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call1202_part4",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 1202 (iland 2, iseason 2, ta 282.16 K, gsw 304.9 W/m^2, rh 69.0 percent, dry). Gas slots 32, 33, 34, 35, 36, 37, 38, 39, 40, 41 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 282.1641540527344,
+        "rad": 304.9364318847656,
+        "rh": 69.03053283691406,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          32.0,
+          33.0,
+          34.0,
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 139.98866271972656,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 139.98866271972656,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 195772.96875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 195772.96875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 116.47573852539062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 116.47573852539062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1384.400146484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1384.400146484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 116.47573852539062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 116.47573852539062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 6028922.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 6028922.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 171.84292602539062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 171.84292602539062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3672655360.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3672655360.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 75483312.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 75483312.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call1202_part5",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 1202 (iland 2, iseason 2, ta 282.16 K, gsw 304.9 W/m^2, rh 69.0 percent, dry). Gas slots 35, 36, 37, 38, 39, 40, 41, 42, 43, 44 on the species axis, in that order; only the last 3 are asserted here, the first 7 are the call's preceding slots, already asserted in the previous test, filling the ten-wide axis. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 282.1641540527344,
+        "rad": 304.9364318847656,
+        "rh": 69.03053283691406,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0,
+          42.0,
+          43.0,
+          44.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 7855083520.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 7855083520.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call1412_part1",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 1412 (iland 2, iseason 2, ta 288.56 K, gsw 549.1 W/m^2, rh 46.9 percent, dry). Gas slots 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 288.56097412109375,
+        "rad": 549.1495971679688,
+        "rh": 46.90193557739258,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          7.0,
+          8.0,
+          9.0,
+          10.0,
+          11.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 885.5711059570312,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 885.5711059570312,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1175.253662109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1175.253662109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 5613976576.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 5613976576.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 179.0764923095703,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 179.0764923095703,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 157.06776428222656,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 157.06776428222656,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 844468.125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 844468.125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3065.76123046875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3065.76123046875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1151.2996826171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1151.2996826171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call1412_part2",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 1412 (iland 2, iseason 2, ta 288.56 K, gsw 549.1 W/m^2, rh 46.9 percent, dry). Gas slots 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 288.56097412109375,
+        "rad": 549.1495971679688,
+        "rh": 46.90193557739258,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          12.0,
+          13.0,
+          14.0,
+          15.0,
+          16.0,
+          17.0,
+          18.0,
+          19.0,
+          20.0,
+          21.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 68.97281646728516,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 68.97281646728516,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1122.2708740234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1122.2708740234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 33.148033142089844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 33.148033142089844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 94.91934204101562,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 94.91934204101562,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 13128208384.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 13128208384.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 203.34506225585938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 203.34506225585938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1174.9190673828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1174.9190673828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 8011567616.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 8011567616.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 10141690880.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 10141690880.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call1412_part3",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 1412 (iland 2, iseason 2, ta 288.56 K, gsw 549.1 W/m^2, rh 46.9 percent, dry). Gas slots 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 288.56097412109375,
+        "rad": 549.1495971679688,
+        "rh": 46.90193557739258,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          22.0,
+          23.0,
+          24.0,
+          25.0,
+          26.0,
+          27.0,
+          28.0,
+          29.0,
+          30.0,
+          31.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 9461097472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 9461097472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 6029687808.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 6029687808.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 2034003072.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 2034003072.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 3254193408.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 3254193408.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 3330534144.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 3330534144.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 9000984576.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 9000984576.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 126255536.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 126255536.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 131496520.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 131496520.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 203.34063720703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 203.34063720703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1174.9190673828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1174.9190673828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call1412_part4",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 1412 (iland 2, iseason 2, ta 288.56 K, gsw 549.1 W/m^2, rh 46.9 percent, dry). Gas slots 32, 33, 34, 35, 36, 37, 38, 39, 40, 41 on the species axis, in that order. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 288.56097412109375,
+        "rad": 549.1495971679688,
+        "rh": 46.90193557739258,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          32.0,
+          33.0,
+          34.0,
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 151.1829071044922,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 151.1829071044922,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 308043.96875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 308043.96875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 114.5808334350586,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 114.5808334350586,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 2392.9736328125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 2392.9736328125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 114.5808334350586,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 114.5808334350586,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 9276315.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 9276315.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 171.23634338378906,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 171.23634338378906,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3458061568.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3458061568.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 85655072.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 85655072.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_rc_call1412_part5",
+      "description": "Reference: the WRF-Chem 4.8 em_scm_xy single-column run (chem_opt = 101 RADM2 KPP) with gas_drydep_opt = 1 -- the chem_scm reference run has it OFF and produces no dry-deposition ground truth at all, so data/eqwefic/chem_scm_dep is the same namelist with it switched on. GNU gfortran 13.3 REAL*4 build; dumped by the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem, in wesely_driver for column i = its, j = jts at call 1412 (iland 2, iseason 2, ta 288.56 K, gsw 549.1 W/m^2, rh 46.9 percent, dry). Gas slots 35, 36, 37, 38, 39, 40, 41, 42, 43, 44 on the species axis, in that order; only the last 3 are asserted here, the first 7 are the call's preceding slots, already asserted in the previous test, filling the ten-wide axis. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 288.56097412109375,
+        "rad": 549.1495971679688,
+        "rh": 46.90193557739258,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0,
+          42.0,
+          43.0,
+          44.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6164887040.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6164887040.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu1_s1_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 1 (urban), season 1, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 1.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1000.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 3099.997314453125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 400.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 10.370565414428711,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 228.7703857421875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 5348.40625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 50.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 3098.578369140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 10168266752.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 199.99998474121094,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu1_s1_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 1 (urban), season 1, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 1.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 500.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 2809.657958984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 352.941162109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 44.57473373413086,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1053.6214599609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 2803.524169921875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3014967552.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.22222328186035,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu1_s1_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 1 (urban), season 1, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 1.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 500.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 2366.405517578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 285.7142639160156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 43.288352966308594,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1053.6214599609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 50.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 2362.052734375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3014967552.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.22222328186035,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu1_s1_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 1 (urban), season 1, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 1.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 2809.657958984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 352.941162109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 44.57473373413086,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1053.6214599609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 2803.524169921875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3014967552.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.22222328186035,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu1_s2_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 1 (urban), season 2, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 1.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1000.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 3099.997314453125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 400.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 10.370565414428711,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 228.7703857421875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 5348.40625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 50.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 3098.578369140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 10168266752.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 199.99998474121094,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu1_s2_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 1 (urban), season 2, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 1.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 500.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 2809.657958984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 352.941162109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 44.57473373413086,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1053.6214599609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 2803.524169921875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3014967552.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.22222328186035,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu1_s2_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 1 (urban), season 2, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 1.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 500.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 2366.405517578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 285.7142639160156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 43.288352966308594,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1053.6214599609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 50.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 2362.052734375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3014967552.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.22222328186035,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu1_s2_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 1 (urban), season 2, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 1.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 2809.657958984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 352.941162109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 44.57473373413086,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1053.6214599609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 2803.524169921875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3014967552.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.22222328186035,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu1_s4_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 1 (urban), season 4, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 1.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 6099.9658203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 699.9998779296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 10.370565414428711,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 151.55604553222656,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1412.1019287109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6077.33642578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 4026653696.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 125.00000762939453,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu1_s4_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 1 (urban), season 4, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 1.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 5069.2041015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 567.5674438476562,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 40.54943084716797,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 680.1332397460938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 5037.50341796875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 20.83333396911621,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu1_s4_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 1 (urban), season 4, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 1.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 3788.79296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 411.7646179199219,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 39.482112884521484,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 680.1332397460938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 3771.056396484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 20.83333396911621,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu1_s4_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 1 (urban), season 4, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 1.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 5069.2041015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 567.5674438476562,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 40.54943084716797,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 680.1332397460938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 5037.50341796875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 20.83333396911621,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu2_s1_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 2 (dryland cropland), season 1, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 162.2566680908203,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 138.8277130126953,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 77.38192749023438,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 71.76569366455078,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 116.69284057617188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 100.04420471191406,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 210.95828247070312,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1499778.875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 86.52837371826172,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu2_s1_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 2 (dryland cropland), season 1, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 133.2769317626953,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 70.14468383789062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 30.981374740600586,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 105.70599365234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 50.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 198.37831115722656,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.08544921875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 20.111188888549805,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu2_s1_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 2 (dryland cropland), season 1, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 132.10317993164062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 67.01103973388672,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 30.354429244995117,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 105.70599365234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 50.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 195.7889404296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.08544921875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 20.111188888549805,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu2_s1_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 2 (dryland cropland), season 1, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 133.2769317626953,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 70.14468383789062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 30.981374740600586,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 105.70599365234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 50.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 198.37831115722656,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.08544921875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 20.111188888549805,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu2_s2_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 2 (dryland cropland), season 2, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 2401.579833984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1183.732177734375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 186.16810607910156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 159.20587158203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 2649.905029296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 16674034688.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1183.3489990234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 6544947712.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 171.74037170410156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu2_s2_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 2 (dryland cropland), season 2, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1066.8043212890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 168.71812438964844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 40.97272872924805,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 856.1080932617188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 100.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1065.78369140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 26999.74609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.01899528503418,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu2_s2_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 2 (dryland cropland), season 2, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 995.970458984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 151.65965270996094,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 39.88330841064453,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 856.1080932617188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 100.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 995.0809326171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 26999.74609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.01899528503418,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu2_s2_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 2 (dryland cropland), season 2, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1066.8043212890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 168.71812438964844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 40.97272872924805,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 856.1080932617188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 100.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1065.78369140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 26999.74609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.01899528503418,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu2_s4_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 2 (dryland cropland), season 4, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 8014.16845703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 997.4432983398438,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 5.364043235778809,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 62.56660079956055,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1322.1019287109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 7973.87060546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 4026653696.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 35.000022888183594,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu2_s4_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 2 (dryland cropland), season 4, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 6324.57958984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 748.5608520507812,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 29.372018814086914,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 658.5414428710938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6274.5146484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 14.58333683013916,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu2_s4_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 2 (dryland cropland), season 4, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 4448.79541015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 499.3599853515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 28.807924270629883,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 658.5414428710938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 4423.9658203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 14.58333683013916,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu2_s4_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 2 (dryland cropland), season 4, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 6324.57958984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 748.5608520507812,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 29.372018814086914,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 658.5414428710938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6274.5146484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 14.58333683013916,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu7_s1_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 7 (grassland), season 1, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 7.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 295.0748596191406,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 259.2142028808594,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 118.99420166015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 88.88538360595703,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 231.9410858154297,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1000.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 380.8438415527344,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1500074.625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 94.64134216308594,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu7_s1_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 7 (grassland), season 1, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 7.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 240.51101684570312,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 102.699951171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 33.791015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 192.228759765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1000.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 341.7228088378906,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.08984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 20.520030975341797,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu7_s1_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 7 (grassland), season 1, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 7.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 236.71548461914062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 96.11900329589844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 33.046566009521484,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 192.228759765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1000.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 334.11126708984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.08984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 20.520030975341797,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu7_s1_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 7 (grassland), season 1, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 7.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 240.51101684570312,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 102.699951171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 33.791015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 192.228759765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1000.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 341.7228088378906,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.08984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 20.520030975341797,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu7_s2_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 7 (grassland), season 2, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 7.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 2401.579833984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1398.7669677734375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 212.54782104492188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 150.76071166992188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 4347.43310546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 50.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1398.4217529296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 9096494080.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 162.44114685058594,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu7_s2_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 7 (grassland), season 2, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 7.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1238.3765869140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 190.10037231445312,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 40.390445709228516,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 979.6952514648438,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 20.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1237.1502685546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 26999.775390625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 21.85856056213379,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu7_s2_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 7 (grassland), season 2, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 7.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1143.93505859375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 168.71810913085938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 39.33137130737305,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 979.6952514648438,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 20.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1142.8885498046875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 26999.775390625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 21.85856056213379,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu7_s2_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 7 (grassland), season 2, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 7.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1238.3765869140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 190.10037231445312,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 40.390445709228516,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 979.6952514648438,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 20.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1237.1502685546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 26999.775390625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 21.85856056213379,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu7_s4_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 7 (grassland), season 4, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 7.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 8014.16845703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 997.4432983398438,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 5.364043235778809,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 62.56660079956055,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1322.1019287109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 7973.87060546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 4026653696.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 35.000022888183594,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu7_s4_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 7 (grassland), season 4, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 7.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 6324.57958984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 748.5608520507812,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 29.372018814086914,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 658.5414428710938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6274.5146484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 14.58333683013916,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu7_s4_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 7 (grassland), season 4, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 7.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 4448.79541015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 499.3599853515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 28.807924270629883,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 658.5414428710938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 4423.9658203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 14.58333683013916,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu7_s4_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 7 (grassland), season 4, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 7.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 6324.57958984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 748.5608520507812,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 29.372018814086914,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 658.5414428710938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6274.5146484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 14.58333683013916,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu11_s1_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 11 (deciduous broadleaf), season 1, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 186.20330810546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 168.31202697753906,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 89.64131927490234,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 106.4343490600586,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 141.22914123535156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 500.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 261.1147766113281,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1500009.625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 138.63636779785156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu11_s1_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 11 (deciduous broadleaf), season 1, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 160.22181701660156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 80.07108306884766,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 36.05073547363281,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 125.44866180419922,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 242.11119079589844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.08837890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.036245346069336,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu11_s1_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 11 (deciduous broadleaf), season 1, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 158.52850341796875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 76.013427734375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 35.20463562011719,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 125.44866180419922,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 238.26539611816406,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.08837890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.036245346069336,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu11_s1_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 11 (deciduous broadleaf), season 1, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 160.22181701660156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 80.07108306884766,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 36.05073547363281,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 125.44866180419922,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 100.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 242.11119079589844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.08837890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.036245346069336,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu11_s2_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 11 (deciduous broadleaf), season 2, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 2401.579833984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1906.79931640625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 212.54782104492188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 447.40771484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 7093.712890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 500.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1906.6029052734375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 10777068544.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 695.348388671875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu11_s2_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 11 (deciduous broadleaf), season 2, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1620.66015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 190.10037231445312,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 49.11494827270508,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1073.3360595703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1618.8812255859375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 26999.7890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 24.37198257446289,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu11_s2_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 11 (deciduous broadleaf), season 2, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1462.631591796875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 168.71810913085938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 47.55774688720703,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1073.3360595703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1461.1826171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 26999.7890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 24.37198257446289,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu11_s2_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 11 (deciduous broadleaf), season 2, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1620.66015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 190.10037231445312,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 49.11494827270508,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1073.3360595703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 100.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1618.8812255859375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 26999.7890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 24.37198257446289,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu11_s4_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 11 (deciduous broadleaf), season 4, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 3915.546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 650.1287841796875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 11.42838191986084,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 443.2667541503906,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 2267.846435546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 3906.341064453125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3990942976.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 738.6019897460938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu11_s4_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 11 (deciduous broadleaf), season 4, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 3463.485595703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 534.3335571289062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 49.21498107910156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 831.1979370117188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 3448.759765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2066539648.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 24.18151092529297,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu11_s4_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 11 (deciduous broadleaf), season 4, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 2813.785400390625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 393.98663330078125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 47.65153503417969,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 831.1979370117188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 2804.058349609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2066539648.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 24.18151092529297,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu11_s4_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 11 (deciduous broadleaf), season 4, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 3463.485595703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 534.3335571289062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 49.21498107910156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 831.1979370117188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 3448.759765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2066539648.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 24.18151092529297,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu16_s1_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 16 (water), season 1, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 16.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 19964.513671875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1999.9990234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 13.121042251586914,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 8834.8779296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 49879428.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu16_s1_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 16 (water), season 1, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 16.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 11987.0810546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1199.999267578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 12.991130828857422,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6795.6474609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 49305584.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu16_s1_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 16 (water), season 1, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 16.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 6662.6767578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 666.6664428710938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 12.991130828857422,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 4676.83837890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 49305584.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu16_s1_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 16 (water), season 1, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 16.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 11987.0810546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1199.999267578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 12.991130828857422,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6795.6474609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 49305584.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu16_s2_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 16 (water), season 2, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 16.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 19964.513671875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1999.9990234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 13.121042251586914,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 8834.8779296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 49879428.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu16_s2_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 16 (water), season 2, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 16.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 11987.0810546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1199.999267578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 12.991130828857422,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6795.6474609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 49305584.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu16_s2_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 16 (water), season 2, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 16.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 6662.6767578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 666.6664428710938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 12.991130828857422,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 4676.83837890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 49305584.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu16_s2_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 16 (water), season 2, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 16.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 11987.0810546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1199.999267578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 12.991130828857422,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6795.6474609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 49305584.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu16_s4_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 16 (water), season 4, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 16.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 19964.513671875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1999.9990234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 13.121042251586914,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 8834.8779296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 49879428.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu16_s4_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 16 (water), season 4, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 16.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 11987.0810546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1199.999267578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 12.991130828857422,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6795.6474609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 49305584.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu16_s4_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 16 (water), season 4, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 16.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 6662.6767578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 666.6664428710938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 12.991130828857422,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 4676.83837890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 49305584.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu16_s4_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 16 (water), season 4, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 16.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 11987.0810546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1199.999267578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 12.991130828857422,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6795.6474609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 49305584.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu17_s1_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 17 (herbaceous wetland), season 1, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 17.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 211.0515594482422,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 196.62930297851562,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 128.1098175048828,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 90.04676818847656,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 107.71795654296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 500.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 303.37860107421875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1456432.75,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 110.09810638427734,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu17_s1_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 17 (herbaceous wetland), season 1, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 17.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 187.53353881835938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 111.86762237548828,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 34.02225112915039,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 98.53685760498047,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 282.20806884765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 7461.56494140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 21.001283645629883,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu17_s1_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 17 (herbaceous wetland), season 1, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 17.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 185.21791076660156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 104.10372924804688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 33.26769256591797,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 98.53685760498047,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 276.9967041015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 7461.56494140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 21.001283645629883,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu17_s1_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 17 (herbaceous wetland), season 1, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 17.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 187.53353881835938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 111.86762237548828,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 34.02225112915039,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 98.53685760498047,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 100.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 282.20806884765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 7461.56494140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 21.001283645629883,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu17_s2_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 17 (herbaceous wetland), season 2, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 17.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 2401.579833984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 2771.922607421875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 402.8033142089844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 151.4549560546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 212.3558349609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 500.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 2380.39013671875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 49868572.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 171.9246826171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu17_s2_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 17 (herbaceous wetland), season 2, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 17.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 2205.782470703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 329.1469421386719,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 40.44010925292969,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 181.8253936767578,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1948.115234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 26985.244140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.022022247314453,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu17_s2_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 17 (herbaceous wetland), season 2, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 17.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1923.0009765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 269.91839599609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 39.37846374511719,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 181.8253936767578,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1724.1876220703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 26985.244140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.022022247314453,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu17_s2_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 17 (herbaceous wetland), season 2, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 17.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 2205.782470703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 329.1469421386719,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 40.44010925292969,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 181.8253936767578,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 100.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1948.115234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 26985.244140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.022022247314453,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu17_s4_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 17 (herbaceous wetland), season 4, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 17.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 6297.87255859375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 812.522705078125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 93.3868637084961,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1331.43798828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 6272.490234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3955858688.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 70.64105987548828,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu17_s4_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 17 (herbaceous wetland), season 4, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 17.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 3978.0849609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 559.8193969726562,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 34.681941986083984,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 648.6041870117188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 3958.142333984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 26999.671875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 18.605113983154297,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu17_s4_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 17 (herbaceous wetland), season 4, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 17.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 3144.219482421875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 407.6712341308594,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 33.898170471191406,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 648.6041870117188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 3131.74853515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 26999.671875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 18.605113983154297,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu17_s4_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 17 (herbaceous wetland), season 4, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 17.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 3978.0849609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 559.8193969726562,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 34.681941986083984,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 648.6041870117188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 3958.142333984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 26999.671875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 18.605113983154297,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu24_s1_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 24 (snow/ice), season 1, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 24.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 34998.84375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 3499.9970703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 55.508026123046875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1312.1019287109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 34242.6484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 4026653696.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 25.00002098083496,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu24_s1_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 24 (snow/ice), season 1, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 24.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 16153.353515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1615.383544921875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 27.717374801635742,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 656.0509643554688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 15830.646484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 12.500004768371582,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu24_s1_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 24 (snow/ice), season 1, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 24.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 7777.66259765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 777.7774658203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 27.21449851989746,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 656.0509643554688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 7702.0673828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 12.500004768371582,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu24_s1_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 24 (snow/ice), season 1, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 24.0,
+        "iseason": 1.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 16153.353515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1615.383544921875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 27.717374801635742,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 656.0509643554688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 15830.646484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 12.500004768371582,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu24_s2_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 24 (snow/ice), season 2, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 24.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 34998.84375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 3499.9970703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 55.508026123046875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1312.1019287109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 34242.6484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 4026653696.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 25.00002098083496,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu24_s2_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 24 (snow/ice), season 2, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 24.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 16153.353515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1615.383544921875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 27.717374801635742,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 656.0509643554688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 15830.646484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 12.500004768371582,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu24_s2_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 24 (snow/ice), season 2, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 24.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 7777.66259765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 777.7774658203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 27.21449851989746,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 656.0509643554688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 7702.0673828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 12.500004768371582,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu24_s2_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 24 (snow/ice), season 2, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 24.0,
+        "iseason": 2.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 16153.353515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1615.383544921875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 27.717374801635742,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 656.0509643554688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 15830.646484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 12.500004768371582,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu24_s4_c1",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 24 (snow/ice), season 4, dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 24.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 34998.84375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 3499.9970703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 55.508026123046875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1312.1019287109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 34242.6484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 4026653696.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 25.00002098083496,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu24_s4_c2",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 24 (snow/ice), season 4, dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 24.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 16153.353515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1615.383544921875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 27.717374801635742,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 656.0509643554688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 15830.646484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 12.500004768371582,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu24_s4_c3",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 24 (snow/ice), season 4, rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 24.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 7777.66259765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 777.7774658203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 27.21449851989746,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 656.0509643554688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 7702.0673828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 12.500004768371582,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_lu24_s4_c4",
+      "description": "Reference: the ESM_SWEEP regime sweep added to wesely_driver in the ctessum-claude/WRF fork, branch earthsciml-instrumented-chem. The reference column only ever visits iland 2, iseason 2 and a dry surface, so the sweep calls rc() directly over every land-use category, every season and the four wetness/high-NH3 combinations at that column's own meteorology (ta 286.80 K, gsw 330.8 W/m^2, rh 30.0 percent), run from data/eqwefic/chem_scm_dep. Regime: USGS 24 (snow/ice), season 4, dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. THIS IS THE COVERAGE THE IN-MODEL DUMPS CANNOT GIVE: it exercises the wet and rain cuticle branches, the snow branches, water, and the Erisman SO2/NH3 land-class cascades. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 24.0,
+        "iseason": 4.0,
+        "T": 286.7980041503906,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 16153.353515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1615.383544921875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 27.717374801635742,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 656.0509643554688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 15830.646484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2076073472.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 12.500004768371582,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T253_c1",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 253.15 K (-20.0 C), dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 253.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 426.3952941894531,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 16955.408203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 14242.4853515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 19781.171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 14575.6318359375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 13619.869140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 500.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 27389.34765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1513510.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 25962.7421875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T253_c2",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 253.15 K (-20.0 C), dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 253.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 417.33343505859375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 2445.1015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 525.3353881835938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 2.6152243614196777,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 46.33851623535156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 2527.614013671875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.30078125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 24.872417449951172,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T253_c3",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 253.15 K (-20.0 C), rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 253.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 417.33343505859375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 2102.396728515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 389.07293701171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 2.61067271232605,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 46.33851623535156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 2163.11279296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.30078125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 24.872417449951172,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T253_c4",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 253.15 K (-20.0 C), dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 253.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 405.1261901855469,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 2445.1015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 525.3353881835938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 2.6152243614196777,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 46.33851623535156,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 100.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 2527.614013671875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.30078125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 24.872417449951172,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T268_c1",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 268.15 K (-5.0 C), dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 268.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 187.08229064941406,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 3047.750732421875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1167.30126953125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1050.7047119140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1082.06787109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1958.609130859375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 500.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 3269.454345703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1513482.25,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1201.06982421875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T268_c2",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 268.15 K (-5.0 C), dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 268.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 185.3167724609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1577.0509033203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 403.5400695800781,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 11.019158363342285,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 204.1846923828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1627.871826171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.30029296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 24.57695198059082,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T268_c3",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 268.15 K (-5.0 C), rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 268.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 185.3167724609375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1427.0186767578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 317.9917907714844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 10.938801765441895,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 204.1846923828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1468.5028076171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.30029296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 24.57695198059082,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T268_c4",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 268.15 K (-5.0 C), dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 268.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 182.86997985839844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1577.0509033203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 403.5400695800781,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 11.019158363342285,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 204.1846923828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 100.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1627.871826171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.30029296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 24.57695198059082,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T283_c1",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 283.15 K (+10.0 C), dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 283.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 218.2593536376953,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 199.12181091308594,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 99.40180206298828,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 114.55196380615234,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 166.5480194091797,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 500.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 306.70587158203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1500038.375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 151.23622131347656,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T283_c2",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 283.15 K (+10.0 C), dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 283.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 187.89743041992188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 87.76924133300781,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 30.394027709960938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 139.45037841796875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 280.80181884765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.0888671875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.33197593688965,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T283_c3",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 283.15 K (+10.0 C), rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 283.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 185.57284545898438,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 82.9175033569336,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 29.79039764404297,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 139.45037841796875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 275.64178466796875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.0888671875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.33197593688965,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T283_c4",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 283.15 K (+10.0 C), dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 283.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 187.89743041992188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 87.76924133300781,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 30.394027709960938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 139.45037841796875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 100.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 280.80181884765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.0888671875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 22.33197593688965,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T298_c1",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 298.15 K (+25.0 C), dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 298.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 179.4232177734375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 161.8688201904297,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 87.43250274658203,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 111.7178726196289,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 138.2965850830078,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 500.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 251.49960327148438,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1500003.75,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 135.72706604003906,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T298_c2",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 298.15 K (+25.0 C), dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 298.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 154.37237548828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 78.3040771484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 57.306514739990234,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 130.27194213867188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 233.83999633789062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.08837890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 21.9614200592041,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T298_c3",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 298.15 K (+25.0 C), rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 298.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 152.79983520507812,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 74.419189453125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 55.19771957397461,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 130.27194213867188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 230.2505340576172,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.08837890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 21.9614200592041,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T298_c4",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 298.15 K (+25.0 C), dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 298.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 154.37237548828125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 78.3040771484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 57.306514739990234,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 130.27194213867188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 100.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 233.83999633789062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.08837890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 21.9614200592041,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T313_c1",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 313.15 K (+40.0 C), dry; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 313.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1502.8121337890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 2196.871337890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 216.3936004638672,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 516.7391967773438,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 9953.6064453125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 500.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 2310.845458984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1513482.25,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 275.6028747558594,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T313_c2",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 313.15 K (+40.0 C), dew (wetflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 313.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1324.16455078125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 167.9390411376953,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 170.84243774414062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 2817.36279296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1364.5303955078125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.30029296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 23.9262638092041,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T313_c3",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 313.15 K (+40.0 C), rain (rainflag); gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 313.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1216.7525634765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 151.02984619140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 153.37391662597656,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 2817.36279296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1250.751220703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.30029296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 23.9262638092041,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_sweep_T313_c4",
+      "description": "Same ESM_SWEEP hook, temperature ladder over USGS 11 (deciduous broadleaf), season 1, at 313.15 K (+40.0 C), dew with high NH3; gases so2, no2, o3, hno3, h2o2, hcho, nh3, pan, eth, csl on the species axis, in that order. This is what pins the temperature-dependent Henry's law correction (dhr), the 0 and 40 C stomatal clamps, the ice resistance, and the -1 C and -5 C thresholds of the Erisman SO2 and NH3 branches -- none of which the reference column reaches. Single-precision reference, rel 1e-5.",
+      "parameter_overrides": {
+        "iland": 11.0,
+        "iseason": 1.0,
+        "T": 313.15,
+        "rad": 330.8174743652344,
+        "rh": 30.01438331604004,
+        "wetflag": 1.0,
+        "rainflag": 0.0,
+        "highnh3": 1.0,
+        "igas": [
+          2.0,
+          4.0,
+          6.0,
+          7.0,
+          8.0,
+          10.0,
+          16.0,
+          19.0,
+          23.0,
+          39.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1324.16455078125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 167.9390411376953,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 170.84243774414062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 2817.36279296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 100.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1364.5303955078125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5976.30029296875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 23.9262638092041,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step364_part1",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 364, which is model step ktau = 366 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 308.09 K, rad 403.6 W/m2, rh 40.8 %, rainflag. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 308.0929260253906,
+        "rad": 403.59918212890625,
+        "rh": 40.8441276550293,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          2.0,
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          7.0,
+          8.0,
+          9.0,
+          10.0,
+          11.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 218.01947021484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 5980.67822265625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 87.75363159179688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 69.51172637939453,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 707.9419555664062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 212.9928741455078,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 220.54013061523438,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 218.01947021484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 5980.67822265625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 87.75363159179688,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 69.51172637939453,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 707.9419555664062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 212.9928741455078,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 220.54013061523438,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step364_part2",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 364, which is model step ktau = 366 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 308.09 K, rad 403.6 W/m2, rh 40.8 %, rainflag. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 308.0929260253906,
+        "rad": 403.59918212890625,
+        "rh": 40.8441276550293,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          12.0,
+          13.0,
+          14.0,
+          15.0,
+          16.0,
+          17.0,
+          18.0,
+          19.0,
+          20.0,
+          21.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 15.68018913269043,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.862823247909546,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 21.36566734313965,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 50.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 107.7266845703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 306.7857971191406,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 5976.0869140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5903.1962890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 5944.4697265625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 15.68018913269043,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.862823247909546,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 21.36566734313965,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 50.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 107.7266845703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 306.7857971191406,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 5976.0869140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5903.1962890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 5944.4697265625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step364_part3",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 364, which is model step ktau = 366 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 308.09 K, rad 403.6 W/m2, rh 40.8 %, rainflag. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 308.0929260253906,
+        "rad": 403.59918212890625,
+        "rh": 40.8441276550293,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          22.0,
+          23.0,
+          24.0,
+          25.0,
+          26.0,
+          27.0,
+          28.0,
+          29.0,
+          30.0,
+          31.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 5943.41357421875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 5983.83837890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 4629.21533203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 4672.2353515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 31.6063289642334,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 485.2687683105469,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 309.9334411621094,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2816.484619140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 20.902170181274414,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 5943.41357421875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 5983.83837890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 4629.21533203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 4672.2353515625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 31.6063289642334,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 485.2687683105469,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 309.9334411621094,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2816.484619140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 20.902170181274414,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step364_part4",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 364, which is model step ktau = 366 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 308.09 K, rad 403.6 W/m2, rh 40.8 %, rainflag. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 32, 33, 34, 35, 36, 37, 38, 39, 40, 41 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 308.0929260253906,
+        "rad": 403.59918212890625,
+        "rh": 40.8441276550293,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          32.0,
+          33.0,
+          34.0,
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 5943.42041015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5986.4658203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 5943.42041015625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5986.4658203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step364_part5",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 364, which is model step ktau = 366 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 308.09 K, rad 403.6 W/m2, rh 40.8 %, rainflag. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 42, 43, 44, 45, 46, 47, 48, 49, 50, 51 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 308.0929260253906,
+        "rad": 403.59918212890625,
+        "rh": 40.8441276550293,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          42.0,
+          43.0,
+          44.0,
+          45.0,
+          46.0,
+          47.0,
+          48.0,
+          49.0,
+          50.0,
+          51.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step364_part6",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 364, which is model step ktau = 366 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 308.09 K, rad 403.6 W/m2, rh 40.8 %, rainflag. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 52, 53, 54, 55, 56, 57, 58, 59, 60, 61 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 308.0929260253906,
+        "rad": 403.59918212890625,
+        "rh": 40.8441276550293,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          52.0,
+          53.0,
+          54.0,
+          55.0,
+          56.0,
+          57.0,
+          58.0,
+          59.0,
+          60.0,
+          61.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 5982.0458984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 5982.0458984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step364_part7",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 364, which is model step ktau = 366 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 308.09 K, rad 403.6 W/m2, rh 40.8 %, rainflag. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 56, 57, 58, 59, 60, 61, 62, 63, 64, 65 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 308.0929260253906,
+        "rad": 403.59918212890625,
+        "rh": 40.8441276550293,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          56.0,
+          57.0,
+          58.0,
+          59.0,
+          60.0,
+          61.0,
+          62.0,
+          63.0,
+          64.0,
+          65.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step1080_part1",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 1080, which is model step ktau = 1082 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 295.02 K, rad 0.0 W/m2, rh 52.8 %, dry. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 295.0245361328125,
+        "rad": 0.0,
+        "rh": 52.842227935791016,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          2.0,
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          7.0,
+          8.0,
+          9.0,
+          10.0,
+          11.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 612.0507202148438,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1453.5108642578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 315311040.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 217.86050415039062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 214.57061767578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 923583.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3633.064697265625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1421.5098876953125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 612.0507202148438,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1453.5108642578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 315311040.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 217.86050415039062,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 214.57061767578125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 923583.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 3633.064697265625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1421.5098876953125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step1080_part2",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 1080, which is model step ktau = 1082 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 295.02 K, rad 0.0 W/m2, rh 52.8 %, dry. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 295.0245361328125,
+        "rad": 0.0,
+        "rh": 52.842227935791016,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          12.0,
+          13.0,
+          14.0,
+          15.0,
+          16.0,
+          17.0,
+          18.0,
+          19.0,
+          20.0,
+          21.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 59.259033203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 15.425164222717285,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 89.181640625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 200.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 290.06573486328125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1453.0704345703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 315291072.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 266200832.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 287090240.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 59.259033203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 15.425164222717285,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 89.181640625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 200.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 290.06573486328125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1453.0704345703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 315291072.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 266200832.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 287090240.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step1080_part3",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 1080, which is model step ktau = 1082 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 295.02 K, rad 0.0 W/m2, rh 52.8 %, dry. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 295.0245361328125,
+        "rad": 0.0,
+        "rh": 52.842227935791016,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          22.0,
+          23.0,
+          24.0,
+          25.0,
+          26.0,
+          27.0,
+          28.0,
+          29.0,
+          30.0,
+          31.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 343357984.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 476322656.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 75189536.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 78593184.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 157.8896942138672,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 325094.65625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 2912.8251953125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 9448745.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 158.6076202392578,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 343357984.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 476322656.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 75189536.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 78593184.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 157.8896942138672,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 325094.65625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 2912.8251953125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 9448745.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 158.6076202392578,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step1080_part4",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 1080, which is model step ktau = 1082 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 295.02 K, rad 0.0 W/m2, rh 52.8 %, dry. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 32, 33, 34, 35, 36, 37, 38, 39, 40, 41 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 295.0245361328125,
+        "rad": 0.0,
+        "rh": 52.842227935791016,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          32.0,
+          33.0,
+          34.0,
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 422437728.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 492213024.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 422437728.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 492213024.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step1080_part5",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 1080, which is model step ktau = 1082 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 295.02 K, rad 0.0 W/m2, rh 52.8 %, dry. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 42, 43, 44, 45, 46, 47, 48, 49, 50, 51 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 295.0245361328125,
+        "rad": 0.0,
+        "rh": 52.842227935791016,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          42.0,
+          43.0,
+          44.0,
+          45.0,
+          46.0,
+          47.0,
+          48.0,
+          49.0,
+          50.0,
+          51.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step1080_part6",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 1080, which is model step ktau = 1082 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 295.02 K, rad 0.0 W/m2, rh 52.8 %, dry. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 52, 53, 54, 55, 56, 57, 58, 59, 60, 61 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 295.0245361328125,
+        "rad": 0.0,
+        "rh": 52.842227935791016,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          52.0,
+          53.0,
+          54.0,
+          55.0,
+          56.0,
+          57.0,
+          58.0,
+          59.0,
+          60.0,
+          61.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 236790960.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 236790960.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step1080_part7",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 1080, which is model step ktau = 1082 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 295.02 K, rad 0.0 W/m2, rh 52.8 %, dry. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 56, 57, 58, 59, 60, 61, 62, 63, 64, 65 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 295.0245361328125,
+        "rad": 0.0,
+        "rh": 52.842227935791016,
+        "wetflag": 0.0,
+        "rainflag": 0.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          56.0,
+          57.0,
+          58.0,
+          59.0,
+          60.0,
+          61.0,
+          62.0,
+          63.0,
+          64.0,
+          65.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step2101_part1",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 2101, which is model step ktau = 2103 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 302.64 K, rad 194.8 W/m2, rh 46.0 %, rainflag. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 302.6439514160156,
+        "rad": 194.7565460205078,
+        "rh": 45.996253967285156,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          2.0,
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          7.0,
+          8.0,
+          9.0,
+          10.0,
+          11.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 208.08287048339844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 5978.93896484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 86.62936401367188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 61.12654495239258,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 566.3373413085938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 196.08065795898438,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 210.2587890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 208.08287048339844,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 5978.93896484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 86.62936401367188,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 61.12654495239258,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 566.3373413085938,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 196.08065795898438,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 210.2587890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step2101_part2",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 2101, which is model step ktau = 2103 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 302.64 K, rad 194.8 W/m2, rh 46.0 %, rainflag. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 12, 13, 14, 15, 16, 17, 18, 19, 20, 21 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 302.6439514160156,
+        "rad": 194.7565460205078,
+        "rh": 45.996253967285156,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          12.0,
+          13.0,
+          14.0,
+          15.0,
+          16.0,
+          17.0,
+          18.0,
+          19.0,
+          20.0,
+          21.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 9.19972038269043,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.3432624340057373,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 13.999780654907227,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 50.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 106.85663604736328,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 294.59661865234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 5976.0869140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5903.19287109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 5944.46875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 9.19972038269043,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.3432624340057373,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 13.999780654907227,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 50.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 106.85663604736328,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 294.59661865234375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 5976.0869140625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5903.19287109375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 5944.46875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step2101_part3",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 2101, which is model step ktau = 2103 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 302.64 K, rad 194.8 W/m2, rh 46.0 %, rainflag. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 302.6439514160156,
+        "rad": 194.7565460205078,
+        "rh": 45.996253967285156,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          22.0,
+          23.0,
+          24.0,
+          25.0,
+          26.0,
+          27.0,
+          28.0,
+          29.0,
+          30.0,
+          31.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 5943.41259765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 5983.83837890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 4627.951171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 4670.96435546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 26.56830406188965,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 425.07025146484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 280.9873962402344,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2382.021484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 20.95673179626465,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 5943.41259765625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 5983.83837890625,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 4627.951171875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 4670.96435546875,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 26.56830406188965,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 425.07025146484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 280.9873962402344,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 2382.021484375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 20.95673179626465,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step2101_part4",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 2101, which is model step ktau = 2103 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 302.64 K, rad 194.8 W/m2, rh 46.0 %, rainflag. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 32, 33, 34, 35, 36, 37, 38, 39, 40, 41 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 302.6439514160156,
+        "rad": 194.7565460205078,
+        "rh": 45.996253967285156,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          32.0,
+          33.0,
+          34.0,
+          35.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          40.0,
+          41.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 5943.41845703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5986.4658203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 5943.41845703125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 5986.4658203125,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step2101_part5",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 2101, which is model step ktau = 2103 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 302.64 K, rad 194.8 W/m2, rh 46.0 %, rainflag. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 42, 43, 44, 45, 46, 47, 48, 49, 50, 51 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 302.6439514160156,
+        "rad": 194.7565460205078,
+        "rh": 45.996253967285156,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          42.0,
+          43.0,
+          44.0,
+          45.0,
+          46.0,
+          47.0,
+          48.0,
+          49.0,
+          50.0,
+          51.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step2101_part6",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 2101, which is model step ktau = 2103 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 302.64 K, rad 194.8 W/m2, rh 46.0 %, rainflag. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 52, 53, 54, 55, 56, 57, 58, 59, 60, 61 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 302.6439514160156,
+        "rad": 194.7565460205078,
+        "rh": 45.996253967285156,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          52.0,
+          53.0,
+          54.0,
+          55.0,
+          56.0,
+          57.0,
+          58.0,
+          59.0,
+          60.0,
+          61.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 5982.0458984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 5982.0458984375,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    },
+    {
+      "id": "wesely_cbmz_rc_step2101_part7",
+      "description": "Reference: the chem_opt = 170 (CBMZ_MOSAIC_KPP) em_scm_xy reference run (data/eqwefic/chem170_scm/run.sh, dumps/chem170_wrf; GNU gfortran REAL*4; fork ctessum-claude/WRF branch earthsciml-instrumented-chem170, wesely hook in wesely_driver) at its call 2101, which is model step ktau = 2103 (wesely_driver is not called at the first two steps, so the dry-deposition hooks' call N is ktau N+2 while cbmz_kpp's call N is ktau N), column (its, jts): iland 2, iseason 1, ta 302.64 K, rad 194.8 W/m2, rh 46.0 %, rainflag. Mechanism row 2 of wesely_data (the CBM-Z gas slots). Single-precision reference, rel 1e-5. Gas slots 56, 57, 58, 59, 60, 61, 62, 63, 64, 65 on the species axis. srfres is zero for the LAST TWO slots (64 lim, 65 isopo2), not HO and HO2 (FORTRAN_BUGS N124).",
+      "parameter_overrides": {
+        "iland": 2.0,
+        "iseason": 1.0,
+        "T": 302.6439514160156,
+        "rad": 194.7565460205078,
+        "rh": 45.996253967285156,
+        "wetflag": 0.0,
+        "rainflag": 1.0,
+        "highnh3": 0.0,
+        "mech": 2.0,
+        "igas": [
+          56.0,
+          57.0,
+          58.0,
+          59.0,
+          60.0,
+          61.0,
+          62.0,
+          63.0,
+          64.0,
+          65.0
+        ]
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "tolerance": {
+        "rel": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "rc",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 1
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 2
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 3
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 4
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 5
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 6
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 7
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 8
+          },
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 9
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        },
+        {
+          "variable": "srfres",
+          "time": 0.0,
+          "coords": {
+            "spc": 10
+          },
+          "expected": 0.0,
+          "tolerance": {
+            "rel": 1e-05,
+            "abs": 1e-30
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

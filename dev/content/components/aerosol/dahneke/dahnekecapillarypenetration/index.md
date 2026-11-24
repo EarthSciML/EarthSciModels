@@ -1,0 +1,429 @@
+---
+title: "DahnekeCapillaryPenetration"
+slug: "dahnekecapillarypenetration"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["dahneke"]
+domain: "aerosol"
+subdomain: "dahneke"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/dahneke/capillary_penetration.esm"
+reference: "Dahneke, B. (1983) Simple Kinetic Theory of Brownian Diffusion in Vapors and Aerosols, Section 9, Eqs. 9.4–9.5 — velocity-profile normalization σ and dimensionless tube length z'. Migrated from Aerosol.jl src/dahneke_brownian_diffusion.jl:372 @ YeW6d (esm-1vo)."
+description: "Parameters for aerosol penetration through a fine capillary tube via convective diffusion (Dahneke 1983, Section 9). Computes the velocity-profile normalization factor σ and the dimensionless tube length z' = DL/(σv̄R²) from which the penetration fraction ϕ(z') = Σ B_i exp(−ω_i² z') can be evaluated using the tabulated eigenvalues in Tables 3–5 of the reference. Migrated from Aerosol.jl src/dahneke_brownian_diffusion.jl:372."
+tags: ["aerosol", "dahneke", "model", "capillary", "penetration", "diffusion"]
+---
+
+## Description
+
+Parameters for aerosol penetration through a fine capillary tube via convective diffusion (Dahneke 1983, Section 9). Computes the velocity-profile normalization factor σ and the dimensionless tube length z' = DL/(σv̄R²) from which the penetration fraction ϕ(z') = Σ B_i exp(−ω_i² z') can be evaluated using the tabulated eigenvalues in Tables 3–5 of the reference. Migrated from Aerosol.jl src/dahneke_brownian_diffusion.jl:372.
+
+## Reference
+
+Dahneke, B. (1983) Simple Kinetic Theory of Brownian Diffusion in Vapors and Aerosols, Section 9, Eqs. 9.4–9.5 — velocity-profile normalization σ and dimensionless tube length z'. Migrated from Aerosol.jl src/dahneke_brownian_diffusion.jl:372 @ YeW6d (esm-1vo).
+
+_source_ref: Aerosol.jl@YeW6d:src/dahneke_brownian_diffusion.jl:372
+
+Upstream `DahnekeCapillaryPenetration` is an MTK `@component` with 5 parameters (Dcoeff, R_cap, v_mean, L_cap, γ_flow) and 2 algebraic variables (σ_flow, z_dim) with no time derivatives — both purely observed.
+
+Equations (Dahneke 1983, Section 9):
+  σ_flow = 2 / (2 − γ_flow)              [Eq. 9.4–9.5: velocity-profile normalization factor]
+  z_dim  = Dcoeff * L_cap / (σ_flow * v_mean * R_cap²)  [dimensionless tube length z']
+
+The velocity profile is v(r) = σv̄[1 − γ(r/R)²] with:
+  γ = 0   (plug flow, free-molecular):  σ = 1
+  γ = 0.5 (transition / slip flow):     σ = 4/3
+  γ = 1.0 (Poiseuille / continuum):     σ = 2
+
+Once z_dim is known, the penetration fraction ϕ is computed outside the component using the eigenfunction expansion Σ B_i exp(−ω_i² z) with eigenvalues and coefficients taken from Dahneke's Tables 3–5 via the standalone `dahneke_capillary_penetration` function (not migrated as a model component since it requires discrete tabular lookup, not a continuous ODE/algebraic system).
+
+Topological evaluation order: γ_flow → σ_flow → z_dim. The dependency graph is acyclic; both equations are purely explicit.
+
+Tolerance rationale (model-level rel=1e-9): purely algebraic system with two divisions in float64. Round-off is ~1e-15 relative; rel=1e-9 leaves six orders of headroom above machine epsilon._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `Dcoeff` | `m^2/s` | `1e-10` | Particle diffusion coefficient. |
+| `R_cap` | `m` | `0.0001` | Capillary radius. |
+| `v_mean` | `m/s` | `0.01` | Mean flow velocity. |
+| `L_cap` | `m` | `0.1` | Capillary length. |
+| `γ_flow` | `1` | `1.0` | Velocity profile parameter: 0 = plug flow (free-molecular), 0.5 = transition / slip flow, 1.0 = Poiseuille (continuum). |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `σ_flow` | `1` |  | Velocity-profile normalization factor σ = 2/(2−γ), Eq. 9.4–9.5 of Dahneke (1983). Equals 1 for plug flow (γ=0), 4/3 for transition (γ=0.5), and 2 for Poiseuille flow (γ=1.0). |
+| `z_dim` | `1` |  | Dimensionless capillary length z' = DL/(σv̄R²). The penetration fraction ϕ(z') = Σ B_i exp(−ω_i² z') is a monotonically decreasing function of z'; larger z' means more deposition. |
+
+## Observed expressions
+
+$$
+σ_{flow} = \frac{2}{2 - γ_{flow}}
+$$
+_Velocity-profile normalization factor σ = 2/(2−γ), Eq. 9.4–9.5 of Dahneke (1983). Equals 1 for plug flow (γ=0), 4/3 for transition (γ=0.5), and 2 for Poiseuille flow (γ=1.0)._
+
+$$
+z_{dim} = \frac{Dcoeff \cdot L_{cap}}{σ_{flow} \cdot v_{mean} \cdot R_{cap}^{2}}
+$$
+_Dimensionless capillary length z' = DL/(σv̄R²). The penetration fraction ϕ(z') = Σ B_i exp(−ω_i² z') is a monotonically decreasing function of z'; larger z' means more deposition._
+
+## Analyses
+
+### z_dim_vs_R_cap
+
+Dimensionless tube length z' as a function of capillary radius R_cap (log sweep 1 µm to 1 mm) for Poiseuille flow (γ=1.0, σ=2). Since z' ∝ 1/R², z' increases sharply for small radii, showing that thin capillaries cause much more particle deposition.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `R_cap`
+
+![Dimensionless tube length z' vs capillary radius R_cap for Poiseuille flow. z' ∝ 1/R² — smaller capillaries cause stronger deposition.](/plots/aerosol/dahneke/dahnekecapillarypenetration/z_dim_vs_R_cap-z_dim_vs_R_cap.png)
+
+### sigma_vs_gamma
+
+Velocity-profile normalization factor σ = 2/(2−γ) as γ sweeps from 0 (plug flow) to 1 (Poiseuille). σ ranges from 1 to 2; higher σ reduces z' and thus reduces particle deposition at fixed tube geometry.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `γ_flow`
+
+![Normalization factor σ_flow vs velocity profile parameter γ_flow. σ increases from 1 (plug, γ=0) to 2 (Poiseuille, γ=1).](/plots/aerosol/dahneke/dahnekecapillarypenetration/sigma_vs_gamma-sigma_vs_gamma.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Dahneke, B. (1983) Simple Kinetic Theory of Brownian Diffusion in Vapors and Aerosols, Section 9, Eqs. 9.4–9.5 — velocity-profile normalization σ and dimensionless tube length z'. Migrated from Aerosol.jl src/dahneke_brownian_diffusion.jl:372 @ YeW6d (esm-1vo).",
+    "notes": "source_ref: Aerosol.jl@YeW6d:src/dahneke_brownian_diffusion.jl:372\n\nUpstream `DahnekeCapillaryPenetration` is an MTK `@component` with 5 parameters (Dcoeff, R_cap, v_mean, L_cap, γ_flow) and 2 algebraic variables (σ_flow, z_dim) with no time derivatives — both purely observed.\n\nEquations (Dahneke 1983, Section 9):\n  σ_flow = 2 / (2 − γ_flow)              [Eq. 9.4–9.5: velocity-profile normalization factor]\n  z_dim  = Dcoeff * L_cap / (σ_flow * v_mean * R_cap²)  [dimensionless tube length z']\n\nThe velocity profile is v(r) = σv̄[1 − γ(r/R)²] with:\n  γ = 0   (plug flow, free-molecular):  σ = 1\n  γ = 0.5 (transition / slip flow):     σ = 4/3\n  γ = 1.0 (Poiseuille / continuum):     σ = 2\n\nOnce z_dim is known, the penetration fraction ϕ is computed outside the component using the eigenfunction expansion Σ B_i exp(−ω_i² z) with eigenvalues and coefficients taken from Dahneke's Tables 3–5 via the standalone `dahneke_capillary_penetration` function (not migrated as a model component since it requires discrete tabular lookup, not a continuous ODE/algebraic system).\n\nTopological evaluation order: γ_flow → σ_flow → z_dim. The dependency graph is acyclic; both equations are purely explicit.\n\nTolerance rationale (model-level rel=1e-9): purely algebraic system with two divisions in float64. Round-off is ~1e-15 relative; rel=1e-9 leaves six orders of headroom above machine epsilon."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {
+    "Dcoeff": {
+      "type": "parameter",
+      "units": "m^2/s",
+      "default": 1e-10,
+      "description": "Particle diffusion coefficient."
+    },
+    "R_cap": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0.0001,
+      "description": "Capillary radius."
+    },
+    "v_mean": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 0.01,
+      "description": "Mean flow velocity."
+    },
+    "L_cap": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0.1,
+      "description": "Capillary length."
+    },
+    "γ_flow": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "Velocity profile parameter: 0 = plug flow (free-molecular), 0.5 = transition / slip flow, 1.0 = Poiseuille (continuum)."
+    },
+    "σ_flow": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Velocity-profile normalization factor σ = 2/(2−γ), Eq. 9.4–9.5 of Dahneke (1983). Equals 1 for plug flow (γ=0), 4/3 for transition (γ=0.5), and 2 for Poiseuille flow (γ=1.0)."
+    },
+    "z_dim": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Dimensionless capillary length z' = DL/(σv̄R²). The penetration fraction ϕ(z') = Σ B_i exp(−ω_i² z') is a monotonically decreasing function of z'; larger z' means more deposition."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "σ_flow",
+      "rhs": {
+        "op": "/",
+        "args": [
+          2,
+          {
+            "op": "-",
+            "args": [
+              2,
+              "γ_flow"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "z_dim",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "Dcoeff",
+              "L_cap"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "σ_flow",
+              "v_mean",
+              {
+                "op": "^",
+                "args": [
+                  "R_cap",
+                  2
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "default_parameters",
+      "description": "Default parameters: Dcoeff=1e-10 m²/s, R_cap=1e-4 m, v_mean=0.01 m/s, L_cap=0.1 m, γ_flow=1.0 (Poiseuille). σ_flow = 2/(2-1) = 2. z_dim = 1e-10 * 0.1 / (2 * 0.01 * (1e-4)²) = 1e-11 / (2e-9) = 0.05. Both equations verified.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "σ_flow",
+          "time": 0.0,
+          "expected": 2.0,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        },
+        {
+          "variable": "z_dim",
+          "time": 0.0,
+          "expected": 0.05,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        }
+      ]
+    },
+    {
+      "id": "plug_flow",
+      "description": "Plug-flow regime: γ_flow=0.0 → σ_flow = 2/(2-0) = 1.0. z_dim = 1e-10 * 0.1 / (1.0 * 0.01 * (1e-4)²) = 0.10. More deposition than Poiseuille because σ=1 < σ=2 gives larger z_dim at the same physical tube length.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "γ_flow": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "σ_flow",
+          "time": 0.0,
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        },
+        {
+          "variable": "z_dim",
+          "time": 0.0,
+          "expected": 0.1,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        }
+      ]
+    },
+    {
+      "id": "transition_flow",
+      "description": "Transition / slip-flow regime: γ_flow=0.5 → σ_flow = 2/(2-0.5) = 4/3 ≈ 1.33333. z_dim = 1e-10 * 0.1 / (4/3 * 0.01 * (1e-4)²) = 0.075.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "γ_flow": 0.5
+      },
+      "assertions": [
+        {
+          "variable": "σ_flow",
+          "time": 0.0,
+          "expected": 1.3333333333333333,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        },
+        {
+          "variable": "z_dim",
+          "time": 0.0,
+          "expected": 0.075,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        }
+      ]
+    },
+    {
+      "id": "sigma_flow_monotonicity",
+      "description": "σ_flow increases monotonically with γ_flow: plug flow (γ=0, σ=1) < transition (γ=0.5, σ=4/3) < Poiseuille (γ=1, σ=2). Conversely z_dim decreases — higher σ means less relative deposition at the same physical tube length.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "γ_flow": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "σ_flow",
+          "time": 0.0,
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        }
+      ]
+    },
+    {
+      "id": "z_dim_diffusion_scaling",
+      "description": "z_dim is proportional to Dcoeff: doubling the diffusion coefficient doubles z_dim. With Dcoeff=2e-10 and Poiseuille flow: z_dim = 2 * 0.05 = 0.10.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "Dcoeff": 2e-10
+      },
+      "assertions": [
+        {
+          "variable": "z_dim",
+          "time": 0.0,
+          "expected": 0.1,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        }
+      ]
+    },
+    {
+      "id": "z_dim_radius_scaling",
+      "description": "z_dim is inversely proportional to R_cap²: halving R_cap quadruples z_dim. With R_cap=5e-5 (half default) and Poiseuille flow: z_dim = 1e-10 * 0.1 / (2 * 0.01 * (5e-5)²) = 0.2.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "R_cap": 5e-05
+      },
+      "assertions": [
+        {
+          "variable": "z_dim",
+          "time": 0.0,
+          "expected": 0.2,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "z_dim_vs_R_cap",
+      "description": "Dimensionless tube length z' as a function of capillary radius R_cap (log sweep 1 µm to 1 mm) for Poiseuille flow (γ=1.0, σ=2). Since z' ∝ 1/R², z' increases sharply for small radii, showing that thin capillaries cause much more particle deposition.",
+      "initial_state": {},
+      "parameters": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "R_cap",
+            "range": {
+              "start": 1e-06,
+              "stop": 0.001,
+              "count": 61,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "z_dim_vs_R_cap",
+          "type": "line",
+          "description": "Dimensionless tube length z' vs capillary radius R_cap for Poiseuille flow. z' ∝ 1/R² — smaller capillaries cause stronger deposition.",
+          "x": {
+            "variable": "R_cap",
+            "label": "Capillary radius R_cap (m)"
+          },
+          "y": {
+            "variable": "z_dim",
+            "label": "z' (dimensionless tube length)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "sigma_vs_gamma",
+      "description": "Velocity-profile normalization factor σ = 2/(2−γ) as γ sweeps from 0 (plug flow) to 1 (Poiseuille). σ ranges from 1 to 2; higher σ reduces z' and thus reduces particle deposition at fixed tube geometry.",
+      "initial_state": {},
+      "parameters": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "γ_flow",
+            "range": {
+              "start": 0.0,
+              "stop": 1.0,
+              "count": 21,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "sigma_vs_gamma",
+          "type": "line",
+          "description": "Normalization factor σ_flow vs velocity profile parameter γ_flow. σ increases from 1 (plug, γ=0) to 2 (Poiseuille, γ=1).",
+          "x": {
+            "variable": "γ_flow",
+            "label": "Velocity profile parameter γ"
+          },
+          "y": {
+            "variable": "σ_flow",
+            "label": "Normalization factor σ"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

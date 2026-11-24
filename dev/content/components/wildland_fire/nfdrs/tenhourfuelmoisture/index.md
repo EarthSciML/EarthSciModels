@@ -1,0 +1,553 @@
+---
+title: "TenHourFuelMoisture"
+slug: "tenhourfuelmoisture"
+domains: ["wildland_fire"]
+component_types: ["model"]
+subdomains: ["nfdrs"]
+domain: "wildland_fire"
+subdomain: "nfdrs"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/wildland_fire/nfdrs/moisture_10h.esm"
+reference: "Cohen, J. D., & Deeming, J. E. (1985). The National Fire-Danger Rating System: basic equations. Gen. Tech. Rep. PSW-82. Berkeley, CA: USDA Forest Service, Pacific Southwest Forest and Range Experiment Station. Page 4 (10-hour timelag fuel moisture)."
+description: "10-hour timelag dead fuel moisture content per the NFDRS (Cohen & Deeming 1985), page 4. Migrated from WildlandFire.jl@126976f2 src/nfdrs.jl:207 (`TenHourFuelMoisture` @component). Observed-only: EMCPRM, use_fuel_sticks, WT, AGE, CLIMAT are inputs (parameters); MC10 is the algebraic output."
+tags: ["wildland_fire", "nfdrs", "model", "fuel_moisture", "observed-only"]
+---
+
+## Description
+
+10-hour timelag dead fuel moisture content per the NFDRS (Cohen & Deeming 1985), page 4. Migrated from WildlandFire.jl@126976f2 src/nfdrs.jl:207 (`TenHourFuelMoisture` @component). Observed-only: EMCPRM, use_fuel_sticks, WT, AGE, CLIMAT are inputs (parameters); MC10 is the algebraic output.
+
+## Reference
+
+_source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/nfdrs.jl:207
+Upstream `TenHourFuelMoisture` is an MTK `@component` whose inputs (EMCPRM, use_fuel_sticks, WT, AGE, CLIMAT) are `@parameters` and whose single output (MC10) is a time-indexed `@variable` with one algebraic equation — an `ifelse` that selects between the no-fuel-sticks branch (MC10 = 1.28*EMCPRM, Cohen & Deeming p.4) and the with-fuel-sticks branch (age-corrected MC10 from Haines & Frost 1978: MC10 = (AA*CC + BB*CC*(WT_grams - 100))/100 where AA = 0.5*AGE/30, BB = 1 + 0.02*AGE/30, CC = CLIMAT/4, WT_grams = WT[kg] * 1000). The dispatch threshold (0.5) and the AA/BB/CC/WT_grams/WT_diff intermediate bindings are inlined into the equation tree here exactly as MTK inlines them at System construction time.
+
+The upstream `@constants` (kg_ref = 1 kg, kg_to_g = 1000 dimensionless, WT_ref_g = 100 dimensionless) are MTK unit-balancing literals that non-dimensionalize WT (kg → grams) and subtract the 100 g reference weight. They are preserved here as parameters with their upstream values to maintain 1:1 fidelity with the source component (same convention as components/wildland_fire/terrain_slope.esm).
+
+Dispatch flag note: use_fuel_sticks is a 0/1 indicator parameter; the upstream uses the strict comparison `use_fuel_sticks > 0.5` so any value > 0.5 selects the with-sticks branch. Default is 0.0 (no fuel sticks) so the standalone component is well-posed without overrides.
+
+Tolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equation is a single `ifelse` over polynomial expressions in float64 — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on dimensionless moisture-fraction outputs._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `EMCPRM` | `1` | `0.1` | Equilibrium moisture content at the fuel-atmosphere interface (dimensionless fraction). Default 0.10 = 10% moisture, mid-range NFDRS value. |
+| `use_fuel_sticks` | `1` | `0.0` | Flag: 1 if 10-hour fuel sticks are used, 0 otherwise (dimensionless). Threshold against 0.5 selects branch. |
+| `WT` | `kg` | `0.1` | Weight of fuel sticks. Reference fuel-stick weight is 100 g = 0.1 kg, at which WT_diff = 0. |
+| `AGE` | `1` | `0.0` | Days since fuel sticks were set out (dimensionless). Drives age-correction factors AA and BB (Haines & Frost 1978). |
+| `CLIMAT` | `1` | `2.0` | NFDRS climate class 1-4 (dimensionless). 1 = arid, 4 = wet; drives the climate-correction factor CC = CLIMAT/4. |
+| `kg_ref` | `kg` | `1.0` | Reference mass for non-dimensionalizing WT (MTK unit-balancing constant preserved from upstream). |
+| `kg_to_g` | `1` | `1000.0` | Kilograms-to-grams conversion (dimensionless after WT/kg_ref non-dimensionalization). Preserved from upstream `@constants`. |
+| `WT_ref_g` | `1` | `100.0` | Reference fuel-stick weight in grams (dimensionless after non-dimensionalization). Preserved from upstream `@constants`. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `MC10` | `1` |  | 10-hour fuel moisture content (dimensionless fraction). |
+
+## Observed expressions
+
+$$
+MC10 = \mathrm{ifelse}\left(\mathrm{>}\left(use_{fuel\,sticks}, 0.5\right), \frac{\frac{0.5 \cdot AGE}{30.0} \cdot \frac{CLIMAT}{4.0} + \left(1.0 + \frac{0.02 \cdot AGE}{30.0}\right) \cdot \frac{CLIMAT}{4.0} \cdot \left(\frac{WT}{kg_{ref}} \cdot kg_{to\,g} - WT_{ref\,g}\right)}{100.0}, 1.28 \cdot EMCPRM\right)
+$$
+_10-hour fuel moisture content (dimensionless fraction)._
+
+## Analyses
+
+### no_sticks_typical
+
+Standard NFDRS operation without 10-hour fuel sticks: MC10 is derived directly from EMCPRM as MC10 = 1.28 * EMCPRM (Cohen & Deeming 1985, p. 4). At a moderate interface EMC of 10%, MC10 = 0.128 (12.8% fuel moisture).
+
+**Time span:** 0.0 → 1.0
+
+### with_sticks_fresh_moderate_climate
+
+Fresh (AGE = 0 d) 120 g fuel sticks in a moderate climate (CLIMAT = 2 ⇒ CC = 0.5). The age-correction term AA*CC vanishes (AA = 0), leaving MC10 = BB*CC*WT_diff/100 = (1.0 * 0.5 * 20)/100 = 0.10 (10% moisture). Illustrates the with-sticks branch at the canonical Haines & Frost (1978) reference age.
+
+**Time span:** 0.0 → 1.0
+
+### with_sticks_aged_arid_climate
+
+60-day-old 120 g fuel sticks in arid climate class 1 (CC = 0.25). Both age-correction terms are active: AA = 1.0, BB = 1.04. MC10 = (1.0*0.25 + 1.04*0.25*20)/100 = 0.0545 (5.45% moisture). Exercises the dry end of the climate-correction range together with the AA contribution that grows with stick age.
+
+**Time span:** 0.0 → 1.0
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/nfdrs.jl:207\nUpstream `TenHourFuelMoisture` is an MTK `@component` whose inputs (EMCPRM, use_fuel_sticks, WT, AGE, CLIMAT) are `@parameters` and whose single output (MC10) is a time-indexed `@variable` with one algebraic equation — an `ifelse` that selects between the no-fuel-sticks branch (MC10 = 1.28*EMCPRM, Cohen & Deeming p.4) and the with-fuel-sticks branch (age-corrected MC10 from Haines & Frost 1978: MC10 = (AA*CC + BB*CC*(WT_grams - 100))/100 where AA = 0.5*AGE/30, BB = 1 + 0.02*AGE/30, CC = CLIMAT/4, WT_grams = WT[kg] * 1000). The dispatch threshold (0.5) and the AA/BB/CC/WT_grams/WT_diff intermediate bindings are inlined into the equation tree here exactly as MTK inlines them at System construction time.\n\nThe upstream `@constants` (kg_ref = 1 kg, kg_to_g = 1000 dimensionless, WT_ref_g = 100 dimensionless) are MTK unit-balancing literals that non-dimensionalize WT (kg → grams) and subtract the 100 g reference weight. They are preserved here as parameters with their upstream values to maintain 1:1 fidelity with the source component (same convention as components/wildland_fire/terrain_slope.esm).\n\nDispatch flag note: use_fuel_sticks is a 0/1 indicator parameter; the upstream uses the strict comparison `use_fuel_sticks > 0.5` so any value > 0.5 selects the with-sticks branch. Default is 0.0 (no fuel sticks) so the standalone component is well-posed without overrides.\n\nTolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equation is a single `ifelse` over polynomial expressions in float64 — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on dimensionless moisture-fraction outputs."
+  },
+  "tolerance": {
+    "rel": 1e-12
+  },
+  "variables": {
+    "EMCPRM": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.1,
+      "description": "Equilibrium moisture content at the fuel-atmosphere interface (dimensionless fraction). Default 0.10 = 10% moisture, mid-range NFDRS value."
+    },
+    "use_fuel_sticks": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "Flag: 1 if 10-hour fuel sticks are used, 0 otherwise (dimensionless). Threshold against 0.5 selects branch."
+    },
+    "WT": {
+      "type": "parameter",
+      "units": "kg",
+      "default": 0.1,
+      "description": "Weight of fuel sticks. Reference fuel-stick weight is 100 g = 0.1 kg, at which WT_diff = 0."
+    },
+    "AGE": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "Days since fuel sticks were set out (dimensionless). Drives age-correction factors AA and BB (Haines & Frost 1978)."
+    },
+    "CLIMAT": {
+      "type": "parameter",
+      "units": "1",
+      "default": 2.0,
+      "description": "NFDRS climate class 1-4 (dimensionless). 1 = arid, 4 = wet; drives the climate-correction factor CC = CLIMAT/4."
+    },
+    "kg_ref": {
+      "type": "parameter",
+      "units": "kg",
+      "default": 1.0,
+      "description": "Reference mass for non-dimensionalizing WT (MTK unit-balancing constant preserved from upstream)."
+    },
+    "kg_to_g": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1000.0,
+      "description": "Kilograms-to-grams conversion (dimensionless after WT/kg_ref non-dimensionalization). Preserved from upstream `@constants`."
+    },
+    "WT_ref_g": {
+      "type": "parameter",
+      "units": "1",
+      "default": 100.0,
+      "description": "Reference fuel-stick weight in grams (dimensionless after non-dimensionalization). Preserved from upstream `@constants`."
+    },
+    "MC10": {
+      "type": "unknown",
+      "units": "1",
+      "description": "10-hour fuel moisture content (dimensionless fraction)."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "MC10",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "use_fuel_sticks",
+              0.5
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "+",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          {
+                            "op": "*",
+                            "args": [
+                              0.5,
+                              "AGE"
+                            ]
+                          },
+                          30.0
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          "CLIMAT",
+                          4.0
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          1.0,
+                          {
+                            "op": "/",
+                            "args": [
+                              {
+                                "op": "*",
+                                "args": [
+                                  0.02,
+                                  "AGE"
+                                ]
+                              },
+                              30.0
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          "CLIMAT",
+                          4.0
+                        ]
+                      },
+                      {
+                        "op": "-",
+                        "args": [
+                          {
+                            "op": "*",
+                            "args": [
+                              {
+                                "op": "/",
+                                "args": [
+                                  "WT",
+                                  "kg_ref"
+                                ]
+                              },
+                              "kg_to_g"
+                            ]
+                          },
+                          "WT_ref_g"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              100.0
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              1.28,
+              "EMCPRM"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "no_fuel_sticks_emcprm10",
+      "description": "No fuel sticks (use_fuel_sticks = 0); EMCPRM = 0.10 (10% interface EMC). Selects the without-sticks branch: MC10 = 1.28 * EMCPRM = 0.128.",
+      "parameter_overrides": {
+        "use_fuel_sticks": 0.0,
+        "EMCPRM": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC10",
+          "time": 0.0,
+          "expected": 0.128
+        }
+      ]
+    },
+    {
+      "id": "no_fuel_sticks_emcprm05",
+      "description": "No fuel sticks; EMCPRM = 0.05 (dry interface). MC10 = 1.28 * 0.05 = 0.064.",
+      "parameter_overrides": {
+        "use_fuel_sticks": 0.0,
+        "EMCPRM": 0.05
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC10",
+          "time": 0.0,
+          "expected": 0.064
+        }
+      ]
+    },
+    {
+      "id": "no_fuel_sticks_emcprm30",
+      "description": "No fuel sticks; EMCPRM = 0.30 (humid interface). MC10 = 1.28 * 0.30 = 0.384.",
+      "parameter_overrides": {
+        "use_fuel_sticks": 0.0,
+        "EMCPRM": 0.3
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC10",
+          "time": 0.0,
+          "expected": 0.384
+        }
+      ]
+    },
+    {
+      "id": "with_fuel_sticks_reference_weight",
+      "description": "Fuel sticks, default reference values: WT = 0.1 kg (= 100 g, the reference weight ⇒ WT_diff = 0), AGE = 0 (⇒ AA = 0), CLIMAT = 2 (⇒ CC = 0.5). MC10 = (0*0.5 + 1*0.5*0)/100 = 0.",
+      "parameter_overrides": {
+        "use_fuel_sticks": 1.0,
+        "WT": 0.1,
+        "AGE": 0.0,
+        "CLIMAT": 2.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC10",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        }
+      ]
+    },
+    {
+      "id": "with_fuel_sticks_heavy_zero_age",
+      "description": "Fresh (AGE=0) heavy fuel sticks: WT = 0.12 kg = 120 g ⇒ WT_diff = 20; CLIMAT = 2 (⇒ CC = 0.5). MC10 = (0 + 1*0.5*20)/100 = 0.10.",
+      "parameter_overrides": {
+        "use_fuel_sticks": 1.0,
+        "WT": 0.12,
+        "AGE": 0.0,
+        "CLIMAT": 2.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC10",
+          "time": 0.0,
+          "expected": 0.1
+        }
+      ]
+    },
+    {
+      "id": "with_fuel_sticks_aged_30days",
+      "description": "30-day-old fuel sticks at WT = 0.12 kg, CLIMAT = 2: AA = 0.5, BB = 1.02, CC = 0.5, WT_diff = 20. MC10 = (0.5*0.5 + 1.02*0.5*20)/100 = 10.45/100 = 0.1045 — exercises the age-correction factor BB and the AA*CC term.",
+      "parameter_overrides": {
+        "use_fuel_sticks": 1.0,
+        "WT": 0.12,
+        "AGE": 30.0,
+        "CLIMAT": 2.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC10",
+          "time": 0.0,
+          "expected": 0.1045
+        }
+      ]
+    },
+    {
+      "id": "with_fuel_sticks_climate4_aged_60days",
+      "description": "60-day-old sticks in wettest climate class (CLIMAT = 4 ⇒ CC = 1.0); WT = 0.12 kg ⇒ WT_diff = 20. AA = 1.0, BB = 1.04. MC10 = (1.0*1.0 + 1.04*1.0*20)/100 = 21.8/100 = 0.218.",
+      "parameter_overrides": {
+        "use_fuel_sticks": 1.0,
+        "WT": 0.12,
+        "AGE": 60.0,
+        "CLIMAT": 4.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC10",
+          "time": 0.0,
+          "expected": 0.218
+        }
+      ]
+    },
+    {
+      "id": "with_fuel_sticks_climate1_arid",
+      "description": "Arid climate class (CLIMAT = 1 ⇒ CC = 0.25); fresh heavy sticks (WT = 0.12, AGE = 0). MC10 = (0 + 1*0.25*20)/100 = 5/100 = 0.05 — exercises the dry end of the climate-correction range.",
+      "parameter_overrides": {
+        "use_fuel_sticks": 1.0,
+        "WT": 0.12,
+        "AGE": 0.0,
+        "CLIMAT": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC10",
+          "time": 0.0,
+          "expected": 0.05
+        }
+      ]
+    },
+    {
+      "id": "with_fuel_sticks_light_weight_negative",
+      "description": "Light fresh sticks (WT = 0.08 kg < 100 g reference) ⇒ WT_diff = -20; CLIMAT = 2 ⇒ CC = 0.5. MC10 = (0 + 1*0.5*-20)/100 = -0.10. Exercises the negative-WT_diff regime — mathematically the formula is signed even though MC10 < 0 is non-physical; preserves bit-fidelity with upstream which does not clamp.",
+      "parameter_overrides": {
+        "use_fuel_sticks": 1.0,
+        "WT": 0.08,
+        "AGE": 0.0,
+        "CLIMAT": 2.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC10",
+          "time": 0.0,
+          "expected": -0.1
+        }
+      ]
+    },
+    {
+      "id": "with_fuel_sticks_aged_180days_climate3",
+      "description": "Long-aged sticks (AGE = 180 d) in moderately wet climate (CLIMAT = 3); WT = 0.105 kg ⇒ WT_diff = 5. AA = 3.0, BB = 1.12, CC = 0.75. MC10 = (3.0*0.75 + 1.12*0.75*5)/100 = (2.25 + 4.2)/100 = 0.0645 — the AA*CC term dominates as AGE/30 grows.",
+      "parameter_overrides": {
+        "use_fuel_sticks": 1.0,
+        "WT": 0.105,
+        "AGE": 180.0,
+        "CLIMAT": 3.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC10",
+          "time": 0.0,
+          "expected": 0.0645
+        }
+      ]
+    },
+    {
+      "id": "dispatch_below_threshold",
+      "description": "use_fuel_sticks = 0.4 (below 0.5 threshold) selects the no-sticks branch. EMCPRM = 0.10 ⇒ MC10 = 0.128 (matches no_fuel_sticks_emcprm10). WT/AGE/CLIMAT overrides are present but should not affect the result.",
+      "parameter_overrides": {
+        "use_fuel_sticks": 0.4,
+        "EMCPRM": 0.1,
+        "WT": 0.12,
+        "AGE": 30.0,
+        "CLIMAT": 4.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC10",
+          "time": 0.0,
+          "expected": 0.128
+        }
+      ]
+    },
+    {
+      "id": "dispatch_above_threshold",
+      "description": "use_fuel_sticks = 0.6 (above 0.5 threshold) selects the with-sticks branch. WT = 0.12, AGE = 0, CLIMAT = 2 ⇒ MC10 = 0.10 (matches with_fuel_sticks_heavy_zero_age). EMCPRM override is present but should not affect the result.",
+      "parameter_overrides": {
+        "use_fuel_sticks": 0.6,
+        "EMCPRM": 0.99,
+        "WT": 0.12,
+        "AGE": 0.0,
+        "CLIMAT": 2.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC10",
+          "time": 0.0,
+          "expected": 0.1
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "no_sticks_typical",
+      "description": "Standard NFDRS operation without 10-hour fuel sticks: MC10 is derived directly from EMCPRM as MC10 = 1.28 * EMCPRM (Cohen & Deeming 1985, p. 4). At a moderate interface EMC of 10%, MC10 = 0.128 (12.8% fuel moisture).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameters": {
+        "use_fuel_sticks": 0.0,
+        "EMCPRM": 0.1
+      }
+    },
+    {
+      "id": "with_sticks_fresh_moderate_climate",
+      "description": "Fresh (AGE = 0 d) 120 g fuel sticks in a moderate climate (CLIMAT = 2 ⇒ CC = 0.5). The age-correction term AA*CC vanishes (AA = 0), leaving MC10 = BB*CC*WT_diff/100 = (1.0 * 0.5 * 20)/100 = 0.10 (10% moisture). Illustrates the with-sticks branch at the canonical Haines & Frost (1978) reference age.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameters": {
+        "use_fuel_sticks": 1.0,
+        "WT": 0.12,
+        "AGE": 0.0,
+        "CLIMAT": 2.0
+      }
+    },
+    {
+      "id": "with_sticks_aged_arid_climate",
+      "description": "60-day-old 120 g fuel sticks in arid climate class 1 (CC = 0.25). Both age-correction terms are active: AA = 1.0, BB = 1.04. MC10 = (1.0*0.25 + 1.04*0.25*20)/100 = 0.0545 (5.45% moisture). Exercises the dry end of the climate-correction range together with the AA contribution that grows with stick age.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameters": {
+        "use_fuel_sticks": 1.0,
+        "WT": 0.12,
+        "AGE": 60.0,
+        "CLIMAT": 1.0
+      }
+    }
+  ]
+}
+```
+
+</details>

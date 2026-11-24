@@ -1,0 +1,590 @@
+---
+title: "DropletMassBalance"
+slug: "dropletmassbalance"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["transport"]
+domain: "aerosol"
+subdomain: "transport"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/transport/droplet_mass_balance.esm"
+reference: "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons. Gas-phase partial pressure ODE: §12.5, Eq. 12.122. Aqueous-phase concentration ODE: §12.5, Eq. 12.123. Mass transfer coefficient k_mt: §12.4. Effective Henry's law H*: §12.3."
+description: "Coupled gas-phase and aqueous-phase mass balance for cloud droplet chemistry. Tracks the time evolution of bulk gas-phase partial pressure and aqueous-phase concentration, including gas-to-aqueous mass transfer and aqueous-phase chemical reaction (Seinfeld & Pandis 2006, Ch. 12, Eqs. 12.122-12.123). Migrated from Aerosol.jl src/aqueous_transport.jl:112."
+tags: ["aerosol", "transport", "model", "aqueous_transport", "mass_balance", "henry_law", "gas_uptake", "cloud_droplet"]
+---
+
+## Description
+
+Coupled gas-phase and aqueous-phase mass balance for cloud droplet chemistry. Tracks the time evolution of bulk gas-phase partial pressure and aqueous-phase concentration, including gas-to-aqueous mass transfer and aqueous-phase chemical reaction (Seinfeld & Pandis 2006, Ch. 12, Eqs. 12.122-12.123). Migrated from Aerosol.jl src/aqueous_transport.jl:112.
+
+## Reference
+
+_source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/aqueous_transport.jl:112
+Seinfeld, J. H. and Pandis, S. N. (2006), Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, Wiley, Ch. 12. Key equations: 12.122 (gas-phase partial pressure ODE: dp/dt = -k_mt*w_L*p + k_mt*w_L*C_aq/H*); 12.123 (aqueous-phase concentration ODE: dC_aq/dt = (k_mt/RT)*p - (k_mt/(H*RT))*C_aq - Q*R_aq). The system admits a conserved mass quantity n = p/(R*T) + C_aq*w_L (total moles per unit volume, gas + aqueous), which is verified analytically by summing the two ODEs. At equilibrium (dp/dt = dC_aq/dt = 0, R_aq = 0) the constraint C_aq = H_star * p (Henry's law equilibrium) is recovered. R is a physical constant (universal gas constant) carried as a fixed-default parameter following the upstream @constants block convention._
+
+## Variables
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `p` | `Pa` | `100.0` | Bulk gas-phase partial pressure |
+| `C_aq` | `mol/m^3` | `0.0` | Aqueous-phase concentration |
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `R` | `J/(mol*K)` | `8.314` | Universal gas constant |
+| `k_mt` | `s^-1` | `1.0` | Mass transfer coefficient |
+| `w_L` | `1` | `1e-06` | Liquid water volume fraction (dimensionless) |
+| `H_star` | `mol/(m^3*Pa)` | `100000.0` | Effective Henry's law coefficient |
+| `T` | `K` | `298.15` | Temperature |
+| `Q` | `1` | `1.0` | Aqueous diffusion correction factor (dimensionless) |
+| `R_aq` | `mol/(m^3*s)` | `0.0` | Aqueous-phase reaction rate |
+
+## Equations
+
+$$
+\mathrm{D}\left(p\right) = \left(-1\right) \cdot k_{mt} \cdot w_{L} \cdot p + \frac{k_{mt} \cdot w_{L} \cdot C_{aq}}{H_{star}}
+$$
+
+$$
+\mathrm{D}\left(C_{aq}\right) = \frac{k_{mt} \cdot p}{R \cdot T} + \left(-1\right) \cdot \frac{k_{mt} \cdot C_{aq}}{H_{star} \cdot R \cdot T} + \left(-1\right) \cdot Q \cdot R_{aq}
+$$
+
+## Analyses
+
+### defaults_trajectory
+
+Gas-phase pressure and aqueous-phase concentration trajectories at upstream Aerosol.jl defaults (k_mt=1 s^-1, w_L=1e-6, H_star=1e5 mol/(m³·Pa)) over a 1-hour window. The equilibration time constant is ~11.5 days, so gas pressure decreases slowly (100 → 99.6 Pa) and aqueous concentration rises from 0 to ~145 mol/m³. The small but monotonic change over 3600 s makes the direction of mass transfer visible without waiting for full equilibration.
+
+**Time span:** 0.0 → 3600.0
+
+![Gas-phase partial pressure p decreasing slowly as the species partitions into the aqueous phase.](/plots/aerosol/transport/dropletmassbalance/defaults_trajectory-gas_pressure_vs_time.png)
+
+![Aqueous-phase concentration C_aq rising from 0 as the species dissolves from the gas phase.](/plots/aerosol/transport/dropletmassbalance/defaults_trajectory-aqueous_concentration_vs_time.png)
+
+### fast_equilibration_trajectory
+
+Gas-phase pressure and aqueous-phase concentration at fast-equilibration conditions (k_mt=10 s^-1, w_L=1e-3, H_star=100 mol/(m³·Pa)) over 600 s. Time constant τ ≈ 99.6 s. Both variables approach Henry's law equilibrium (C_aq ≈ H*·p ≈ 40.18 mol/m³, p ≈ 0.402 Pa) within the window, illustrating the transfer of mass from gas to aqueous phase.
+
+**Time span:** 0.0 → 600.0
+
+![Gas-phase pressure p (Pa) decaying from 100 Pa toward equilibrium (~0.4 Pa) with τ ≈ 99.6 s.](/plots/aerosol/transport/dropletmassbalance/fast_equilibration_trajectory-gas_pressure_fast_vs_time.png)
+
+![Aqueous concentration C_aq (mol/m³) rising from 0 toward equilibrium (~40.18 mol/m³), approaching Henry's law partition C_aq = H*·p.](/plots/aerosol/transport/dropletmassbalance/fast_equilibration_trajectory-aqueous_concentration_fast_vs_time.png)
+
+### mass_transfer_rate_sensitivity
+
+Sweep the mass transfer coefficient k_mt over one order of magnitude (1 to 10 s^-1) at fixed w_L=1e-3, H_star=100. Higher k_mt drives faster equilibration: at t=200 s the final aqueous concentration C_aq spans the range from ~8 mol/m³ (slow transfer) to ~40 mol/m³ (near equilibrium). Illustrates how the rate of gas-to-aqueous partitioning depends on the mass transfer coefficient.
+
+**Time span:** 0.0 → 600.0
+
+**Swept over:** `k_mt`
+
+![C_aq trajectories for five k_mt values (1, 1.78, 3.16, 5.62, 10 s^-1). Faster transfer (larger k_mt) saturates C_aq more quickly.](/plots/aerosol/transport/dropletmassbalance/mass_transfer_rate_sensitivity-aqueous_conc_vs_time_kmt_sweep.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "variables": {
+    "R": {
+      "default": 8.314,
+      "type": "parameter",
+      "units": "J/(mol*K)",
+      "description": "Universal gas constant"
+    },
+    "k_mt": {
+      "default": 1.0,
+      "type": "parameter",
+      "units": "s^-1",
+      "description": "Mass transfer coefficient"
+    },
+    "w_L": {
+      "default": 1e-06,
+      "type": "parameter",
+      "units": "1",
+      "description": "Liquid water volume fraction (dimensionless)"
+    },
+    "H_star": {
+      "default": 100000.0,
+      "type": "parameter",
+      "units": "mol/(m^3*Pa)",
+      "description": "Effective Henry's law coefficient"
+    },
+    "T": {
+      "default": 298.15,
+      "type": "parameter",
+      "units": "K",
+      "description": "Temperature"
+    },
+    "Q": {
+      "default": 1.0,
+      "type": "parameter",
+      "units": "1",
+      "description": "Aqueous diffusion correction factor (dimensionless)"
+    },
+    "R_aq": {
+      "default": 0.0,
+      "type": "parameter",
+      "units": "mol/(m^3*s)",
+      "description": "Aqueous-phase reaction rate"
+    },
+    "p": {
+      "default": 100.0,
+      "type": "unknown",
+      "units": "Pa",
+      "description": "Bulk gas-phase partial pressure"
+    },
+    "C_aq": {
+      "default": 0.0,
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "Aqueous-phase concentration"
+    }
+  },
+  "equations": [
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "p"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              -1,
+              "k_mt",
+              "w_L",
+              "p"
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "k_mt",
+                  "w_L",
+                  "C_aq"
+                ]
+              },
+              "H_star"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "C_aq"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "k_mt",
+                  "p"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "R",
+                  "T"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1,
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      "k_mt",
+                      "C_aq"
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      "H_star",
+                      "R",
+                      "T"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1,
+              "Q",
+              "R_aq"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "reference": {
+    "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/aqueous_transport.jl:112\nSeinfeld, J. H. and Pandis, S. N. (2006), Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, Wiley, Ch. 12. Key equations: 12.122 (gas-phase partial pressure ODE: dp/dt = -k_mt*w_L*p + k_mt*w_L*C_aq/H*); 12.123 (aqueous-phase concentration ODE: dC_aq/dt = (k_mt/RT)*p - (k_mt/(H*RT))*C_aq - Q*R_aq). The system admits a conserved mass quantity n = p/(R*T) + C_aq*w_L (total moles per unit volume, gas + aqueous), which is verified analytically by summing the two ODEs. At equilibrium (dp/dt = dC_aq/dt = 0, R_aq = 0) the constraint C_aq = H_star * p (Henry's law equilibrium) is recovered. R is a physical constant (universal gas constant) carried as a fixed-default parameter following the upstream @constants block convention."
+  },
+  "tolerance": {
+    "rel": 1e-08,
+    "abs": 1e-12
+  },
+  "tests": [
+    {
+      "id": "defaults_slow_approach_equilibrium",
+      "description": "Reference run at upstream Aerosol.jl defaults: k_mt=1 s^-1, w_L=1e-6, H_star=1e5 mol/(m³·Pa), T=298.15 K, Q=1, R_aq=0. Initial conditions: p=100 Pa (pure gas phase), C_aq=0 mol/m³. The equilibration time constant τ = 1/(k_mt·w_L + k_mt/(H*·R·T)) ≈ 9.96e5 s (~11.5 days), so changes over hours are small but measurable. Mirrors upstream 'DropletMassBalance dynamics' test: gas phase decreases, aqueous phase increases. Mass n = p/(R·T) + C_aq·w_L is conserved exactly: n₀ = 100/(8.314·298.15) = 0.040342 mol/m³.",
+      "time_span": {
+        "start": 0.0,
+        "end": 3600.0
+      },
+      "assertions": [
+        {
+          "variable": "p",
+          "time": 0.0,
+          "expected": 100.0,
+          "tolerance": {
+            "abs": 1e-12
+          }
+        },
+        {
+          "variable": "C_aq",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-12
+          }
+        },
+        {
+          "variable": "p",
+          "time": 60.0,
+          "expected": 99.9940001807225
+        },
+        {
+          "variable": "C_aq",
+          "time": 60.0,
+          "expected": 2.42043450346047
+        },
+        {
+          "variable": "p",
+          "time": 600.0,
+          "expected": 99.9400180689867
+        },
+        {
+          "variable": "C_aq",
+          "time": 600.0,
+          "expected": 24.1977847489298
+        },
+        {
+          "variable": "p",
+          "time": 3600.0,
+          "expected": 99.6406498309692
+        },
+        {
+          "variable": "C_aq",
+          "time": 3600.0,
+          "expected": 144.968291163633
+        }
+      ]
+    },
+    {
+      "id": "fast_gas_uptake_into_aqueous",
+      "description": "Fast equilibration: k_mt=10 s^-1, w_L=1e-3, H_star=100 mol/(m³·Pa), T=298.15 K, Q=1, R_aq=0. Time constant τ ≈ 99.6 s. Starting from pure gas phase (p=100 Pa, C_aq=0), the system equilibrates toward Henry's law: C_aq → H*·p_eq ≈ 40.18 mol/m³, p_eq ≈ 0.402 Pa. Mirrors upstream 'DropletMassBalance dynamics' test: p_final < p_initial and C_aq_final > C_aq_initial with ratio C_aq/(H*·p) rising toward 1.\n\nRe-derived expected values (2026-09-19): the two t=100 s assertions of this test (p and C_aq) no longer carry the values they were migrated with. p went from 36.89441462311552 to 36.89441315162609 Pa (-4.0e-8 relative) and C_aq from 25.45792283788859 to 25.457923431513784 mol/m^3 (+2.3e-8 relative); both had drifted just outside the component-level rel=1e-8 these assertions are judged at, while every other assertion in this test (t=0, t=300 s, t=600 s) still passes as recorded and is left untouched. The new numbers are the Python runner (earthsci_ast.inline_tests.run_inline_tests) at integration tolerances rtol=1e-13 / atol=1e-18, three orders of magnitude tighter than that runner's default rtol=1e-10 / atol=1e-14. They are converged rather than integration error: across rtol=1e-12 / atol=1e-16, rtol=1e-13 / atol=1e-18 and rtol=1e-14 / atol=1e-20 each value moves by at most 3.1e-14 relative, more than five orders of magnitude below the rel=1e-8 bound. The Julia runner (EarthSciAST.run_inline_tests, rtol=1e-13 / atol=1e-18) and the Rust runner (esm test --reltol 1e-14 --abstol 1e-20, the tightest that binding integrates before hitting double-precision limits) land on the same values to within 7e-13 relative, so the three bindings agree to about twelve significant digits. No provenance for the superseded values is on record: the DropletMassBalance row of docs/migration-tracker.md reads in full \"**status: complete** (esm-c3w; 28 assertions, 4 tests, 3 examples; mass conservation verified)\" and says nothing about how the expected values were produced. That row is a dated record of what was true when the model landed and is deliberately left as it stands.",
+      "parameter_overrides": {
+        "k_mt": 10.0,
+        "w_L": 0.001,
+        "H_star": 100.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 600.0
+      },
+      "assertions": [
+        {
+          "variable": "p",
+          "time": 0.0,
+          "expected": 100.0,
+          "tolerance": {
+            "abs": 1e-12
+          }
+        },
+        {
+          "variable": "C_aq",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-12
+          }
+        },
+        {
+          "variable": "p",
+          "time": 100.0,
+          "expected": 36.89441315162609
+        },
+        {
+          "variable": "C_aq",
+          "time": 100.0,
+          "expected": 25.457923431513784
+        },
+        {
+          "variable": "p",
+          "time": 300.0,
+          "expected": 5.30084833634346
+        },
+        {
+          "variable": "C_aq",
+          "time": 300.0,
+          "expected": 38.2033330563156
+        },
+        {
+          "variable": "p",
+          "time": 600.0,
+          "expected": 0.642772253978951
+        },
+        {
+          "variable": "C_aq",
+          "time": 600.0,
+          "expected": 40.0824843353923
+        }
+      ]
+    },
+    {
+      "id": "reaction_depletes_aqueous_phase",
+      "description": "Aqueous-phase reaction sink (R_aq=1e-3 mol/(m³·s), Q=1) with fast dynamics (k_mt=10, w_L=1e-3, H_star=100). At t=300 s (~3 time constants), the reaction has consumed additional C_aq compared to the no-reaction case: C_aq(300) ≈ 37.90 mol/m³ vs 38.20 mol/m³ without reaction. Also p is slightly lower (5.299 vs 5.301 Pa) because the reaction draws additional material from the gas phase. Mirrors upstream mass-balance expectation for R_aq > 0: the reaction term -Q·R_aq drives net depletion of the aqueous phase.\n\nRe-derived expected values (2026-09-19): as in fast_gas_uptake_into_aqueous, the two t=100 s assertions of this test were re-derived against the current runners. p went from 36.89404716142744 to 36.8940456899008 Pa (-4.0e-8 relative) and C_aq from 25.35807107851176 to 25.35807167215196 mol/m^3 (+2.3e-8 relative); the t=300 s and t=600 s assertions still pass at rel=1e-8 as recorded and are left untouched. Same derivation and same convergence evidence as the sibling test: Python runner (earthsci_ast.inline_tests.run_inline_tests) at rtol=1e-13 / atol=1e-18, stable to within 3e-14 relative across rtol=1e-12 / atol=1e-16 through rtol=1e-14 / atol=1e-20, and matched by the Julia and Rust runners to within 7e-13 relative. The migration-tracker row for this component records no provenance for the superseded values and is left as it stands.",
+      "parameter_overrides": {
+        "k_mt": 10.0,
+        "w_L": 0.001,
+        "H_star": 100.0,
+        "R_aq": 0.001
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 600.0
+      },
+      "assertions": [
+        {
+          "variable": "p",
+          "time": 100.0,
+          "expected": 36.8940456899008
+        },
+        {
+          "variable": "C_aq",
+          "time": 100.0,
+          "expected": 25.35807167215196
+        },
+        {
+          "variable": "p",
+          "time": 300.0,
+          "expected": 5.29880357678863
+        },
+        {
+          "variable": "C_aq",
+          "time": 300.0,
+          "expected": 37.9041579489247
+        },
+        {
+          "variable": "p",
+          "time": 600.0,
+          "expected": 0.637785941933101
+        },
+        {
+          "variable": "C_aq",
+          "time": 600.0,
+          "expected": 39.484495902935
+        }
+      ]
+    },
+    {
+      "id": "mass_conservation_default_params",
+      "description": "Mass conservation check at default parameters. The total moles n = p/(R·T) + C_aq·w_L is an exact conserved quantity of the ODE system (verified by summing the two equations). At default params n₀ = 100/(8.314·298.15) = 0.040342 mol/m³. This test verifies n is conserved by pinning p and C_aq at four time points: any deviation in either variable would violate conservation. Reproduces upstream 'DropletMassBalance mass conservation' test.",
+      "time_span": {
+        "start": 0.0,
+        "end": 3600.0
+      },
+      "assertions": [
+        {
+          "variable": "p",
+          "time": 60.0,
+          "expected": 99.9940001807225
+        },
+        {
+          "variable": "C_aq",
+          "time": 60.0,
+          "expected": 2.42043450346047
+        },
+        {
+          "variable": "p",
+          "time": 600.0,
+          "expected": 99.9400180689867
+        },
+        {
+          "variable": "C_aq",
+          "time": 600.0,
+          "expected": 24.1977847489298
+        },
+        {
+          "variable": "p",
+          "time": 3600.0,
+          "expected": 99.6406498309692
+        },
+        {
+          "variable": "C_aq",
+          "time": 3600.0,
+          "expected": 144.968291163633
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "defaults_trajectory",
+      "description": "Gas-phase pressure and aqueous-phase concentration trajectories at upstream Aerosol.jl defaults (k_mt=1 s^-1, w_L=1e-6, H_star=1e5 mol/(m³·Pa)) over a 1-hour window. The equilibration time constant is ~11.5 days, so gas pressure decreases slowly (100 → 99.6 Pa) and aqueous concentration rises from 0 to ~145 mol/m³. The small but monotonic change over 3600 s makes the direction of mass transfer visible without waiting for full equilibration.",
+      "time_span": {
+        "start": 0.0,
+        "end": 3600.0
+      },
+      "plots": [
+        {
+          "id": "gas_pressure_vs_time",
+          "type": "line",
+          "description": "Gas-phase partial pressure p decreasing slowly as the species partitions into the aqueous phase.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "p",
+            "label": "p (Pa)"
+          }
+        },
+        {
+          "id": "aqueous_concentration_vs_time",
+          "type": "line",
+          "description": "Aqueous-phase concentration C_aq rising from 0 as the species dissolves from the gas phase.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "C_aq",
+            "label": "C_aq (mol/m³)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fast_equilibration_trajectory",
+      "description": "Gas-phase pressure and aqueous-phase concentration at fast-equilibration conditions (k_mt=10 s^-1, w_L=1e-3, H_star=100 mol/(m³·Pa)) over 600 s. Time constant τ ≈ 99.6 s. Both variables approach Henry's law equilibrium (C_aq ≈ H*·p ≈ 40.18 mol/m³, p ≈ 0.402 Pa) within the window, illustrating the transfer of mass from gas to aqueous phase.",
+      "parameters": {
+        "k_mt": 10.0,
+        "w_L": 0.001,
+        "H_star": 100.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 600.0
+      },
+      "plots": [
+        {
+          "id": "gas_pressure_fast_vs_time",
+          "type": "line",
+          "description": "Gas-phase pressure p (Pa) decaying from 100 Pa toward equilibrium (~0.4 Pa) with τ ≈ 99.6 s.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "p",
+            "label": "p (Pa)"
+          }
+        },
+        {
+          "id": "aqueous_concentration_fast_vs_time",
+          "type": "line",
+          "description": "Aqueous concentration C_aq (mol/m³) rising from 0 toward equilibrium (~40.18 mol/m³), approaching Henry's law partition C_aq = H*·p.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "C_aq",
+            "label": "C_aq (mol/m³)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mass_transfer_rate_sensitivity",
+      "description": "Sweep the mass transfer coefficient k_mt over one order of magnitude (1 to 10 s^-1) at fixed w_L=1e-3, H_star=100. Higher k_mt drives faster equilibration: at t=200 s the final aqueous concentration C_aq spans the range from ~8 mol/m³ (slow transfer) to ~40 mol/m³ (near equilibrium). Illustrates how the rate of gas-to-aqueous partitioning depends on the mass transfer coefficient.",
+      "parameters": {
+        "w_L": 0.001,
+        "H_star": 100.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 600.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "k_mt",
+            "range": {
+              "start": 1.0,
+              "stop": 10.0,
+              "count": 5,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "aqueous_conc_vs_time_kmt_sweep",
+          "type": "line",
+          "description": "C_aq trajectories for five k_mt values (1, 1.78, 3.16, 5.62, 10 s^-1). Faster transfer (larger k_mt) saturates C_aq more quickly.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "C_aq",
+            "label": "C_aq (mol/m³)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

@@ -1,0 +1,1098 @@
+---
+title: "RayleighScattering"
+slug: "rayleighscattering"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["mie"]
+domain: "aerosol"
+subdomain: "mie"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/mie/rayleigh_scattering.esm"
+reference: "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 15. Migrated from Aerosol.jl src/mie_scattering.jl `RayleighScattering` (esm-8aj)."
+description: "Optical scattering, absorption, and extinction properties of small particles in the Rayleigh regime (size parameter α = πD_p/λ << 1), from Seinfeld & Pandis (2006) Atmospheric Chemistry and Physics, 2nd ed., Chapter 15, Eqs. 15.4, 15.5, 15.19, 15.21, and 15.41-15.43. Computes the size parameter α, the Clausius-Mossotti factor (m²-1)/(m²+2), and from them the Rayleigh scattering efficiency Q_scat, absorption efficiency Q_abs, extinction efficiency Q_ext, single-scattering albedo ω, and mass efficiencies E_ext/E_scat/E_abs. The two upstream @register_symbolic helper functions (rayleigh_m2_factor_real, rayleigh_m2_factor_imag) are resolved as closed-form algebraic AST, closing the gt-p3ep blocking gap. Migrated from Aerosol.jl src/mie_scattering.jl."
+tags: ["aerosol", "mie", "model", "rayleigh", "optical", "scattering", "seinfeld_pandis_ch15"]
+---
+
+## Description
+
+Optical scattering, absorption, and extinction properties of small particles in the Rayleigh regime (size parameter α = πD_p/λ << 1), from Seinfeld & Pandis (2006) Atmospheric Chemistry and Physics, 2nd ed., Chapter 15, Eqs. 15.4, 15.5, 15.19, 15.21, and 15.41-15.43. Computes the size parameter α, the Clausius-Mossotti factor (m²-1)/(m²+2), and from them the Rayleigh scattering efficiency Q_scat, absorption efficiency Q_abs, extinction efficiency Q_ext, single-scattering albedo ω, and mass efficiencies E_ext/E_scat/E_abs. The two upstream @register_symbolic helper functions (rayleigh_m2_factor_real, rayleigh_m2_factor_imag) are resolved as closed-form algebraic AST, closing the gt-p3ep blocking gap. Migrated from Aerosol.jl src/mie_scattering.jl.
+
+## Reference
+
+Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 15. Migrated from Aerosol.jl src/mie_scattering.jl `RayleighScattering` (esm-8aj).
+
+_source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/mie_scattering.jl:111
+
+Upstream `RayleighScattering` is an MTK `@component` with five `@constants` (π_val=Float64(π), eight_thirds=8/3, four=4.0, three=3.0, two=2.0) and five `@parameters` (D_p=0.05e-6 m, λ=550e-9 m, n_refr=1.5, k_refr=0.0, ρ_p=1500 kg/m³). The eleven `@variables` are all algebraic:
+  α              ~ π_val * D_p / λ                                    [size parameter, Eq. 15.6]
+  m2_factor_real ~ rayleigh_m2_factor_real(n_refr, k_refr)            [@register_symbolic]
+  m2_factor_imag ~ rayleigh_m2_factor_imag(n_refr, k_refr)            [@register_symbolic]
+  m2_factor_mag_sq ~ m2_factor_real² + m2_factor_imag²
+  Q_scat         ~ eight_thirds * α⁴ * m2_factor_mag_sq               [Eq. 15.19]
+  Q_abs          ~ four * α * m2_factor_imag                          [Eq. 15.21]
+  Q_ext          ~ Q_scat + Q_abs                                     [Eq. 15.4]
+  ω              ~ Q_scat / Q_ext                                     [Eq. 15.5]
+  E_ext          ~ three * Q_ext / (two * ρ_p * D_p)                  [Eq. 15.41]
+  E_scat         ~ three * Q_scat / (two * ρ_p * D_p)                 [Eq. 15.42]
+  E_abs          ~ three * Q_abs / (two * ρ_p * D_p)                  [Eq. 15.43]
+
+gt-p3ep gap resolution: `rayleigh_m2_factor_real(n, k)` and `rayleigh_m2_factor_imag(n, k)` compute the real and imaginary parts of the Clausius-Mossotti factor (m²-1)/(m²+2), where m = n_refr + i·k_refr is the complex refractive index. Unlike the Bohren-Huffman Mie functions (`mie_Q_ext`, `mie_Q_scat` in AerosolExtinction), these are closed-form algebraic expressions derivable from standard complex arithmetic. With m2_re = n² - k² and m2_im = 2nk:
+  denom            = (m2_re + 2)² + m2_im²  [= |m²+2|²]
+  m2_factor_real   = [(m2_re-1)(m2_re+2) + m2_im²] / denom  [Re part]
+  m2_factor_imag   = 3·m2_im / denom                        [Im part]
+Derivation of Im[(m²-1)/(m²+2)]: writing (a+bi)/(c+di) = (ac+bd)/(c²+d²) + i(bc-ad)/(c²+d²) with a=(m2_re-1), b=m2_im, c=(m2_re+2), d=m2_im gives Im = [m2_im·(m2_re+2) - (m2_re-1)·m2_im] / denom = 3·m2_im / denom. This resolves the gt-p3ep blocking gap as direct algebraic AST without `interp.*` primitives or parameter-lifting.
+
+@constants handling: all five upstream @constants migrate to `type: parameter` with fixed defaults, consistent with the rig-wide convention (aerosol_extinction.esm, rayleigh_atmosphere.esm, etc.).
+
+Dependency order (all acyclic, no ODEs):
+  {n_refr, k_refr} → {m2_re, m2_im} → denom → {m2_factor_real, m2_factor_imag}
+  {D_p, λ} → α
+  {m2_factor_real, m2_factor_imag} → m2_factor_mag_sq
+  {eight_thirds, α, m2_factor_mag_sq} → Q_scat
+  {four, α, m2_factor_imag} → Q_abs
+  {Q_scat, Q_abs} → Q_ext → {ω, E_ext}
+  {Q_scat, ρ_p, D_p} → E_scat;  {Q_abs, ρ_p, D_p} → E_abs
+
+Tolerance rationale (rel=1e-9): purely algebraic system, all expressions are +, -, *, /, ^ on float64; round-off is ~1e-15. rel=1e-9 leaves six orders of magnitude of headroom._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `π_val` | `1` | `3.141592653589793` | Pi (dimensionless). Upstream MTK @constants entry π_val = Float64(π); migrated as a fixed-default parameter. |
+| `eight_thirds` | `1` | `2.6666666666666665` | Prefactor 8/3 in the Rayleigh scattering efficiency formula (dimensionless, Seinfeld & Pandis Eq. 15.19). Upstream MTK @constants entry eight_thirds = 8.0/3.0. |
+| `four` | `1` | `4.0` | Prefactor 4 in the Rayleigh absorption efficiency formula (dimensionless, Seinfeld & Pandis Eq. 15.21). Upstream MTK @constants entry four = 4.0. |
+| `three` | `1` | `3.0` | Numerator factor 3 in the mass efficiency formula E = 3Q/(2ρD_p) (dimensionless, Seinfeld & Pandis Eqs. 15.41-15.43). Upstream MTK @constants entry three = 3.0. |
+| `two` | `1` | `2.0` | Denominator factor 2 in the mass efficiency formula E = 3Q/(2ρD_p) (dimensionless). Upstream MTK @constants entry two = 2.0. |
+| `D_p` | `m` | `5e-08` | Particle diameter (m). Default 50 nm (0.05 μm) — well within the Rayleigh regime: α = πD_p/λ ≈ 0.286 << 1 at λ=550 nm. The upstream default is 0.05e-6 m. |
+| `λ` | `m` | `5.5e-07` | Wavelength of incident radiation (m). Default 550 nm — visible green light, near the peak of the solar spectrum. The upstream default is 550e-9 m. |
+| `n_refr` | `1` | `1.5` | Real part of the complex refractive index m = n_refr + i·k_refr (dimensionless). Default 1.5 — a representative value for many inorganic aerosol constituents (e.g., ammonium sulfate ~1.53, sea salt ~1.54). |
+| `k_refr` | `1` | `0.0` | Imaginary part of the complex refractive index m = n_refr + i·k_refr (dimensionless). Default 0 — non-absorbing (purely scattering) particle. Positive values indicate light absorption (e.g., black carbon k ≈ 0.6 at 550 nm). Enters Q_abs linearly. |
+| `ρ_p` | `kg*m^-3` | `1500.0` | Particle material density (kg/m³). Default 1500 kg/m³ — a representative value for mixed inorganic aerosol. Used only in the mass efficiency calculations E_ext, E_scat, E_abs. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `m2_re` | `1` |  | Real part of m² = n_refr² - k_refr² (dimensionless). Intermediate quantity for the Clausius-Mossotti factor. At default conditions (n=1.5, k=0): m2_re = 2.25. |
+| `m2_im` | `1` |  | Imaginary part of m² = 2 n_refr k_refr (dimensionless). Zero for non-absorbing particles (k_refr=0); positive for absorbing particles. |
+| `denom` | `1` |  | Shared denominator \|m²+2\|² = (m2_re+2)² + m2_im² (dimensionless) for the Clausius-Mossotti factor (m²-1)/(m²+2). At default conditions (n=1.5, k=0): denom = 4.25² = 18.0625. |
+| `α` | `1` |  | Size parameter α = π D_p / λ (dimensionless, Seinfeld & Pandis 2006, Eq. 15.6). Characterises the scattering regime: Rayleigh (α << 1), resonance (α ~ 1), geometric (α >> 1). At default conditions α = π/11 ≈ 0.286. |
+| `m2_factor_real` | `1` |  | Real part of the Clausius-Mossotti factor Re[(m²-1)/(m²+2)] = [(m2_re-1)(m2_re+2) + m2_im²] / \|m²+2\|² (dimensionless). For non-absorbing particles (k=0): Re = (n²-1)/(n²+2); at n=1.5: 1.25/4.25 = 5/17 ≈ 0.294. |
+| `m2_factor_imag` | `1` |  | Imaginary part of the Clausius-Mossotti factor Im[(m²-1)/(m²+2)] = 3 m2_im / \|m²+2\|² (dimensionless). Zero for non-absorbing particles; positive for absorbing particles. Enters Q_abs = 4α × m2_factor_imag (Eq. 15.21). |
+| `m2_factor_mag_sq` | `1` |  | Squared magnitude of the Clausius-Mossotti factor \|(m²-1)/(m²+2)\|² = m2_factor_real² + m2_factor_imag² (dimensionless). Enters Q_scat via Eq. 15.19. At default conditions: (5/17)² = 25/289 ≈ 0.08651. |
+| `Q_scat` | `1` |  | Rayleigh scattering efficiency Q_scat = (8/3) α⁴ \|(m²-1)/(m²+2)\|² (dimensionless, Seinfeld & Pandis 2006, Eq. 15.19). Scales as D_p⁴ and λ⁻⁴ in the Rayleigh regime. For non-absorbing particles equals Q_ext. |
+| `Q_abs` | `1` |  | Rayleigh absorption efficiency Q_abs = 4 α Im[(m²-1)/(m²+2)] (dimensionless, Seinfeld & Pandis 2006, Eq. 15.21). Scales as D_p and λ⁻¹ — linear in α rather than α⁴, so absorption dominates over scattering for absorbing particles in the Rayleigh limit. Zero when k_refr=0. |
+| `Q_ext` | `1` |  | Rayleigh extinction efficiency Q_ext = Q_scat + Q_abs (dimensionless, Seinfeld & Pandis 2006, Eq. 15.4). |
+| `ω` | `1` |  | Single-scattering albedo ω = Q_scat / Q_ext (dimensionless, Seinfeld & Pandis 2006, Eq. 15.5). Equal to 1 for non-absorbing particles (k_refr=0); decreases toward 0 as absorption dominates in the Rayleigh regime. |
+| `E_ext` | `m^2*kg^-1` |  | Mass extinction efficiency E_ext = 3 Q_ext / (2 ρ_p D_p) (m² kg⁻¹, Seinfeld & Pandis 2006, Eq. 15.41). The power extinguished per unit incident irradiance per unit aerosol mass concentration. |
+| `E_scat` | `m^2*kg^-1` |  | Mass scattering efficiency E_scat = 3 Q_scat / (2 ρ_p D_p) (m² kg⁻¹, Seinfeld & Pandis 2006, Eq. 15.42). |
+| `E_abs` | `m^2*kg^-1` |  | Mass absorption efficiency E_abs = 3 Q_abs / (2 ρ_p D_p) (m² kg⁻¹, Seinfeld & Pandis 2006, Eq. 15.43). Zero when k_refr=0. |
+
+## Observed expressions
+
+$$
+m2_{re} = n_{refr}^{2} - k_{refr}^{2}
+$$
+_Real part of m² = n_refr² - k_refr² (dimensionless). Intermediate quantity for the Clausius-Mossotti factor. At default conditions (n=1.5, k=0): m2_re = 2.25._
+
+$$
+m2_{im} = 2.0 \cdot n_{refr} \cdot k_{refr}
+$$
+_Imaginary part of m² = 2 n_refr k_refr (dimensionless). Zero for non-absorbing particles (k_refr=0); positive for absorbing particles._
+
+$$
+denom = \left(m2_{re} + 2.0\right)^{2} + m2_{im}^{2}
+$$
+_Shared denominator |m²+2|² = (m2_re+2)² + m2_im² (dimensionless) for the Clausius-Mossotti factor (m²-1)/(m²+2). At default conditions (n=1.5, k=0): denom = 4.25² = 18.0625._
+
+$$
+α = \frac{π_{val} \cdot D_{p}}{λ}
+$$
+_Size parameter α = π D_p / λ (dimensionless, Seinfeld & Pandis 2006, Eq. 15.6). Characterises the scattering regime: Rayleigh (α << 1), resonance (α ~ 1), geometric (α >> 1). At default conditions α = π/11 ≈ 0.286._
+
+$$
+m2_{factor\,real} = \frac{\left(m2_{re} - 1.0\right) \cdot \left(m2_{re} + 2.0\right) + m2_{im}^{2}}{denom}
+$$
+_Real part of the Clausius-Mossotti factor Re[(m²-1)/(m²+2)] = [(m2_re-1)(m2_re+2) + m2_im²] / |m²+2|² (dimensionless). For non-absorbing particles (k=0): Re = (n²-1)/(n²+2); at n=1.5: 1.25/4.25 = 5/17 ≈ 0.294._
+
+$$
+m2_{factor\,imag} = \frac{3.0 \cdot m2_{im}}{denom}
+$$
+_Imaginary part of the Clausius-Mossotti factor Im[(m²-1)/(m²+2)] = 3 m2_im / |m²+2|² (dimensionless). Zero for non-absorbing particles; positive for absorbing particles. Enters Q_abs = 4α × m2_factor_imag (Eq. 15.21)._
+
+$$
+m2_{factor\,mag\,sq} = m2_{factor\,real}^{2} + m2_{factor\,imag}^{2}
+$$
+_Squared magnitude of the Clausius-Mossotti factor |(m²-1)/(m²+2)|² = m2_factor_real² + m2_factor_imag² (dimensionless). Enters Q_scat via Eq. 15.19. At default conditions: (5/17)² = 25/289 ≈ 0.08651._
+
+$$
+Q_{scat} = eight_{thirds} \cdot α^{4} \cdot m2_{factor\,mag\,sq}
+$$
+_Rayleigh scattering efficiency Q_scat = (8/3) α⁴ |(m²-1)/(m²+2)|² (dimensionless, Seinfeld & Pandis 2006, Eq. 15.19). Scales as D_p⁴ and λ⁻⁴ in the Rayleigh regime. For non-absorbing particles equals Q_ext._
+
+$$
+Q_{abs} = four \cdot α \cdot m2_{factor\,imag}
+$$
+_Rayleigh absorption efficiency Q_abs = 4 α Im[(m²-1)/(m²+2)] (dimensionless, Seinfeld & Pandis 2006, Eq. 15.21). Scales as D_p and λ⁻¹ — linear in α rather than α⁴, so absorption dominates over scattering for absorbing particles in the Rayleigh limit. Zero when k_refr=0._
+
+$$
+Q_{ext} = Q_{scat} + Q_{abs}
+$$
+_Rayleigh extinction efficiency Q_ext = Q_scat + Q_abs (dimensionless, Seinfeld & Pandis 2006, Eq. 15.4)._
+
+$$
+ω = \frac{Q_{scat}}{Q_{ext}}
+$$
+_Single-scattering albedo ω = Q_scat / Q_ext (dimensionless, Seinfeld & Pandis 2006, Eq. 15.5). Equal to 1 for non-absorbing particles (k_refr=0); decreases toward 0 as absorption dominates in the Rayleigh regime._
+
+$$
+E_{ext} = \frac{three \cdot Q_{ext}}{two \cdot ρ_{p} \cdot D_{p}}
+$$
+_Mass extinction efficiency E_ext = 3 Q_ext / (2 ρ_p D_p) (m² kg⁻¹, Seinfeld & Pandis 2006, Eq. 15.41). The power extinguished per unit incident irradiance per unit aerosol mass concentration._
+
+$$
+E_{scat} = \frac{three \cdot Q_{scat}}{two \cdot ρ_{p} \cdot D_{p}}
+$$
+_Mass scattering efficiency E_scat = 3 Q_scat / (2 ρ_p D_p) (m² kg⁻¹, Seinfeld & Pandis 2006, Eq. 15.42)._
+
+$$
+E_{abs} = \frac{three \cdot Q_{abs}}{two \cdot ρ_{p} \cdot D_{p}}
+$$
+_Mass absorption efficiency E_abs = 3 Q_abs / (2 ρ_p D_p) (m² kg⁻¹, Seinfeld & Pandis 2006, Eq. 15.43). Zero when k_refr=0._
+
+## Analyses
+
+### wavelength_dependence_non_absorbing
+
+Rayleigh scattering efficiency Q_scat vs. wavelength λ for a non-absorbing particle (n_refr=1.5, k_refr=0, D_p=5e-8 m). Q_scat ∝ λ⁻⁴: blue light (λ≈400 nm) scatters ~(550/400)⁴ ≈ 3.6× more strongly than green (550 nm), and ~(550/700)⁴ ≈ 2.5× more than red (700 nm). This is the physical origin of the blue sky — Rayleigh scattering of sunlight by air molecules and small aerosols preferentially redirects blue photons.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `λ`
+
+![Rayleigh scattering efficiency Q_scat vs. wavelength λ. Demonstrates the λ⁻⁴ power law (Seinfeld & Pandis 2006, Eq. 15.19): short (blue) wavelengths are scattered far more strongly than long (red) wavelengths.](/plots/aerosol/mie/rayleighscattering/wavelength_dependence_non_absorbing-Q_scat_vs_wavelength.png)
+
+![Mass scattering efficiency E_scat vs. wavelength λ. Like Q_scat, scales as λ⁻⁴.](/plots/aerosol/mie/rayleighscattering/wavelength_dependence_non_absorbing-E_scat_vs_wavelength.png)
+
+### absorbing_particle_omega_vs_k
+
+Single-scattering albedo ω = Q_scat/Q_ext vs. imaginary refractive index k_refr for a Rayleigh particle (n_refr=1.5, D_p=5e-8 m, λ=5.5e-7 m). In the Rayleigh regime Q_scat ∝ α⁴ while Q_abs ∝ α, so even a small k drives ω rapidly toward zero: absorption dominates. At k=0.1, ω ≈ 0.027.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `k_refr`
+
+![Single-scattering albedo ω vs. imaginary refractive index k_refr. Shows how rapidly absorption dominates scattering in the Rayleigh limit as k increases.](/plots/aerosol/mie/rayleighscattering/absorbing_particle_omega_vs_k-omega_vs_k_refr.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 15. Migrated from Aerosol.jl src/mie_scattering.jl `RayleighScattering` (esm-8aj).",
+    "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/mie_scattering.jl:111\n\nUpstream `RayleighScattering` is an MTK `@component` with five `@constants` (π_val=Float64(π), eight_thirds=8/3, four=4.0, three=3.0, two=2.0) and five `@parameters` (D_p=0.05e-6 m, λ=550e-9 m, n_refr=1.5, k_refr=0.0, ρ_p=1500 kg/m³). The eleven `@variables` are all algebraic:\n  α              ~ π_val * D_p / λ                                    [size parameter, Eq. 15.6]\n  m2_factor_real ~ rayleigh_m2_factor_real(n_refr, k_refr)            [@register_symbolic]\n  m2_factor_imag ~ rayleigh_m2_factor_imag(n_refr, k_refr)            [@register_symbolic]\n  m2_factor_mag_sq ~ m2_factor_real² + m2_factor_imag²\n  Q_scat         ~ eight_thirds * α⁴ * m2_factor_mag_sq               [Eq. 15.19]\n  Q_abs          ~ four * α * m2_factor_imag                          [Eq. 15.21]\n  Q_ext          ~ Q_scat + Q_abs                                     [Eq. 15.4]\n  ω              ~ Q_scat / Q_ext                                     [Eq. 15.5]\n  E_ext          ~ three * Q_ext / (two * ρ_p * D_p)                  [Eq. 15.41]\n  E_scat         ~ three * Q_scat / (two * ρ_p * D_p)                 [Eq. 15.42]\n  E_abs          ~ three * Q_abs / (two * ρ_p * D_p)                  [Eq. 15.43]\n\ngt-p3ep gap resolution: `rayleigh_m2_factor_real(n, k)` and `rayleigh_m2_factor_imag(n, k)` compute the real and imaginary parts of the Clausius-Mossotti factor (m²-1)/(m²+2), where m = n_refr + i·k_refr is the complex refractive index. Unlike the Bohren-Huffman Mie functions (`mie_Q_ext`, `mie_Q_scat` in AerosolExtinction), these are closed-form algebraic expressions derivable from standard complex arithmetic. With m2_re = n² - k² and m2_im = 2nk:\n  denom            = (m2_re + 2)² + m2_im²  [= |m²+2|²]\n  m2_factor_real   = [(m2_re-1)(m2_re+2) + m2_im²] / denom  [Re part]\n  m2_factor_imag   = 3·m2_im / denom                        [Im part]\nDerivation of Im[(m²-1)/(m²+2)]: writing (a+bi)/(c+di) = (ac+bd)/(c²+d²) + i(bc-ad)/(c²+d²) with a=(m2_re-1), b=m2_im, c=(m2_re+2), d=m2_im gives Im = [m2_im·(m2_re+2) - (m2_re-1)·m2_im] / denom = 3·m2_im / denom. This resolves the gt-p3ep blocking gap as direct algebraic AST without `interp.*` primitives or parameter-lifting.\n\n@constants handling: all five upstream @constants migrate to `type: parameter` with fixed defaults, consistent with the rig-wide convention (aerosol_extinction.esm, rayleigh_atmosphere.esm, etc.).\n\nDependency order (all acyclic, no ODEs):\n  {n_refr, k_refr} → {m2_re, m2_im} → denom → {m2_factor_real, m2_factor_imag}\n  {D_p, λ} → α\n  {m2_factor_real, m2_factor_imag} → m2_factor_mag_sq\n  {eight_thirds, α, m2_factor_mag_sq} → Q_scat\n  {four, α, m2_factor_imag} → Q_abs\n  {Q_scat, Q_abs} → Q_ext → {ω, E_ext}\n  {Q_scat, ρ_p, D_p} → E_scat;  {Q_abs, ρ_p, D_p} → E_abs\n\nTolerance rationale (rel=1e-9): purely algebraic system, all expressions are +, -, *, /, ^ on float64; round-off is ~1e-15. rel=1e-9 leaves six orders of magnitude of headroom."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {
+    "π_val": {
+      "type": "parameter",
+      "units": "1",
+      "default": 3.141592653589793,
+      "description": "Pi (dimensionless). Upstream MTK @constants entry π_val = Float64(π); migrated as a fixed-default parameter."
+    },
+    "eight_thirds": {
+      "type": "parameter",
+      "units": "1",
+      "default": 2.6666666666666665,
+      "description": "Prefactor 8/3 in the Rayleigh scattering efficiency formula (dimensionless, Seinfeld & Pandis Eq. 15.19). Upstream MTK @constants entry eight_thirds = 8.0/3.0."
+    },
+    "four": {
+      "type": "parameter",
+      "units": "1",
+      "default": 4.0,
+      "description": "Prefactor 4 in the Rayleigh absorption efficiency formula (dimensionless, Seinfeld & Pandis Eq. 15.21). Upstream MTK @constants entry four = 4.0."
+    },
+    "three": {
+      "type": "parameter",
+      "units": "1",
+      "default": 3.0,
+      "description": "Numerator factor 3 in the mass efficiency formula E = 3Q/(2ρD_p) (dimensionless, Seinfeld & Pandis Eqs. 15.41-15.43). Upstream MTK @constants entry three = 3.0."
+    },
+    "two": {
+      "type": "parameter",
+      "units": "1",
+      "default": 2.0,
+      "description": "Denominator factor 2 in the mass efficiency formula E = 3Q/(2ρD_p) (dimensionless). Upstream MTK @constants entry two = 2.0."
+    },
+    "D_p": {
+      "type": "parameter",
+      "units": "m",
+      "default": 5e-08,
+      "description": "Particle diameter (m). Default 50 nm (0.05 μm) — well within the Rayleigh regime: α = πD_p/λ ≈ 0.286 << 1 at λ=550 nm. The upstream default is 0.05e-6 m."
+    },
+    "λ": {
+      "type": "parameter",
+      "units": "m",
+      "default": 5.5e-07,
+      "description": "Wavelength of incident radiation (m). Default 550 nm — visible green light, near the peak of the solar spectrum. The upstream default is 550e-9 m."
+    },
+    "n_refr": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.5,
+      "description": "Real part of the complex refractive index m = n_refr + i·k_refr (dimensionless). Default 1.5 — a representative value for many inorganic aerosol constituents (e.g., ammonium sulfate ~1.53, sea salt ~1.54)."
+    },
+    "k_refr": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "Imaginary part of the complex refractive index m = n_refr + i·k_refr (dimensionless). Default 0 — non-absorbing (purely scattering) particle. Positive values indicate light absorption (e.g., black carbon k ≈ 0.6 at 550 nm). Enters Q_abs linearly."
+    },
+    "ρ_p": {
+      "type": "parameter",
+      "units": "kg*m^-3",
+      "default": 1500.0,
+      "description": "Particle material density (kg/m³). Default 1500 kg/m³ — a representative value for mixed inorganic aerosol. Used only in the mass efficiency calculations E_ext, E_scat, E_abs."
+    },
+    "m2_re": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Real part of m² = n_refr² - k_refr² (dimensionless). Intermediate quantity for the Clausius-Mossotti factor. At default conditions (n=1.5, k=0): m2_re = 2.25."
+    },
+    "m2_im": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Imaginary part of m² = 2 n_refr k_refr (dimensionless). Zero for non-absorbing particles (k_refr=0); positive for absorbing particles."
+    },
+    "denom": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Shared denominator |m²+2|² = (m2_re+2)² + m2_im² (dimensionless) for the Clausius-Mossotti factor (m²-1)/(m²+2). At default conditions (n=1.5, k=0): denom = 4.25² = 18.0625."
+    },
+    "α": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Size parameter α = π D_p / λ (dimensionless, Seinfeld & Pandis 2006, Eq. 15.6). Characterises the scattering regime: Rayleigh (α << 1), resonance (α ~ 1), geometric (α >> 1). At default conditions α = π/11 ≈ 0.286."
+    },
+    "m2_factor_real": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Real part of the Clausius-Mossotti factor Re[(m²-1)/(m²+2)] = [(m2_re-1)(m2_re+2) + m2_im²] / |m²+2|² (dimensionless). For non-absorbing particles (k=0): Re = (n²-1)/(n²+2); at n=1.5: 1.25/4.25 = 5/17 ≈ 0.294."
+    },
+    "m2_factor_imag": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Imaginary part of the Clausius-Mossotti factor Im[(m²-1)/(m²+2)] = 3 m2_im / |m²+2|² (dimensionless). Zero for non-absorbing particles; positive for absorbing particles. Enters Q_abs = 4α × m2_factor_imag (Eq. 15.21)."
+    },
+    "m2_factor_mag_sq": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Squared magnitude of the Clausius-Mossotti factor |(m²-1)/(m²+2)|² = m2_factor_real² + m2_factor_imag² (dimensionless). Enters Q_scat via Eq. 15.19. At default conditions: (5/17)² = 25/289 ≈ 0.08651."
+    },
+    "Q_scat": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Rayleigh scattering efficiency Q_scat = (8/3) α⁴ |(m²-1)/(m²+2)|² (dimensionless, Seinfeld & Pandis 2006, Eq. 15.19). Scales as D_p⁴ and λ⁻⁴ in the Rayleigh regime. For non-absorbing particles equals Q_ext."
+    },
+    "Q_abs": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Rayleigh absorption efficiency Q_abs = 4 α Im[(m²-1)/(m²+2)] (dimensionless, Seinfeld & Pandis 2006, Eq. 15.21). Scales as D_p and λ⁻¹ — linear in α rather than α⁴, so absorption dominates over scattering for absorbing particles in the Rayleigh limit. Zero when k_refr=0."
+    },
+    "Q_ext": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Rayleigh extinction efficiency Q_ext = Q_scat + Q_abs (dimensionless, Seinfeld & Pandis 2006, Eq. 15.4)."
+    },
+    "ω": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Single-scattering albedo ω = Q_scat / Q_ext (dimensionless, Seinfeld & Pandis 2006, Eq. 15.5). Equal to 1 for non-absorbing particles (k_refr=0); decreases toward 0 as absorption dominates in the Rayleigh regime."
+    },
+    "E_ext": {
+      "type": "unknown",
+      "units": "m^2*kg^-1",
+      "description": "Mass extinction efficiency E_ext = 3 Q_ext / (2 ρ_p D_p) (m² kg⁻¹, Seinfeld & Pandis 2006, Eq. 15.41). The power extinguished per unit incident irradiance per unit aerosol mass concentration."
+    },
+    "E_scat": {
+      "type": "unknown",
+      "units": "m^2*kg^-1",
+      "description": "Mass scattering efficiency E_scat = 3 Q_scat / (2 ρ_p D_p) (m² kg⁻¹, Seinfeld & Pandis 2006, Eq. 15.42)."
+    },
+    "E_abs": {
+      "type": "unknown",
+      "units": "m^2*kg^-1",
+      "description": "Mass absorption efficiency E_abs = 3 Q_abs / (2 ρ_p D_p) (m² kg⁻¹, Seinfeld & Pandis 2006, Eq. 15.43). Zero when k_refr=0."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "m2_re",
+      "rhs": {
+        "op": "-",
+        "args": [
+          {
+            "op": "^",
+            "args": [
+              "n_refr",
+              2
+            ]
+          },
+          {
+            "op": "^",
+            "args": [
+              "k_refr",
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "m2_im",
+      "rhs": {
+        "op": "*",
+        "args": [
+          2.0,
+          "n_refr",
+          "k_refr"
+        ]
+      }
+    },
+    {
+      "lhs": "denom",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "+",
+                "args": [
+                  "m2_re",
+                  2.0
+                ]
+              },
+              2
+            ]
+          },
+          {
+            "op": "^",
+            "args": [
+              "m2_im",
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "α",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "π_val",
+              "D_p"
+            ]
+          },
+          "λ"
+        ]
+      }
+    },
+    {
+      "lhs": "m2_factor_real",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "-",
+                    "args": [
+                      "m2_re",
+                      1.0
+                    ]
+                  },
+                  {
+                    "op": "+",
+                    "args": [
+                      "m2_re",
+                      2.0
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "^",
+                "args": [
+                  "m2_im",
+                  2
+                ]
+              }
+            ]
+          },
+          "denom"
+        ]
+      }
+    },
+    {
+      "lhs": "m2_factor_imag",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              3.0,
+              "m2_im"
+            ]
+          },
+          "denom"
+        ]
+      }
+    },
+    {
+      "lhs": "m2_factor_mag_sq",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "^",
+            "args": [
+              "m2_factor_real",
+              2
+            ]
+          },
+          {
+            "op": "^",
+            "args": [
+              "m2_factor_imag",
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "Q_scat",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "eight_thirds",
+          {
+            "op": "^",
+            "args": [
+              "α",
+              4
+            ]
+          },
+          "m2_factor_mag_sq"
+        ]
+      }
+    },
+    {
+      "lhs": "Q_abs",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "four",
+          "α",
+          "m2_factor_imag"
+        ]
+      }
+    },
+    {
+      "lhs": "Q_ext",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "Q_scat",
+          "Q_abs"
+        ]
+      }
+    },
+    {
+      "lhs": "ω",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "Q_scat",
+          "Q_ext"
+        ]
+      }
+    },
+    {
+      "lhs": "E_ext",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "three",
+              "Q_ext"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "two",
+              "ρ_p",
+              "D_p"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "E_scat",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "three",
+              "Q_scat"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "two",
+              "ρ_p",
+              "D_p"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "E_abs",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "three",
+              "Q_abs"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "two",
+              "ρ_p",
+              "D_p"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "default_non_absorbing",
+      "description": "Default parameters: n_refr=1.5, k_refr=0 (non-absorbing), D_p=5e-8 m (50 nm), λ=5.5e-7 m (550 nm), ρ_p=1500 kg/m³. α = π/11 ≈ 0.2856. m2_factor_real = (n²-1)/(n²+2) = 1.25/4.25 = 5/17 ≈ 0.2941. m2_factor_imag = 0. Q_scat = (8/3)(π/11)⁴(25/289) ≈ 1.535e-3. Q_abs = 0. ω = 1 exactly. E_ext = 3Q_scat/(2ρD_p) ≈ 30.7 m²/kg.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "α",
+          "time": 0.0,
+          "expected": 0.28559933214452665,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "m2_re",
+          "time": 0.0,
+          "expected": 2.25,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "m2_im",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "denom",
+          "time": 0.0,
+          "expected": 18.0625,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "m2_factor_real",
+          "time": 0.0,
+          "expected": 0.29411764705882354,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "m2_factor_imag",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "m2_factor_mag_sq",
+          "time": 0.0,
+          "expected": 0.08650519031141869,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "Q_scat",
+          "time": 0.0,
+          "expected": 0.001534757089990882,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "Q_abs",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "Q_ext",
+          "time": 0.0,
+          "expected": 0.001534757089990882,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "ω",
+          "time": 0.0,
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "E_ext",
+          "time": 0.0,
+          "expected": 30.69514179981764,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "E_scat",
+          "time": 0.0,
+          "expected": 30.69514179981764,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "E_abs",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-12
+          }
+        },
+        {
+          "variable": "α",
+          "time": 1.0,
+          "expected": 0.28559933214452665,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "ω",
+          "time": 1.0,
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "absorbing_particle",
+      "description": "Absorbing particle: k_refr=0.1 with n_refr=1.5, D_p=5e-8 m, λ=5.5e-7 m. Q_abs = 4α × Im[(m²-1)/(m²+2)] is now nonzero; ω = Q_scat/Q_ext << 1, showing absorption dominates over scattering in the Rayleigh regime for k > 0 (Q_abs ∝ α but Q_scat ∝ α⁴).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "k_refr": 0.1
+      },
+      "assertions": [
+        {
+          "variable": "m2_factor_imag",
+          "time": 0.0,
+          "expected": 0.0498129247935531,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "m2_factor_mag_sq",
+          "time": 0.0,
+          "expected": 0.09008390710443002,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "Q_scat",
+          "time": 0.0,
+          "expected": 0.0015982499388173016,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "Q_abs",
+          "time": 0.0,
+          "expected": 0.056906152212817196,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "Q_ext",
+          "time": 0.0,
+          "expected": 0.0585044021516345,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "ω",
+          "time": 0.0,
+          "expected": 0.02731845604839925,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "E_ext",
+          "time": 0.0,
+          "expected": 1170.0880430326902,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "E_abs",
+          "time": 0.0,
+          "expected": 1138.123044256344,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "size_parameter_alpha_fourth_scaling",
+      "description": "Double D_p from 5e-8 to 1e-7 m (n=1.5, k=0, λ=5.5e-7). α doubles → Q_scat scales as α⁴ = 2⁴ = 16×. Verifies: Q_scat(1e-7) = 16 × Q_scat(5e-8) = 16 × 0.001534757 ≈ 0.024556.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "D_p": 1e-07
+      },
+      "assertions": [
+        {
+          "variable": "α",
+          "time": 0.0,
+          "expected": 0.5711986642890533,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "Q_scat",
+          "time": 0.0,
+          "expected": 0.024556113439854112,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "Q_abs",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "ω",
+          "time": 0.0,
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "E_ext",
+          "time": 0.0,
+          "expected": 245.56113439854113,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "high_refractive_index",
+      "description": "Higher refractive index n_refr=2.0, k_refr=0. m2_factor_real = (n²-1)/(n²+2) = 3/6 = 0.5 exactly. m2_factor_mag_sq = 0.25. Q_scat is enhanced relative to n=1.5 by the factor (0.25)/(25/289) ≈ 2.89.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "n_refr": 2.0
+      },
+      "assertions": [
+        {
+          "variable": "m2_re",
+          "time": 0.0,
+          "expected": 4.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "denom",
+          "time": 0.0,
+          "expected": 36.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "m2_factor_real",
+          "time": 0.0,
+          "expected": 0.5,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "m2_factor_mag_sq",
+          "time": 0.0,
+          "expected": 0.25,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "Q_scat",
+          "time": 0.0,
+          "expected": 0.004435447990073648,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "E_ext",
+          "time": 0.0,
+          "expected": 88.70895980147297,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "blue_light_wavelength_minus4",
+      "description": "Blue light λ=4e-7 m (400 nm) vs default 5.5e-7 m (550 nm), n=1.5, k=0. Q_scat ∝ λ⁻⁴: ratio (5.5/4.0)⁴ = 1.375⁴ ≈ 3.5745. Expected Q_scat ≈ 3.5745 × 0.001534757 ≈ 0.005486. Verifies the λ⁻⁴ power law that explains the blue sky.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "λ": 4e-07
+      },
+      "assertions": [
+        {
+          "variable": "α",
+          "time": 0.0,
+          "expected": 0.3926990816987242,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "Q_scat",
+          "time": 0.0,
+          "expected": 0.005485932264296023,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "Q_abs",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "ω",
+          "time": 0.0,
+          "expected": 1.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "E_ext",
+          "time": 0.0,
+          "expected": 109.71864528592049,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "wavelength_dependence_non_absorbing",
+      "description": "Rayleigh scattering efficiency Q_scat vs. wavelength λ for a non-absorbing particle (n_refr=1.5, k_refr=0, D_p=5e-8 m). Q_scat ∝ λ⁻⁴: blue light (λ≈400 nm) scatters ~(550/400)⁴ ≈ 3.6× more strongly than green (550 nm), and ~(550/700)⁴ ≈ 2.5× more than red (700 nm). This is the physical origin of the blue sky — Rayleigh scattering of sunlight by air molecules and small aerosols preferentially redirects blue photons.",
+      "initial_state": {},
+      "parameters": {
+        "n_refr": 1.5,
+        "k_refr": 0.0,
+        "D_p": 5e-08,
+        "ρ_p": 1500.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "λ",
+            "range": {
+              "start": 3e-07,
+              "stop": 8e-07,
+              "count": 51,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "Q_scat_vs_wavelength",
+          "type": "line",
+          "description": "Rayleigh scattering efficiency Q_scat vs. wavelength λ. Demonstrates the λ⁻⁴ power law (Seinfeld & Pandis 2006, Eq. 15.19): short (blue) wavelengths are scattered far more strongly than long (red) wavelengths.",
+          "x": {
+            "variable": "λ",
+            "label": "Wavelength λ (m)"
+          },
+          "y": {
+            "variable": "Q_scat",
+            "label": "Rayleigh scattering efficiency Q_scat (dimensionless)"
+          }
+        },
+        {
+          "id": "E_scat_vs_wavelength",
+          "type": "line",
+          "description": "Mass scattering efficiency E_scat vs. wavelength λ. Like Q_scat, scales as λ⁻⁴.",
+          "x": {
+            "variable": "λ",
+            "label": "Wavelength λ (m)"
+          },
+          "y": {
+            "variable": "E_scat",
+            "label": "Mass scattering efficiency E_scat (m² kg⁻¹)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "absorbing_particle_omega_vs_k",
+      "description": "Single-scattering albedo ω = Q_scat/Q_ext vs. imaginary refractive index k_refr for a Rayleigh particle (n_refr=1.5, D_p=5e-8 m, λ=5.5e-7 m). In the Rayleigh regime Q_scat ∝ α⁴ while Q_abs ∝ α, so even a small k drives ω rapidly toward zero: absorption dominates. At k=0.1, ω ≈ 0.027.",
+      "initial_state": {},
+      "parameters": {
+        "n_refr": 1.5,
+        "D_p": 5e-08,
+        "λ": 5.5e-07,
+        "ρ_p": 1500.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "k_refr",
+            "range": {
+              "start": 0.0,
+              "stop": 0.5,
+              "count": 51,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "omega_vs_k_refr",
+          "type": "line",
+          "description": "Single-scattering albedo ω vs. imaginary refractive index k_refr. Shows how rapidly absorption dominates scattering in the Rayleigh limit as k increases.",
+          "x": {
+            "variable": "k_refr",
+            "label": "Imaginary refractive index k_refr (dimensionless)"
+          },
+          "y": {
+            "variable": "ω",
+            "label": "Single-scattering albedo ω (dimensionless)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

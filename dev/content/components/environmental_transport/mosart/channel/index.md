@@ -1,0 +1,1697 @@
+---
+title: "Channel"
+slug: "channel"
+domains: ["environmental_transport"]
+component_types: ["model"]
+subdomains: ["mosart"]
+domain: "environmental_transport"
+subdomain: "mosart"
+component_type: "model"
+esm_version: "2.0.0"
+esm_path: "components/environmental_transport/mosart/mosart_channel.esm"
+reference: "10.1175/JHM-D-12-015.1"
+description: "MOSART main-channel routing step (stage 2 of the EqESM project): the per-cell Euler step 4 of mosart_physics.F90:Euler (F90:175-209) composed of mainchannelRouting -> Routing_KW (F90:273-348) and updateState_mainchannel (F90:385-402), written as a storage ODE with the pointwise laws imported from ./mosart_templates.esm. Equations, exactly as in the Fortran (RoutingMethod = 1, the only implemented method, F90:280-284): erin = -eroutUp (F90:302-303); with no river network (rlen <= 0) vr = 0 and erout = -(erin + erlateral) (F90:306-308); for an unrealistically small drainage density per channel (areaTotal2/(rwidth*rlen) > 1e6) erout = -(erin + erlateral) (F90:310-312); otherwise the Manning velocity vr = CRVRMAN_nosqrt(rslpsqrt, nr, rr) (F90:313) and erout = -vr*mr (F90:314), with the dry-cell clamp erout = -(erlateral + erin + wr/localdelt) when -erout > TINYVALUE and wr + (erlateral + erin + erout)*localdelt < TINYVALUE (F90:315-317), in which case vr = -erout/mr when mr > 0 (F90:318-320); the groundwater term temp_gwl = qgwl*area*frac (F90:325); dwr = erlateral + erin + erout + temp_gwl (F90:327), plus qirrig, the irrigation withdrawal (<= 0) that mosart_run takes out of wr once per coupling period (mosart_driver.F90:497), here a rate wired from the assembly's Control.qirrig_actual; d(wr)/dt = dwr (the Fortran advances wr += dwr*localdelt explicitly per substep, F90:189; here a continuous ODE, which is not the limit of that scheme - see README.md, 'Continuous ODEs vs the Fortran 3600-s Euler stepping'); updateState_mainchannel (F90:391-401) sets mr = GRMR(wr, rlen), yr = GRHR(mr, rwidth, rwidth0, rdepth), pr = GRPR(yr, rwidth, rwidth0, rdepth), rr = GRRR(mr, pr) when rlen > 0 and wr > 0, and zeroes all four otherwise; and the reach outflow streamflow flow = -erout (the Fortran accumulates flow -= erout over the m-levels and divides by DLevelH2R, F90:201, 216; here the instantaneous value) is exported to the assembly for the runoff aggregation. Units per mosart_tstatusflux_type.F90 / mosart_tspatialunit_type.F90: wr [m3]; erin, erout, dwr, erlateral, eroutUp [m3/s]; vr [m/s]; mr [m2]; yr, pr, rr [m]; rslpsqrt [1]; rlen, rwidth, rwidth0, rdepth, areaTotal2 [m2, m, m, m, m2]; nr is the main-reach Manning roughness (SI dimension s/m^(1/3)); qgwl [m/s]; localdelt = Tctl%DeltaT/DLevelH2R/numDT_r(nr) (F90:184). eroutUp is the outflow sum of the upstream gridcells delivered by the rh_eroutUp sparse-matrix gather over the ID/dnID network (F90:158) - a network-topology operation whose per-cell value is a parameter here until the frivinp network data source lands (boundaries.md 2.4). Two deliberate divergences, documented for reviewers: when the areaTotal2 branch fires the Fortran leaves vr stale (unused there), while here vr takes the Manning value; and the Fortran's negative-storage warning (F90:329-334) is a diagnostic, not physics, and is not transcribed. The tests block has three kinds of pins (the stage1/... paths refer to the EqESM instrumented-CESM checkout; see README.md, Testing): (1) dry-window CESM pins from stage1/dumps/mosart/ (gr_chan.csv, crvrman_chan.csv, mosart_euler.csv of the lane run, where every channel stays below TINYVALUE): the dry geometry chain and dry routing branches pointwise (time_span {0,0}) and a one-substep storage trace; (2) wet-window CESM pins from stage1/dumps/mosart_wet/ (a 1-day cold start whose runoff pulse drives reaches above bankfull): flood-plain geometry (floodplain_geom_*), wet Manning routing with qgwl and upstream inflow (wet_manning_*) and one wet m-level storage trace (wet_ode_*); (3) NOT from a CESM run: the in-bank/trapezoid/flood-plain geometry_*_cell100312 pins, whose expected values come from the unmodified GRHR/GRPR/GRRR compiled from mosart_physics.F90 into a standalone gfortran driver at chosen storages (EqESM checkout, stage1/analysis/mosart_geometry/mosart_geometry_driver.f90, gitignored); those pins caught and now guard the GRHR trapezoid transcription (the 0.1*(2.0/1.0) = 0.2 factor in place of SLOPE1/2 = 0.05 and the dropped rdepth prefix, F90:528). Reference: stage1/cesm/components/mosart/src/riverroute/mosart_physics.F90 (mosart1.1.13)."
+tags: ["environmental_transport", "mosart", "model", "river-routing", "hydrology", "channel", "kinematic-wave", "manning", "cesm"]
+---
+
+## Description
+
+MOSART main-channel routing step (stage 2 of the EqESM project): the per-cell Euler step 4 of mosart_physics.F90:Euler (F90:175-209) composed of mainchannelRouting -> Routing_KW (F90:273-348) and updateState_mainchannel (F90:385-402), written as a storage ODE with the pointwise laws imported from ./mosart_templates.esm. Equations, exactly as in the Fortran (RoutingMethod = 1, the only implemented method, F90:280-284): erin = -eroutUp (F90:302-303); with no river network (rlen <= 0) vr = 0 and erout = -(erin + erlateral) (F90:306-308); for an unrealistically small drainage density per channel (areaTotal2/(rwidth*rlen) > 1e6) erout = -(erin + erlateral) (F90:310-312); otherwise the Manning velocity vr = CRVRMAN_nosqrt(rslpsqrt, nr, rr) (F90:313) and erout = -vr*mr (F90:314), with the dry-cell clamp erout = -(erlateral + erin + wr/localdelt) when -erout > TINYVALUE and wr + (erlateral + erin + erout)*localdelt < TINYVALUE (F90:315-317), in which case vr = -erout/mr when mr > 0 (F90:318-320); the groundwater term temp_gwl = qgwl*area*frac (F90:325); dwr = erlateral + erin + erout + temp_gwl (F90:327), plus qirrig, the irrigation withdrawal (<= 0) that mosart_run takes out of wr once per coupling period (mosart_driver.F90:497), here a rate wired from the assembly's Control.qirrig_actual; d(wr)/dt = dwr (the Fortran advances wr += dwr*localdelt explicitly per substep, F90:189; here a continuous ODE, which is not the limit of that scheme - see README.md, 'Continuous ODEs vs the Fortran 3600-s Euler stepping'); updateState_mainchannel (F90:391-401) sets mr = GRMR(wr, rlen), yr = GRHR(mr, rwidth, rwidth0, rdepth), pr = GRPR(yr, rwidth, rwidth0, rdepth), rr = GRRR(mr, pr) when rlen > 0 and wr > 0, and zeroes all four otherwise; and the reach outflow streamflow flow = -erout (the Fortran accumulates flow -= erout over the m-levels and divides by DLevelH2R, F90:201, 216; here the instantaneous value) is exported to the assembly for the runoff aggregation. Units per mosart_tstatusflux_type.F90 / mosart_tspatialunit_type.F90: wr [m3]; erin, erout, dwr, erlateral, eroutUp [m3/s]; vr [m/s]; mr [m2]; yr, pr, rr [m]; rslpsqrt [1]; rlen, rwidth, rwidth0, rdepth, areaTotal2 [m2, m, m, m, m2]; nr is the main-reach Manning roughness (SI dimension s/m^(1/3)); qgwl [m/s]; localdelt = Tctl%DeltaT/DLevelH2R/numDT_r(nr) (F90:184). eroutUp is the outflow sum of the upstream gridcells delivered by the rh_eroutUp sparse-matrix gather over the ID/dnID network (F90:158) - a network-topology operation whose per-cell value is a parameter here until the frivinp network data source lands (boundaries.md 2.4). Two deliberate divergences, documented for reviewers: when the areaTotal2 branch fires the Fortran leaves vr stale (unused there), while here vr takes the Manning value; and the Fortran's negative-storage warning (F90:329-334) is a diagnostic, not physics, and is not transcribed. The tests block has three kinds of pins (the stage1/... paths refer to the EqESM instrumented-CESM checkout; see README.md, Testing): (1) dry-window CESM pins from stage1/dumps/mosart/ (gr_chan.csv, crvrman_chan.csv, mosart_euler.csv of the lane run, where every channel stays below TINYVALUE): the dry geometry chain and dry routing branches pointwise (time_span {0,0}) and a one-substep storage trace; (2) wet-window CESM pins from stage1/dumps/mosart_wet/ (a 1-day cold start whose runoff pulse drives reaches above bankfull): flood-plain geometry (floodplain_geom_*), wet Manning routing with qgwl and upstream inflow (wet_manning_*) and one wet m-level storage trace (wet_ode_*); (3) NOT from a CESM run: the in-bank/trapezoid/flood-plain geometry_*_cell100312 pins, whose expected values come from the unmodified GRHR/GRPR/GRRR compiled from mosart_physics.F90 into a standalone gfortran driver at chosen storages (EqESM checkout, stage1/analysis/mosart_geometry/mosart_geometry_driver.f90, gitignored); those pins caught and now guard the GRHR trapezoid transcription (the 0.1*(2.0/1.0) = 0.2 factor in place of SLOPE1/2 = 0.05 and the dropped rdepth prefix, F90:528). Reference: stage1/cesm/components/mosart/src/riverroute/mosart_physics.F90 (mosart1.1.13).
+
+## Reference
+
+- Li, H., Wigmosta, M. S., Wu, H., Huang, M., Ke, Y., Coleman, A. M., and Leung, L. R. (2013). A physically based runoff routing model for land surface and earth system models. Journal of Hydrometeorology, 14(3), 808-828. The MOSART (Model for Scale Adaptive River Transport) routing scheme these components transcribe.
+- CESM (Community Earth System Model), ESCOMP/CESM, cesm3.0-alphabranch: MOSART river-routing source (mosart1.1.13) - mosart_physics.F90, mosart_driver.F90, mosart_tstatusflux_type.F90, mosart_tspatialunit_type.F90, rof_comp_nuopc/rof_import_export.F90 - the reference implementation these components are transcribed from.
+- EarthSciModels - the authoritative .esm corpus this component lives in.
+
+## Variables
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `wr` | `m^3` | `0.0` | storage of surface water in the main channel (TRunoff%wr), [m3] |
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `eroutUp` | `m^3/s` | `0.0` | outflow sum of the upstream gridcells (TRunoff%eroutUp), delivered by the rh_eroutUp ESMF SMM sparse-matrix gather over the ID/dnID network (F90:158); a network-topology input that is a plain parameter here until the frivinp network data source lands (boundaries.md 2.4), [m3/s] |
+| `erlateral` | `m^3/s` | `0.0` | lateral flow from the hillslope and subnetwork (TRunoff%erlateral, computed by the subnetwork step), [m3/s] |
+| `qgwl` | `m/s` | `0.0` | gwl runoff term from glaciers, wetlands and lakes (TRunoff%qgwl, after the mosart_driver m3/s -> m/s /area conversion), [m/s] |
+| `qirrig` | `m^3/s` | `0.0` | irrigation withdrawal from the main channel (ctl%qirrig_actual, <= 0), computed by the assembly Control model and wired in by the coupling library; mosart_run removes irrig_volume = -qirrig_actual*coupling_period from wr in one jump at the start of each coupling period (mosart_driver.F90:476-497), here it enters d(wr)/dt as a rate so the water withdrawn for irrigation actually leaves the channel storage (mass conservation), [m3/s] |
+| `rslpsqrt` | `1` | `0.01` | sqrt of the slope of the main river reach (TUnit%rslpsqrt, from frivinp rslp), [-] |
+| `nr` | `s/m^(1/3)` | `0.03` | Manning's roughness of the main reach (TUnit%nr, from frivinp); network file stores a bare number; declared with its SI dimension s/m^(1/3) for dimensional consistency |
+| `rlen` | `m` | `10000.0` | length of the main river reach (TUnit%rlen, from frivinp), [m] |
+| `rwidth` | `m` | `50.0` | bankfull width of the main reach (TUnit%rwidth, from frivinp rwid), [m] |
+| `rwidth0` | `m` | `200.0` | total width of the flood plain (TUnit%rwidth0, from frivinp rwid0), [m] |
+| `rdepth` | `m` | `2.0` | bankfull depth of the river cross section (TUnit%rdepth, from frivinp rdep), [m] |
+| `areaTotal2` | `m^2` | `100000000.0` | computed total upstream drainage area (TUnit%areaTotal2, from set_areatotal2), [m2] |
+| `area` | `m^2` | `10000000.0` | area of the local cell (TUnit%area, from frivinp), [m2] |
+| `frac` | `1` | `1.0` | fraction of the cell included in the study area (TUnit%frac, from frivinp), [-] |
+| `localdelt` | `s` | `180.0` | local main-channel substep = Tctl%DeltaT/DLevelH2R/numDT_r(nr) (F90:184), [s] |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `dwr` | `m^3/s` |  | change of main-channel water storage (TRunoff%dwr) = erlateral + erin + erout + qgwl*area*frac, plus the irrigation withdrawal qirrig (<= 0) that mosart_run removes from wr once per coupling period (mosart_driver.F90:497), here as a rate; the Fortran type comment says [m3] but the code assigns a flux sum and advances wr += dwr*localdelt, so the rate reading is the code's, [m3/s] |
+| `erin` | `m^3/s` |  | inflow from the upstream links (TRunoff%erin) = -eroutUp, [m3/s] |
+| `erout_manning` | `m^3/s` |  | unclamped outflow into the downstream links, -vr*mr, [m3/s] |
+| `erout` | `m^3/s` |  | outflow into the downstream links after the no-river / small-catchment branches and the dry-cell clamp (TRunoff%erout), [m3/s] |
+| `vr_manning` | `m/s` |  | Manning velocity of the main-reach flow CRVRMAN_nosqrt(rslpsqrt, nr, rr), [m/s] |
+| `vr` | `m/s` |  | main-reach flow velocity (TRunoff%vr): 0 when rlen <= 0, -erout/mr when the dry-cell clamp fired and mr > 0, the Manning value otherwise, [m/s] |
+| `mr` | `m^2` |  | wetted cross-section area of the main channel (TRunoff%mr), [m2] |
+| `yr` | `m` |  | water depth of the main channel (TRunoff%yr), [m] |
+| `pr` | `m` |  | wetted perimeter of the main channel (TRunoff%pr), [m] |
+| `rr` | `m` |  | hydraulic radius of the main channel (TRunoff%rr), [m] |
+| `flow` | `m^3/s` |  | streamflow from the outlet of the reach (TRunoff%flow) = -erout, the instantaneous value of the Fortran's substep accumulation flow -= erout averaged over DLevelH2R (F90:201, 216), [m3/s] |
+
+## Observed expressions
+
+$$
+dwr = erlateral + erin + erout + qgwl \cdot area \cdot frac + qirrig
+$$
+_change of main-channel water storage (TRunoff%dwr) = erlateral + erin + erout + qgwl*area*frac, plus the irrigation withdrawal qirrig (<= 0) that mosart_run removes from wr once per coupling period (mosart_driver.F90:497), here as a rate; the Fortran type comment says [m3] but the code assigns a flux sum and advances wr += dwr*localdelt, so the rate reading is the code's, [m3/s]_
+
+$$
+erin = -eroutUp
+$$
+_inflow from the upstream links (TRunoff%erin) = -eroutUp, [m3/s]_
+
+$$
+erout_{manning} = \left(-vr_{manning}\right) \cdot mr
+$$
+_unclamped outflow into the downstream links, -vr*mr, [m3/s]_
+
+$$
+erout = \mathrm{ifelse}\left(\mathrm{<=}\left(rlen, 0.0\right), -\left(erin + erlateral\right), \mathrm{ifelse}\left(\mathrm{>}\left(\frac{areaTotal2}{rwidth \cdot rlen}, 1000000.0\right), -\left(erin + erlateral\right), \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>}\left(-erout_{manning}, \mathrm{const}\left(\right)\right), \mathrm{<}\left(wr + \left(erlateral + erin + erout_{manning}\right) \cdot localdelt, \mathrm{const}\left(\right)\right)\right), -\left(erlateral + erin + \frac{wr}{localdelt}\right), erout_{manning}\right)\right)\right)
+$$
+_outflow into the downstream links after the no-river / small-catchment branches and the dry-cell clamp (TRunoff%erout), [m3/s]_
+
+$$
+vr_{manning} = \mathrm{manning_velocity}\left(sqrtslp=rslpsqrt, n=nr, rr=rr\right)
+$$
+_Manning velocity of the main-reach flow CRVRMAN_nosqrt(rslpsqrt, nr, rr), [m/s]_
+
+$$
+vr = \mathrm{ifelse}\left(\mathrm{<=}\left(rlen, 0.0\right), 0.0, \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>}\left(-erout_{manning}, \mathrm{const}\left(\right)\right), \mathrm{and}\left(\mathrm{<}\left(wr + \left(erlateral + erin + erout_{manning}\right) \cdot localdelt, \mathrm{const}\left(\right)\right), \mathrm{>}\left(mr, 0.0\right)\right)\right), \frac{-erout}{mr}, vr_{manning}\right)\right)
+$$
+_main-reach flow velocity (TRunoff%vr): 0 when rlen <= 0, -erout/mr when the dry-cell clamp fired and mr > 0, the Manning value otherwise, [m/s]_
+
+$$
+mr = \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>}\left(rlen, 0.0\right), \mathrm{>}\left(wr, 0.0\right)\right), \mathrm{wetted_area}\left(w=wr, len=rlen\right), 0.0\right)
+$$
+_wetted cross-section area of the main channel (TRunoff%mr), [m2]_
+
+$$
+yr = \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>}\left(rlen, 0.0\right), \mathrm{>}\left(wr, 0.0\right)\right), \mathrm{channel_depth}\left(m=mr, rwidth=rwidth, rwidth0=rwidth0, rdepth=rdepth, SLOPE1=\mathrm{const}\left(\right)\right), 0.0\right)
+$$
+_water depth of the main channel (TRunoff%yr), [m]_
+
+$$
+pr = \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>}\left(rlen, 0.0\right), \mathrm{>}\left(wr, 0.0\right)\right), \mathrm{channel_perimeter}\left(h=yr, rwidth=rwidth, rwidth0=rwidth0, rdepth=rdepth, SLOPE1=\mathrm{const}\left(\right)\right), 0.0\right)
+$$
+_wetted perimeter of the main channel (TRunoff%pr), [m]_
+
+$$
+rr = \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>}\left(rlen, 0.0\right), \mathrm{>}\left(wr, 0.0\right)\right), \mathrm{hydraulic_radius}\left(area=mr, p=pr\right), 0.0\right)
+$$
+_hydraulic radius of the main channel (TRunoff%rr), [m]_
+
+$$
+flow = -erout
+$$
+_streamflow from the outlet of the reach (TRunoff%flow) = -erout, the instantaneous value of the Fortran's substep accumulation flow -= erout averaged over DLevelH2R (F90:201, 216), [m3/s]_
+
+## Equations
+
+$$
+\mathrm{D}\left(wr\right) = dwr
+$$
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "expression_template_imports": [
+    {
+      "ref": "./mosart_templates.esm"
+    }
+  ],
+  "variables": {
+    "wr": {
+      "type": "unknown",
+      "units": "m^3",
+      "default": 0.0,
+      "description": "storage of surface water in the main channel (TRunoff%wr), [m3]"
+    },
+    "dwr": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "change of main-channel water storage (TRunoff%dwr) = erlateral + erin + erout + qgwl*area*frac, plus the irrigation withdrawal qirrig (<= 0) that mosart_run removes from wr once per coupling period (mosart_driver.F90:497), here as a rate; the Fortran type comment says [m3] but the code assigns a flux sum and advances wr += dwr*localdelt, so the rate reading is the code's, [m3/s]"
+    },
+    "erin": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "inflow from the upstream links (TRunoff%erin) = -eroutUp, [m3/s]"
+    },
+    "erout_manning": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "unclamped outflow into the downstream links, -vr*mr, [m3/s]"
+    },
+    "erout": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "outflow into the downstream links after the no-river / small-catchment branches and the dry-cell clamp (TRunoff%erout), [m3/s]"
+    },
+    "vr_manning": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Manning velocity of the main-reach flow CRVRMAN_nosqrt(rslpsqrt, nr, rr), [m/s]"
+    },
+    "vr": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "main-reach flow velocity (TRunoff%vr): 0 when rlen <= 0, -erout/mr when the dry-cell clamp fired and mr > 0, the Manning value otherwise, [m/s]"
+    },
+    "mr": {
+      "type": "unknown",
+      "units": "m^2",
+      "description": "wetted cross-section area of the main channel (TRunoff%mr), [m2]"
+    },
+    "yr": {
+      "type": "unknown",
+      "units": "m",
+      "description": "water depth of the main channel (TRunoff%yr), [m]"
+    },
+    "pr": {
+      "type": "unknown",
+      "units": "m",
+      "description": "wetted perimeter of the main channel (TRunoff%pr), [m]"
+    },
+    "rr": {
+      "type": "unknown",
+      "units": "m",
+      "description": "hydraulic radius of the main channel (TRunoff%rr), [m]"
+    },
+    "flow": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "streamflow from the outlet of the reach (TRunoff%flow) = -erout, the instantaneous value of the Fortran's substep accumulation flow -= erout averaged over DLevelH2R (F90:201, 216), [m3/s]"
+    },
+    "eroutUp": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 0.0,
+      "description": "outflow sum of the upstream gridcells (TRunoff%eroutUp), delivered by the rh_eroutUp ESMF SMM sparse-matrix gather over the ID/dnID network (F90:158); a network-topology input that is a plain parameter here until the frivinp network data source lands (boundaries.md 2.4), [m3/s]"
+    },
+    "erlateral": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 0.0,
+      "description": "lateral flow from the hillslope and subnetwork (TRunoff%erlateral, computed by the subnetwork step), [m3/s]"
+    },
+    "qgwl": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 0.0,
+      "description": "gwl runoff term from glaciers, wetlands and lakes (TRunoff%qgwl, after the mosart_driver m3/s -> m/s /area conversion), [m/s]"
+    },
+    "qirrig": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 0.0,
+      "description": "irrigation withdrawal from the main channel (ctl%qirrig_actual, <= 0), computed by the assembly Control model and wired in by the coupling library; mosart_run removes irrig_volume = -qirrig_actual*coupling_period from wr in one jump at the start of each coupling period (mosart_driver.F90:476-497), here it enters d(wr)/dt as a rate so the water withdrawn for irrigation actually leaves the channel storage (mass conservation), [m3/s]"
+    },
+    "rslpsqrt": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.01,
+      "description": "sqrt of the slope of the main river reach (TUnit%rslpsqrt, from frivinp rslp), [-]"
+    },
+    "nr": {
+      "type": "parameter",
+      "units": "s/m^(1/3)",
+      "default": 0.03,
+      "description": "Manning's roughness of the main reach (TUnit%nr, from frivinp); network file stores a bare number; declared with its SI dimension s/m^(1/3) for dimensional consistency"
+    },
+    "rlen": {
+      "type": "parameter",
+      "units": "m",
+      "default": 10000.0,
+      "description": "length of the main river reach (TUnit%rlen, from frivinp), [m]"
+    },
+    "rwidth": {
+      "type": "parameter",
+      "units": "m",
+      "default": 50.0,
+      "description": "bankfull width of the main reach (TUnit%rwidth, from frivinp rwid), [m]"
+    },
+    "rwidth0": {
+      "type": "parameter",
+      "units": "m",
+      "default": 200.0,
+      "description": "total width of the flood plain (TUnit%rwidth0, from frivinp rwid0), [m]"
+    },
+    "rdepth": {
+      "type": "parameter",
+      "units": "m",
+      "default": 2.0,
+      "description": "bankfull depth of the river cross section (TUnit%rdepth, from frivinp rdep), [m]"
+    },
+    "areaTotal2": {
+      "type": "parameter",
+      "units": "m^2",
+      "default": 100000000.0,
+      "description": "computed total upstream drainage area (TUnit%areaTotal2, from set_areatotal2), [m2]"
+    },
+    "area": {
+      "type": "parameter",
+      "units": "m^2",
+      "default": 10000000.0,
+      "description": "area of the local cell (TUnit%area, from frivinp), [m2]"
+    },
+    "frac": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "fraction of the cell included in the study area (TUnit%frac, from frivinp), [-]"
+    },
+    "localdelt": {
+      "type": "parameter",
+      "units": "s",
+      "default": 180.0,
+      "description": "local main-channel substep = Tctl%DeltaT/DLevelH2R/numDT_r(nr) (F90:184), [s]"
+    }
+  },
+  "equations": [
+    {
+      "lhs": "erin",
+      "rhs": {
+        "op": "-",
+        "args": [
+          "eroutUp"
+        ]
+      }
+    },
+    {
+      "lhs": "vr_manning",
+      "rhs": {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "manning_velocity",
+        "bindings": {
+          "sqrtslp": "rslpsqrt",
+          "n": "nr",
+          "rr": "rr"
+        }
+      }
+    },
+    {
+      "lhs": "erout_manning",
+      "rhs": {
+        "op": "*",
+        "args": [
+          {
+            "op": "-",
+            "args": [
+              "vr_manning"
+            ]
+          },
+          "mr"
+        ]
+      }
+    },
+    {
+      "lhs": "erout",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<=",
+            "args": [
+              "rlen",
+              0.0
+            ]
+          },
+          {
+            "op": "-",
+            "args": [
+              {
+                "op": "+",
+                "args": [
+                  "erin",
+                  "erlateral"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "areaTotal2",
+                      {
+                        "op": "*",
+                        "args": [
+                          "rwidth",
+                          "rlen"
+                        ]
+                      }
+                    ]
+                  },
+                  1000000.0
+                ]
+              },
+              {
+                "op": "-",
+                "args": [
+                  {
+                    "op": "+",
+                    "args": [
+                      "erin",
+                      "erlateral"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": "and",
+                    "args": [
+                      {
+                        "op": ">",
+                        "args": [
+                          {
+                            "op": "-",
+                            "args": [
+                              "erout_manning"
+                            ]
+                          },
+                          {
+                            "op": "const",
+                            "args": [],
+                            "value": 1e-14,
+                            "units": "m^3/s"
+                          }
+                        ]
+                      },
+                      {
+                        "op": "<",
+                        "args": [
+                          {
+                            "op": "+",
+                            "args": [
+                              "wr",
+                              {
+                                "op": "*",
+                                "args": [
+                                  {
+                                    "op": "+",
+                                    "args": [
+                                      "erlateral",
+                                      "erin",
+                                      "erout_manning"
+                                    ]
+                                  },
+                                  "localdelt"
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "op": "const",
+                            "args": [],
+                            "value": 1e-14,
+                            "units": "m^3"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "-",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          "erlateral",
+                          "erin",
+                          {
+                            "op": "/",
+                            "args": [
+                              "wr",
+                              "localdelt"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "erout_manning"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "vr",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<=",
+            "args": [
+              "rlen",
+              0.0
+            ]
+          },
+          0.0,
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "and",
+                "args": [
+                  {
+                    "op": ">",
+                    "args": [
+                      {
+                        "op": "-",
+                        "args": [
+                          "erout_manning"
+                        ]
+                      },
+                      {
+                        "op": "const",
+                        "args": [],
+                        "value": 1e-14,
+                        "units": "m^3/s"
+                      }
+                    ]
+                  },
+                  {
+                    "op": "and",
+                    "args": [
+                      {
+                        "op": "<",
+                        "args": [
+                          {
+                            "op": "+",
+                            "args": [
+                              "wr",
+                              {
+                                "op": "*",
+                                "args": [
+                                  {
+                                    "op": "+",
+                                    "args": [
+                                      "erlateral",
+                                      "erin",
+                                      "erout_manning"
+                                    ]
+                                  },
+                                  "localdelt"
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "op": "const",
+                            "args": [],
+                            "value": 1e-14,
+                            "units": "m^3"
+                          }
+                        ]
+                      },
+                      {
+                        "op": ">",
+                        "args": [
+                          "mr",
+                          0.0
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "-",
+                    "args": [
+                      "erout"
+                    ]
+                  },
+                  "mr"
+                ]
+              },
+              "vr_manning"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "dwr",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "erlateral",
+          "erin",
+          "erout",
+          {
+            "op": "*",
+            "args": [
+              "qgwl",
+              "area",
+              "frac"
+            ]
+          },
+          "qirrig"
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "args": [
+          "wr"
+        ],
+        "wrt": "t"
+      },
+      "rhs": "dwr"
+    },
+    {
+      "lhs": "mr",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "rlen",
+                  0.0
+                ]
+              },
+              {
+                "op": ">",
+                "args": [
+                  "wr",
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "wetted_area",
+            "bindings": {
+              "w": "wr",
+              "len": "rlen"
+            }
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "yr",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "rlen",
+                  0.0
+                ]
+              },
+              {
+                "op": ">",
+                "args": [
+                  "wr",
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "channel_depth",
+            "bindings": {
+              "m": "mr",
+              "rwidth": "rwidth",
+              "rwidth0": "rwidth0",
+              "rdepth": "rdepth",
+              "SLOPE1": {
+                "op": "const",
+                "args": [],
+                "value": 0.1,
+                "units": "1"
+              }
+            }
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "pr",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "rlen",
+                  0.0
+                ]
+              },
+              {
+                "op": ">",
+                "args": [
+                  "wr",
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "channel_perimeter",
+            "bindings": {
+              "h": "yr",
+              "rwidth": "rwidth",
+              "rwidth0": "rwidth0",
+              "rdepth": "rdepth",
+              "SLOPE1": {
+                "op": "const",
+                "args": [],
+                "value": 0.1,
+                "units": "1"
+              }
+            }
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "rr",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "rlen",
+                  0.0
+                ]
+              },
+              {
+                "op": ">",
+                "args": [
+                  "wr",
+                  0.0
+                ]
+              }
+            ]
+          },
+          {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "hydraulic_radius",
+            "bindings": {
+              "area": "mr",
+              "p": "pr"
+            }
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "flow",
+      "rhs": {
+        "op": "-",
+        "args": [
+          "erout"
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "dry_geometry_guard_cell100312",
+      "description": "Instantaneous pin of the dry-cell main-channel geometry chain GRMR/GRHR/GRPR/GRRR and the dry routing branches (mosart_physics.F90:441-572, 302-321) from stage1/dumps/mosart/gr_chan.csv row (step 8, ns 3, m 5, last numDT_r substep, gindex 100312): wr = 1.92941771102327012e-12 m3, rlen = 1.44889171899999987e+05 m give mr = wr/rlen = 1.33165072705013531e-17 m2 (nonzero, so the GRMR branch is taken), but mr <= TINYVALUE (1.0e-14) zeroes the whole GRHR/GRPR/GRRR chain: yr = pr = rr = 0 as in the Fortran; and crvrman_chan.csv row (8,3,5,100312) pins the dry routing: rr = 0 zeroes the Manning velocity vr = 0 (F90:406-422), erout = -vr*mr = 0 (the dry-cell clamp cannot fire: -erout_manning = 0 is not > TINYVALUE), so dwr = erlateral + erin + erout + qgwl*area*frac = erlateral = 6.55201404712201227e-17 m3/s (erin = eroutUp = 0, qgwl = 0) and flow = -erout = 0. This is the last dry state of the dumped window (channel wr reaches 1.9e-12 m3 after 8 steps; every cell stays below the TINYVALUE threshold throughout, so the nonzero GRHR branches are not exercised by this data window). time_span {0,0} keeps wr at its initial condition so the chain is evaluated pointwise; the Fortran values are reproduced to round-off (rel 1e-12).",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "rlen": 144889.1719,
+        "rwidth": 93.9573745727539,
+        "rwidth0": 469.78687286376953,
+        "rdepth": 2.0,
+        "rslpsqrt": 0.099498743710662,
+        "nr": 0.05000000074505806,
+        "erlateral": 6.552014047122012e-17,
+        "localdelt": 180.0
+      },
+      "initial_conditions": {
+        "wr": 1.92941771102327e-12
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "mr",
+          "time": 0.0,
+          "expected": 1.3316507270501353e-17
+        },
+        {
+          "variable": "yr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "pr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "vr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "erout",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "dwr",
+          "time": 0.0,
+          "expected": 6.552014047122012e-17
+        },
+        {
+          "variable": "flow",
+          "time": 0.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "dry_geometry_guard_cell101032",
+      "description": "Instantaneous pin of the same dry chain as dry_geometry_guard_cell100312 for a second cell, 101032, with a shorter reach: gr_chan.csv row (step 8, ns 3, m 5, last substep, gindex 101032): wr = 1.21161058167503756e-13 m3, rlen = 5.39392262550703090e+04 m, rwidth = 6.07456207275390625e+01 m, rwidth0 = 3.03728103637695312e+02 m give mr = 2.24625131985675399e-18 m2 with yr = pr = rr = 0; crvrman_chan.csv row (8,3,5,101032): rslpsqrt = 1.41421356237309507e-02, n_r = 5.00000007450580597e-02, erlateral = 4.11433541143830951e-18 m3/s, vr = 0, erout = 0, dwr = erlateral. The Fortran values are reproduced to round-off (rel 1e-12).",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "rlen": 53939.22625507031,
+        "rwidth": 60.74562072753906,
+        "rwidth0": 303.7281036376953,
+        "rdepth": 2.0,
+        "rslpsqrt": 0.01414213562373095,
+        "nr": 0.05000000074505806,
+        "erlateral": 4.1143354114383095e-18,
+        "localdelt": 180.0
+      },
+      "initial_conditions": {
+        "wr": 1.2116105816750376e-13
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "mr",
+          "time": 0.0,
+          "expected": 2.246251319856754e-18
+        },
+        {
+          "variable": "yr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "pr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "vr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "erout",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "dwr",
+          "time": 0.0,
+          "expected": 4.1143354114383095e-18
+        },
+        {
+          "variable": "flow",
+          "time": 0.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "dry_geometry_zero_guard",
+      "description": "Instantaneous pin of the zero-state branches of the main-channel step from the cold-start rows gr_chan.csv / crvrman_chan.csv (step 1, ns 1, m 1, gindex 100312): with wr = 0 the updateState guard rlen > 0 .and. wr > 0 (F90:391-401) fails and mr = yr = pr = rr = 0; the Manning velocity is zeroed by rr = 0 (vr = 0), erout = -vr*mr = 0, dwr = erlateral + erin + erout + qgwl*area*frac = 0 (erlateral = erin = qgwl = 0 in the cold-start row), and flow = -erout = 0. The geometry is the cell-100312 reach of the dry_geometry_guard_cell100312 test; time_span {0,0} evaluates the chain pointwise.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "rlen": 144889.1719,
+        "rwidth": 93.9573745727539,
+        "rwidth0": 469.78687286376953,
+        "rdepth": 2.0,
+        "rslpsqrt": 0.099498743710662,
+        "nr": 0.05000000074505806,
+        "erlateral": 0.0,
+        "localdelt": 180.0
+      },
+      "initial_conditions": {
+        "wr": 0.0
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "mr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "yr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "pr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "vr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "erout",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "dwr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "flow",
+          "time": 0.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "one_step_accumulation_step2_sub1",
+      "description": "One-substep trace in the continuous-ODE form over [0, 3600] (delt = Tctl%DeltaT of the mosart_euler.csv delt column): entry (step 2, ns 1, gindex 100312) wr = 2.61999638886733984e-16 m3 with erlateral = 5.08977293540838200e-19 m3/s, the DLevelH2R mean of the five m-level erlateral values of the step-2/ns-1 substeps in crvrman_chan.csv ((2.40722391106656755e-19 + 3.57544891632578890e-19 + 4.92208665007665035e-19 + 6.43593338063634362e-19 + 8.10817181893655813e-19)/5; erin = eroutUp = 0, qgwl = 0); the exit state (step 2, ns 1) is wr = 2.09431789563375119e-15 m3. The .esm integrates d(wr)/dt = dwr = erlateral continuously; the end state is EXACT, with no scheme gap: the Fortran accumulates wr += erlateral(m)*numDT_r*localdelt per m-level (F90:189, numDT_r = 4 substeps of localdelt = delt/DLevelH2R/numDT_r = 180 s), and Sigma_m erlateral(m)*720 = mean*5*720 = mean*3600 equals the continuous integral mean*3600. The channel stays dry through the step (mr = wr/rlen <= 1.4e-20 m2 < TINYVALUE, so yr = pr = rr = vr = erout = 0 and dwr = erlateral throughout). Algebraic law values are asserted at time 0 (entry state: mr = 1.80827618414136306e-21 m2, dwr = erlateral), the state wr at the span end.",
+      "time_span": {
+        "start": 0.0,
+        "end": 3600.0
+      },
+      "parameter_overrides": {
+        "rlen": 144889.1719,
+        "rwidth": 93.9573745727539,
+        "rwidth0": 469.78687286376953,
+        "rdepth": 2.0,
+        "rslpsqrt": 0.099498743710662,
+        "nr": 0.05000000074505806,
+        "erlateral": 5.089772935408382e-19,
+        "localdelt": 180.0
+      },
+      "initial_conditions": {
+        "wr": 2.61999638886734e-16
+      },
+      "tolerance": {
+        "rel": 1e-10,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "wr",
+          "time": 3600.0,
+          "expected": 2.094317895633751e-15
+        },
+        {
+          "variable": "mr",
+          "time": 0.0,
+          "expected": 1.808276184141363e-21
+        },
+        {
+          "variable": "yr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "pr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "vr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "erout",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "dwr",
+          "time": 0.0,
+          "expected": 5.089772935408382e-19
+        },
+        {
+          "variable": "flow",
+          "time": 0.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "geometry_inbank_cell100312",
+      "description": "Standalone-gfortran-driver pin (not a CESM-run dump): Instantaneous pin of the in-bank branch of the main-channel cross-section chain GRMR/GRHR/GRPR/GRRR (mosart_physics.F90:441-572) at half bankfull on the cell-100312 reach (rlen = 144889.1719 m, rwidth = 93.9573745727539062 m, rwidth0 = 469.786872863769531 m, rdepth = 2 m): wr = 1.36134061957444288e7 m3 gives mr = wr/rlen = 93.9573745727539062 m2 = (rdepth*rwidth)/2, so mr - rdepth*rwidth = -93.9573745727539062 m2 <= TINYVALUE and GRHR returns yr = mr/rwidth = 1.0 m (F90:510-511); GRPR sees h <= rdepth + TINYVALUE and returns pr = rwidth + 2*yr = 95.9573745727539062 m (F90:543-544); GRRR returns rr = mr/pr = 0.979157412247834924 m. Expected values from the unmodified GRHR/GRPR/GRRR compiled from mosart_physics.F90 into a standalone gfortran driver (EqESM stage-2 repo, stage1/analysis/mosart_geometry/mosart_geometry_driver.f90, run at these exact inputs; output in mosart_geometry_reference.txt). time_span {0,0} evaluates the chain pointwise; the closed forms reproduce to round-off (rel 1e-12).",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "rlen": 144889.1719,
+        "rwidth": 93.9573745727539,
+        "rwidth0": 469.78687286376953,
+        "rdepth": 2.0,
+        "rslpsqrt": 0.099498743710662,
+        "nr": 0.05000000074505806,
+        "erlateral": 0.0,
+        "localdelt": 180.0
+      },
+      "initial_conditions": {
+        "wr": 13613406.195744429
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "mr",
+          "time": 0.0,
+          "expected": 93.9573745727539
+        },
+        {
+          "variable": "yr",
+          "time": 0.0,
+          "expected": 1.0
+        },
+        {
+          "variable": "pr",
+          "time": 0.0,
+          "expected": 95.9573745727539
+        },
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 0.9791574122478349
+        }
+      ]
+    },
+    {
+      "id": "geometry_trapezoid_low_cell100312",
+      "description": "Standalone-gfortran-driver pin (not a CESM-run dump): Instantaneous pin of the trapezoid branch of GRHR/GRPR/GRRR (mosart_physics.F90:501-572) just above bankfull on the cell-100312 reach: wr = 2.73717015633888580e7 m3 gives mr = wr/rlen = 188.914749145507812 m2 = rdepth*rwidth + 1 m2, so the not-flooded test fails and mr is below the flood-plain threshold rdepth*rwidth + (rwidth+rwidth0)*SLOPE1*((rwidth0-rwidth)/2)/2 + TINYVALUE = 5484.70769110837773 m2, so the trapezoid branch computes yr = rdepth + (-rwidth + sqrt(rwidth^2 + 4*(mr - rdepth*rwidth)/SLOPE1))*SLOPE1/2 = 2.01063109524591122 m (F90:527-530; before the fix this branch multiplied by 0.1*(2.0/1.0) = 0.2 instead of SLOPE1/2 = 0.05 and dropped the leading rdepth, so the depth was wrong in both the increment and the offset); GRPR sees rdepth < h <= rdepth + ((rwidth0-rwidth)/2)*SLOPE1 + TINYVALUE and returns pr = rwidth + 2*(rdepth + (h - rdepth)*sinatanSLOPE1defr) = 98.1710569426293063 m (F90:568-570); GRRR returns rr = mr/pr = 1.92434262224464669 m. Expected values from the compiled Fortran driver (EqESM stage-2 repo, stage1/analysis/mosart_geometry/mosart_geometry_driver.f90) at these exact inputs (mosart_geometry_reference.txt). time_span {0,0}; rel 1e-12.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "rlen": 144889.1719,
+        "rwidth": 93.9573745727539,
+        "rwidth0": 469.78687286376953,
+        "rdepth": 2.0,
+        "rslpsqrt": 0.099498743710662,
+        "nr": 0.05000000074505806,
+        "erlateral": 0.0,
+        "localdelt": 180.0
+      },
+      "initial_conditions": {
+        "wr": 27371701.563388858
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "mr",
+          "time": 0.0,
+          "expected": 188.9147491455078
+        },
+        {
+          "variable": "yr",
+          "time": 0.0,
+          "expected": 2.010631095245911
+        },
+        {
+          "variable": "pr",
+          "time": 0.0,
+          "expected": 98.1710569426293
+        },
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 1.9243426222446467
+        }
+      ]
+    },
+    {
+      "id": "geometry_trapezoid_mid_cell100312",
+      "description": "Standalone-gfortran-driver pin (not a CESM-run dump): Instantaneous pin of the trapezoid branch of GRHR/GRPR/GRRR (mosart_physics.F90:501-572) at mid-trapezoid on the cell-100312 reach: wr = 4.10950783934871316e8 m3 gives mr = wr/rlen = 2836.31122012694277 m2 = rdepth*rwidth + atrap/2 with atrap = (rwidth+rwidth0)*SLOPE1*((rwidth0-rwidth)/2)/2 = 5296.79294196286992 m2 the full trapezoid area, so the trapezoid branch gives yr = 14.2405378578643376 m and GRPR (trapezoid branch) pr = rwidth + 2*(rdepth + (yr - rdepth)*sinatanSLOPE1defr) = 343.989140587070096 m, rr = mr/pr = 8.24535104592646029 m. Expected values from the compiled Fortran driver (EqESM stage-2 repo, stage1/analysis/mosart_geometry/mosart_geometry_driver.f90) at these exact inputs (mosart_geometry_reference.txt). time_span {0,0}; rel 1e-12.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "rlen": 144889.1719,
+        "rwidth": 93.9573745727539,
+        "rwidth0": 469.78687286376953,
+        "rdepth": 2.0,
+        "rslpsqrt": 0.099498743710662,
+        "nr": 0.05000000074505806,
+        "erlateral": 0.0,
+        "localdelt": 180.0
+      },
+      "initial_conditions": {
+        "wr": 410950783.9348713
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "mr",
+          "time": 0.0,
+          "expected": 2836.3112201269428
+        },
+        {
+          "variable": "yr",
+          "time": 0.0,
+          "expected": 14.240537857864338
+        },
+        {
+          "variable": "pr",
+          "time": 0.0,
+          "expected": 343.9891405870701
+        },
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 8.24535104592646
+        }
+      ]
+    },
+    {
+      "id": "geometry_trapezoid_high_cell100312",
+      "description": "Standalone-gfortran-driver pin (not a CESM-run dump): Instantaneous pin of the trapezoid branch of GRHR/GRPR/GRRR (mosart_physics.F90:501-572) just below the flood-plain threshold on the cell-100312 reach: wr = 7.94529866306353807e8 m3 gives mr = wr/rlen = 5483.70769110837773 m2 = rdepth*rwidth + atrap - 1 m2 (the flood-plain threshold is rdepth*rwidth + atrap + TINYVALUE = 5484.70769110837773 m2, so the trapezoid branch still applies), yr = 20.7893461932681980 m (approaching the trapezoid-top depth rdepth + SLOPE1*((rwidth0-rwidth)/2) = 20.7914749145507827 m), pr = 475.618559061807161 m, rr = mr/pr = 11.5296335406368442 m. Expected values from the compiled Fortran driver (EqESM stage-2 repo, stage1/analysis/mosart_geometry/mosart_geometry_driver.f90) at these exact inputs (mosart_geometry_reference.txt). time_span {0,0}; rel 1e-12.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "rlen": 144889.1719,
+        "rwidth": 93.9573745727539,
+        "rwidth0": 469.78687286376953,
+        "rdepth": 2.0,
+        "rslpsqrt": 0.099498743710662,
+        "nr": 0.05000000074505806,
+        "erlateral": 0.0,
+        "localdelt": 180.0
+      },
+      "initial_conditions": {
+        "wr": 794529866.3063538
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "mr",
+          "time": 0.0,
+          "expected": 5483.707691108378
+        },
+        {
+          "variable": "yr",
+          "time": 0.0,
+          "expected": 20.789346193268198
+        },
+        {
+          "variable": "pr",
+          "time": 0.0,
+          "expected": 475.61855906180716
+        },
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 11.529633540636844
+        }
+      ]
+    },
+    {
+      "id": "geometry_floodplain_cell100312",
+      "description": "Standalone-gfortran-driver pin (not a CESM-run dump): Instantaneous pin of the flood-plain branch of GRHR/GRPR/GRRR (mosart_physics.F90:501-572) above the trapezoid on the cell-100312 reach: wr = 8.30897048453253746e8 m3 gives mr = wr/rlen = 5734.70769110837773 m2 = rdepth*rwidth + atrap + 250 m2 > the flood-plain threshold, so GRHR returns yr = rdepth + SLOPE1*((rwidth0-rwidth)/2) + deltam/rwidth0 = 21.3236311207861262 m (deltam = 250 m2, F90:525-526); GRPR (flood-plain branch) returns pr = rwidth + 2*(rdepth + ((rwidth0-rwidth)/2)*SLOPE1*sinatanSLOPE1defr + deltah) = 476.725658242511884 m; GRRR returns rr = mr/pr = 12.0293665590600813 m. Expected values from the compiled Fortran driver (EqESM stage-2 repo, stage1/analysis/mosart_geometry/mosart_geometry_driver.f90) at these exact inputs (mosart_geometry_reference.txt). time_span {0,0}; rel 1e-12.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "rlen": 144889.1719,
+        "rwidth": 93.9573745727539,
+        "rwidth0": 469.78687286376953,
+        "rdepth": 2.0,
+        "rslpsqrt": 0.099498743710662,
+        "nr": 0.05000000074505806,
+        "erlateral": 0.0,
+        "localdelt": 180.0
+      },
+      "initial_conditions": {
+        "wr": 830897048.4532537
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "mr",
+          "time": 0.0,
+          "expected": 5734.707691108378
+        },
+        {
+          "variable": "yr",
+          "time": 0.0,
+          "expected": 21.323631120786125
+        },
+        {
+          "variable": "pr",
+          "time": 0.0,
+          "expected": 476.7256582425119
+        },
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 12.029366559060081
+        }
+      ]
+    },
+    {
+      "id": "floodplain_geom_cell205774",
+      "description": "Instantaneous pin of the wet-window flood-plain branch of the GRMR/GRHR/GRPR/GRRR main-channel geometry chain (mosart_physics.F90:461-483, 501-572) on the cell-205774 reach at its peak stage, from stage1/dumps/mosart_wet/gr_chan.csv row (step 8, ns 1, m 1, last numDT_r substep, gindex 205774): wr = 3.2775943146412177e9 m3 gives mr = wr/rlen = 22549.106117176078 m2, 4.6x the trapezoid top area rdepth*rwidth + atrap, so GRHR takes the flood-plain branch and returns yr = 21.655034446136074 m (6.5x the bankfull depth rdepth = 3.307091236114502 m); GRPR returns pr = 1261.2312797301292 m and GRRR returns rr = mr/pr = 17.878644844584731 m. Expected values are the dumped outputs of the EqESM instrumented-CESM wet window (CESM run, not a standalone driver) (the reference). time_span {0,0}; rel 1e-12.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "rlen": 145353.625,
+        "rwidth": 885.8280029296875,
+        "rwidth0": 4429.1400146484375,
+        "rdepth": 3.307091236114502,
+        "rslpsqrt": 0.0282842712474619,
+        "nr": 0.04739361256361008,
+        "erlateral": 0.0,
+        "localdelt": 144.0
+      },
+      "initial_conditions": {
+        "wr": 3277594314.6412177
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "mr",
+          "time": 0.0,
+          "expected": 22549.106117176078
+        },
+        {
+          "variable": "yr",
+          "time": 0.0,
+          "expected": 21.655034446136074
+        },
+        {
+          "variable": "pr",
+          "time": 0.0,
+          "expected": 1261.2312797301292
+        },
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 17.87864484458473
+        }
+      ]
+    },
+    {
+      "id": "floodplain_geom_cell217950",
+      "description": "Instantaneous pin of the wet-window flood-plain branch of the GRMR/GRHR/GRPR/GRRR chain on the cell-217950 reach just above bankfull, from stage1/dumps/mosart_wet/gr_chan.csv row (step 7, ns 3, m 5, last numDT_r substep, gindex 217950): wr = 7.7279559083327115e8 m3 gives mr = wr/rlen = 16249.008126925779 m2, slightly above the trapezoid top area rdepth*rwidth + atrap, so GRHR returns yr = 7.8833288368836971 m > rdepth = 7.6949272155761719 m; GRPR returns pr = 2080.3177934343184 m and GRRR returns rr = mr/pr = 7.8108297579385226 m. Expected values are the dumped outputs of the EqESM instrumented-CESM wet window (CESM run, not a standalone driver). time_span {0,0}; rel 1e-12.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "rlen": 47559.5547,
+        "rwidth": 2061.14111328125,
+        "rwidth0": 10305.70556640625,
+        "rdepth": 7.694927215576172,
+        "rslpsqrt": 0.01,
+        "nr": 0.040311627089977264,
+        "erlateral": 0.0,
+        "localdelt": 120.0
+      },
+      "initial_conditions": {
+        "wr": 772795590.8332711
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "mr",
+          "time": 0.0,
+          "expected": 16249.008126925779
+        },
+        {
+          "variable": "yr",
+          "time": 0.0,
+          "expected": 7.883328836883697
+        },
+        {
+          "variable": "pr",
+          "time": 0.0,
+          "expected": 2080.3177934343184
+        },
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 7.810829757938523
+        }
+      ]
+    },
+    {
+      "id": "floodplain_geom_cell106268",
+      "description": "Instantaneous pin of the wet-window flood-plain branch of the GRMR/GRHR/GRPR/GRRR chain on the cell-106268 reach, from stage1/dumps/mosart_wet/gr_chan.csv row (step 7, ns 1, m 5, last numDT_r substep, gindex 106268): wr = 5.1524468773763949e8 m3 gives mr = wr/rlen = 5838.6088544464865 m2 > the trapezoid top area, so GRHR returns yr = 5.2832589622015345 m > rdepth = 4.1161375045776367 m; GRPR returns pr = 1134.2278691409408 m and GRRR returns rr = mr/pr = 5.1476506734653089 m. Expected values are the dumped outputs of the EqESM instrumented-CESM wet window (CESM run, not a standalone driver). time_span {0,0}; rel 1e-12.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "rlen": 88247.8516,
+        "rwidth": 1102.5367431640625,
+        "rwidth0": 5512.6837158203125,
+        "rdepth": 4.116137504577637,
+        "rslpsqrt": 0.017320508075688773,
+        "nr": 0.045899756252765656,
+        "erlateral": 0.0,
+        "localdelt": 102.85714285714286
+      },
+      "initial_conditions": {
+        "wr": 515244687.7376395
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "mr",
+          "time": 0.0,
+          "expected": 5838.6088544464865
+        },
+        {
+          "variable": "yr",
+          "time": 0.0,
+          "expected": 5.2832589622015345
+        },
+        {
+          "variable": "pr",
+          "time": 0.0,
+          "expected": 1134.2278691409408
+        },
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 5.147650673465309
+        }
+      ]
+    },
+    {
+      "id": "wet_manning_cell205774",
+      "description": "Instantaneous pin of the wet-window main-channel Manning law (Routing_KW, mosart_physics.F90:369-393) on the cell-205774 reach as it fills, from stage1/dumps/mosart_wet/crvrman_chan.csv row (step 1, ns 2, m 2, substep k=1 of numDT_r = 5, gindex 205774): the state wr = mr*rlen = 13281309.968130844 m3 (recovered from the dumped pre-update mr = 91.372402773792842 m2) gives the inbank rr = 0.10312513031112586 m; the wet Manning law returns vr = CRVRMAN_nosqrt(rslpsqrt, n_r, rr) = 0.13124059373213465 m/s and erout = -vr*mr = -11.991768390764319 m3/s (the no-river and small-catchment branches are inactive: rlen > 0 and areaTotal2/rwidth/rlen <= 1e6, and the dry-cell clamp cannot fire: wr + (erlateral + erin + erout)*localdelt > 0), so dwr = erlateral + erin + erout + qgwl*area*frac = 0 + 10719.101264620582 - 11.991768390764319 + 0 = 10707.109496229818 m3/s (qgwl_area = 0). Expected values are the dumped outputs of the EqESM instrumented-CESM wet window (CESM run, not a standalone driver). time_span {0,0}; rel 1e-12.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "rlen": 145353.625,
+        "rwidth": 885.8280029296875,
+        "rwidth0": 4429.1400146484375,
+        "rdepth": 3.307091236114502,
+        "rslpsqrt": 0.0282842712474619,
+        "nr": 0.04739361256361008,
+        "eroutUp": -10719.101264620582,
+        "erlateral": 0.0,
+        "qgwl": 0.0,
+        "area": 10000000.0,
+        "frac": 1.0,
+        "localdelt": 144.0
+      },
+      "initial_conditions": {
+        "wr": 13281309.968130844
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 0.10312513031112586
+        },
+        {
+          "variable": "vr",
+          "time": 0.0,
+          "expected": 0.13124059373213465
+        },
+        {
+          "variable": "erout",
+          "time": 0.0,
+          "expected": -11.991768390764319
+        },
+        {
+          "variable": "dwr",
+          "time": 0.0,
+          "expected": 10707.109496229818
+        }
+      ]
+    },
+    {
+      "id": "wet_manning_qgwl_cell217950",
+      "description": "Instantaneous pin of the wet-window main-channel Manning law with a nonzero qgwl groundwater term on the cell-217950 reach, from stage1/dumps/mosart_wet/crvrman_chan.csv row (step 1, ns 1, m 1, substep k=6 of numDT_r = 6, gindex 217950): wr = mr*rlen = 17290936.281603549 m3 (mr = 363.56388092093613 m2) gives rr = 0.17635942664820015 m, vr = CRVRMAN_nosqrt(rslpsqrt, n_r, rr) = 0.078013325477311546 m/s and erout = -vr*mr = -28.362827374079526 m3/s; qgwl = 1.9387133266078165e-5 m/s (the entry qgwl of mosart_euler.csv row (step 1, ns 1, gindex 217950)) with area*frac = qgwl_area/qgwl = 1486871767.8600042 m2 (qgwl_area = 28826.181113071139 m3/s of the dump row) gives the dwr term qgwl*area*frac = 28826.181113071139 m3/s, so dwr = 0.00020540314504617537 + 0 - 28.362827374079526 + 28826.181113071139 = 28797.818491100206 m3/s. Expected values are the dumped outputs of the EqESM instrumented-CESM wet window (CESM run, not a standalone driver). time_span {0,0}; rel 1e-12.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "rlen": 47559.5547,
+        "rwidth": 2061.14111328125,
+        "rwidth0": 10305.70556640625,
+        "rdepth": 7.694927215576172,
+        "rslpsqrt": 0.01,
+        "nr": 0.040311627089977264,
+        "erlateral": 0.00020540314504617537,
+        "qgwl": 1.9387133266078165e-05,
+        "area": 1486871767.8600042,
+        "frac": 1.0,
+        "localdelt": 120.0
+      },
+      "initial_conditions": {
+        "wr": 17290936.28160355
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 0.17635942664820015
+        },
+        {
+          "variable": "vr",
+          "time": 0.0,
+          "expected": 0.07801332547731155
+        },
+        {
+          "variable": "erout",
+          "time": 0.0,
+          "expected": -28.362827374079526
+        },
+        {
+          "variable": "dwr",
+          "time": 0.0,
+          "expected": 28797.818491100206
+        }
+      ]
+    },
+    {
+      "id": "wet_manning_qgwl_cell208659",
+      "description": "Instantaneous pin of the wet-window main-channel Manning law with a nonzero qgwl groundwater term on the cell-208659 reach, from stage1/dumps/mosart_wet/crvrman_chan.csv row (step 1, ns 1, m 1, substep k=4 of numDT_r = 4, gindex 208659): wr = mr*rlen = 18504639.701937884 m3 (mr = 173.18950525080496 m2) gives rr = 0.26357203605676338 m, vr = CRVRMAN_nosqrt(rslpsqrt, n_r, rr) = 0.083770487261864424 m/s and erout = -vr*mr = -14.508169243501158 m3/s; qgwl = 1.9208976754897619e-5 m/s (mosart_euler.csv entry row (step 1, ns 1, gindex 208659)) with area*frac = qgwl_area/qgwl = 1784118342.2755408 m2 (qgwl_area = 34271.087764757336 m3/s) gives dwr = 0 + 0 - 14.508169243501158 + 34271.087764757336 = 34256.579595513838 m3/s. Expected values are the dumped outputs of the EqESM instrumented-CESM wet window (CESM run, not a standalone driver). time_span {0,0}; rel 1e-12.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "rlen": 106846.1953,
+        "rwidth": 656.5584716796875,
+        "rwidth0": 3282.7923583984375,
+        "rdepth": 2.4511516094207764,
+        "rslpsqrt": 0.01,
+        "nr": 0.04907291382551193,
+        "erlateral": 0.0,
+        "qgwl": 1.920897675489762e-05,
+        "area": 1784118342.2755408,
+        "frac": 1.0,
+        "localdelt": 180.0
+      },
+      "initial_conditions": {
+        "wr": 18504639.701937884
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 0.2635720360567634
+        },
+        {
+          "variable": "vr",
+          "time": 0.0,
+          "expected": 0.08377048726186442
+        },
+        {
+          "variable": "erout",
+          "time": 0.0,
+          "expected": -14.508169243501158
+        },
+        {
+          "variable": "dwr",
+          "time": 0.0,
+          "expected": 34256.57959551384
+        }
+      ]
+    },
+    {
+      "id": "wet_manning_erin_cell99771",
+      "description": "Instantaneous pin of the wet-window main-channel Manning law with upstream inflow (erin) and a qgwl term on the cell-99771 reach, from stage1/dumps/mosart_wet/crvrman_chan.csv row (step 1, ns 1, m 4, substep k=7 of numDT_r = 7, gindex 99771): wr = mr*rlen = 5495792.2275085868 m3 (mr = 36.402167603900082 m2) gives rr = 0.10789001733649697 m, vr = CRVRMAN_nosqrt(rslpsqrt, n_r, rr) = 0.04532635867581996 m/s and erout = -vr*mr = -1.6499777053916889 m3/s; erin = -eroutUp = 34.764882855627363 m3/s (upstream inflow), qgwl = 6.8058082871077723e-7 m/s (mosart_euler.csv entry row (step 1, ns 1, gindex 99771)) with area*frac = 2890766297.991117 m2 (qgwl_area = 1967.4001226959799 m3/s), so dwr = 0 + 34.764882855627363 - 1.6499777053916889 + 1967.4001226959799 = 2000.5150278462156 m3/s. Expected values are the dumped outputs of the EqESM instrumented-CESM wet window (CESM run, not a standalone driver). time_span {0,0}; rel 1e-12.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "rlen": 150974.3125,
+        "rwidth": 337.1847839355469,
+        "rwidth0": 1685.9239196777344,
+        "rdepth": 2.0,
+        "rslpsqrt": 0.01,
+        "nr": 0.05000000074505806,
+        "eroutUp": -34.76488285562736,
+        "erlateral": 0.0,
+        "qgwl": 6.805808287107772e-07,
+        "area": 2890766297.991117,
+        "frac": 1.0,
+        "localdelt": 102.85714285714286
+      },
+      "initial_conditions": {
+        "wr": 5495792.227508587
+      },
+      "tolerance": {
+        "rel": 1e-12,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 0.10789001733649697
+        },
+        {
+          "variable": "vr",
+          "time": 0.0,
+          "expected": 0.04532635867581996
+        },
+        {
+          "variable": "erout",
+          "time": 0.0,
+          "expected": -1.6499777053916889
+        },
+        {
+          "variable": "dwr",
+          "time": 0.0,
+          "expected": 2000.5150278462156
+        }
+      ]
+    },
+    {
+      "id": "wet_ode_cell217950_step1_ns1",
+      "description": "Integrated pin of the wet-window main-channel Euler step on the cell-217950 reach over the first m-level window (m = 1 of 5, numDT_r = 6 substeps of localdelt = 120 s, i.e. the first 720 s of the 3600-s coupled step 1, ns 1) of stage1/dumps/mosart_wet/mosart_euler.csv row (step 1, ns 1, exit, gindex 217950) and crvrman_chan.csv rows: entry wr = 0 (cold start); the m = 1 lateral inflow erlateral = 0.00020540314504617537 m3/s and qgwl*area*frac = 28826.181113071139 m3/s are constant and the upstream inflow erin = 0 throughout m = 1 (the upstream subnetwork is still filling), so the only feedback is the wet Manning erout = -vr*mr, which grows from 0 to -28.362827374079526 m3/s over the window; the Fortran accumulates wr += dwr*localdelt explicitly (Euler, F90:189) giving wr = 20746674.500536 m3 at 720 s; the .esm integrates d(wr)/dt = dwr continuously, which removes the erout feedback slightly earlier (left-endpoint vs. smooth evaluation), giving wr = 20744473.707141895 m3 — the measured scheme gap is rel 1.06e-4, so the assertion pins the Fortran's explicit-Euler value with rel 1.2e-4 and documents the gap. The pin's sensitivity to the erout feedback is low: the six substep erout values (-0, -1.94, -6.16, -12.11, -19.56, -28.36 m3/s) integrate to only ~5e-4 of the final wr (10576 m3 of 20746674.5 m3, about 4x the rel 1.2e-4 tolerance), so this assertion mainly pins the constant qgwl*area*frac + erlateral drive, and the pointwise Manning law is pinned separately by the wet_manning_* tests. The full 3600-s step cannot be pinned exactly: erin grows from 0 to 2661.4 m3/s as the upstream network fills (contributing 3.596e6 m3 of the exit wr = 106628149.84799671 m3), which the isolated-cell Channel model cannot reproduce (erin = -eroutUp is a constant parameter there). time_span {0,720}; rel 1.2e-4.",
+      "time_span": {
+        "start": 0.0,
+        "end": 720.0
+      },
+      "parameter_overrides": {
+        "rlen": 47559.5547,
+        "rwidth": 2061.14111328125,
+        "rwidth0": 10305.70556640625,
+        "rdepth": 7.694927215576172,
+        "rslpsqrt": 0.01,
+        "nr": 0.040311627089977264,
+        "erlateral": 0.00020540314504617537,
+        "qgwl": 1.9387133266078165e-05,
+        "area": 1486871767.8600042,
+        "frac": 1.0,
+        "localdelt": 120.0
+      },
+      "initial_conditions": {
+        "wr": 0.0
+      },
+      "tolerance": {
+        "rel": 0.00012,
+        "abs": 1e-24
+      },
+      "assertions": [
+        {
+          "variable": "wr",
+          "time": 720.0,
+          "expected": 20746674.500536
+        },
+        {
+          "variable": "mr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "yr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "pr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "rr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "vr",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "erout",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "dwr",
+          "time": 0.0,
+          "expected": 28826.181318474282
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

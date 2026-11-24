@@ -1,0 +1,979 @@
+---
+title: "HerbaceousFuelMoisture"
+slug: "herbaceousfuelmoisture"
+domains: ["wildland_fire"]
+component_types: ["model"]
+subdomains: ["nfdrs"]
+domain: "wildland_fire"
+subdomain: "nfdrs"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/wildland_fire/nfdrs/herbaceous_moisture.esm"
+reference: "Cohen, J. D., & Deeming, J. E. (1985). The National Fire-Danger Rating System: basic equations. Gen. Tech. Rep. PSW-82. Berkeley, CA: USDA Forest Service, Pacific Southwest Forest and Range Experiment Station. Pages 6-8 (Herbaceous Fuel Moisture)."
+description: "Herbaceous fuel moisture content (MCHERB) per NFDRS Cohen & Deeming (1985), pages 6-8. Migrated from WildlandFire.jl@126976f2 src/nfdrs.jl:426 (`HerbaceousFuelMoisture` @component). Calculates moisture stages (pregreen, greenup, green, transition, cured/frozen) based on climate class, 1000-hr moisture, and seasonal flags."
+tags: ["wildland_fire", "nfdrs", "model", "fuel_moisture", "herbaceous"]
+---
+
+## Description
+
+Herbaceous fuel moisture content (MCHERB) per NFDRS Cohen & Deeming (1985), pages 6-8. Migrated from WildlandFire.jl@126976f2 src/nfdrs.jl:426 (`HerbaceousFuelMoisture` @component). Calculates moisture stages (pregreen, greenup, green, transition, cured/frozen) based on climate class, 1000-hr moisture, and seasonal flags.
+
+## Reference
+
+_source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/nfdrs.jl:426
+Upstream `HerbaceousFuelMoisture` is an MTK `@component` whose inputs are `@parameters` and whose single output (MCHERB) is a time-indexed `@variable` with one algebraic equation — a nested `ifelse` selecting between cured/frozen, greenup, green, and transition stages based on climate class, annual/perennial type, and seasonal flags (Cohen & Deeming 1985, pages 6-8).
+
+The intermediate bindings (X1000_pct, HERBGA, HERBGB, ANNTA, ANNTB, PERTA, PERTB, GREN, MCHRBP) are inlined into the equation tree exactly as MTK inlines them at System construction time.
+
+TODO_GAP: gt-p3ep - non-standard op 'max' likely requires a registered function declaration
+TODO_GAP: gt-p3ep - non-standard op 'min' likely requires a registered function declaration_
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `X1000` | `1` | `0.02` | Modified 1000-hr moisture (dimensionless fraction). Default 0.02 = 2%, typical dry condition. |
+| `is_cured` | `1` | `0.0` | Flag: 1 if cured/frozen, 0 otherwise (dimensionless). Threshold against 0.5 selects branch. |
+| `is_annual` | `1` | `0.0` | Flag: 1 if annual species, 0 if perennial (dimensionless). Threshold against 0.5 selects annual/perennial equations. |
+| `CLIMAT` | `1` | `2.0` | NFDRS climate class 1-4 (dimensionless). 1 = arid, 4 = wet; drives climate-dependent parameters. |
+| `MC1` | `1` | `0.1` | 1-hour fuel moisture content (dimensionless fraction). Used for cured annuals. |
+| `is_greenup` | `1` | `0.0` | Flag: 1 if in greenup stage, 0 otherwise (dimensionless). Threshold against 0.5 selects greenup branch. |
+| `GRNDAY` | `1` | `0.0` | Days since greenup started (dimensionless). Drives greenup fraction GREN. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `MCHERB` | `1` |  | Herbaceous fuel moisture content (dimensionless fraction). |
+
+## Observed expressions
+
+$$
+MCHERB = \mathrm{ifelse}\left(\mathrm{<}\left(0.5, is_{cured}\right), \mathrm{ifelse}\left(\mathrm{<}\left(0.5, is_{annual}\right), MC1, \mathrm{max}\left(0.3, \mathrm{min}\left(1.5, \frac{100 \cdot X1000 \cdot \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 1.5\right), 7.4, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 2.5\right), 8.3, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 3.5\right), 9.8, 12.2\right)\right)\right) + \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 1.5\right), 11.2, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 2.5\right), -10.3, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 3.5\right), -42.7, -93.5\right)\right)\right)}{100}\right)\right)\right), \mathrm{ifelse}\left(\mathrm{<}\left(0.5, is_{greenup}\right), 0.3 + \mathrm{min}\left(1, \frac{GRNDAY}{7 \cdot CLIMAT}\right) \cdot \left(-0.3 + \mathrm{max}\left(0.3, \frac{\mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 1.5\right), -70, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 2.5\right), -100, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 3.5\right), -137.5, -185\right)\right)\right) + 100 \cdot X1000 \cdot \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 1.5\right), 12.8, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 2.5\right), 14, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 3.5\right), 15.5, 17.4\right)\right)\right)}{100}\right)\right), \mathrm{ifelse}\left(\mathrm{<}\left(1.2, \frac{\mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 1.5\right), -70, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 2.5\right), -100, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 3.5\right), -137.5, -185\right)\right)\right) + 100 \cdot X1000 \cdot \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 1.5\right), 12.8, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 2.5\right), 14, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 3.5\right), 15.5, 17.4\right)\right)\right)}{100}\right), \mathrm{min}\left(2.5, \frac{\mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 1.5\right), -70, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 2.5\right), -100, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 3.5\right), -137.5, -185\right)\right)\right) + 100 \cdot X1000 \cdot \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 1.5\right), 12.8, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 2.5\right), 14, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 3.5\right), 15.5, 17.4\right)\right)\right)}{100}\right), \mathrm{ifelse}\left(\mathrm{<}\left(0.5, is_{annual}\right), \mathrm{max}\left(0.3, \mathrm{min}\left(1.5, \frac{100 \cdot X1000 \cdot \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 1.5\right), 18.4, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 2.5\right), 19.6, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 3.5\right), 22, 24.3\right)\right)\right) + \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 1.5\right), -150.5, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 2.5\right), -187.7, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 3.5\right), -245.2, -305.2\right)\right)\right)}{100}\right)\right), \mathrm{max}\left(0.3, \mathrm{min}\left(1.5, \frac{100 \cdot X1000 \cdot \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 1.5\right), 7.4, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 2.5\right), 8.3, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 3.5\right), 9.8, 12.2\right)\right)\right) + \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 1.5\right), 11.2, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 2.5\right), -10.3, \mathrm{ifelse}\left(\mathrm{<}\left(CLIMAT, 3.5\right), -42.7, -93.5\right)\right)\right)}{100}\right)\right)\right)\right)\right)\right)
+$$
+_Herbaceous fuel moisture content (dimensionless fraction)._
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "variables": {
+    "X1000": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.02,
+      "description": "Modified 1000-hr moisture (dimensionless fraction). Default 0.02 = 2%, typical dry condition."
+    },
+    "is_cured": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "Flag: 1 if cured/frozen, 0 otherwise (dimensionless). Threshold against 0.5 selects branch."
+    },
+    "is_annual": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "Flag: 1 if annual species, 0 if perennial (dimensionless). Threshold against 0.5 selects annual/perennial equations."
+    },
+    "CLIMAT": {
+      "type": "parameter",
+      "units": "1",
+      "default": 2.0,
+      "description": "NFDRS climate class 1-4 (dimensionless). 1 = arid, 4 = wet; drives climate-dependent parameters."
+    },
+    "MC1": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.1,
+      "description": "1-hour fuel moisture content (dimensionless fraction). Used for cured annuals."
+    },
+    "is_greenup": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "Flag: 1 if in greenup stage, 0 otherwise (dimensionless). Threshold against 0.5 selects greenup branch."
+    },
+    "MCHERB": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Herbaceous fuel moisture content (dimensionless fraction)."
+    },
+    "GRNDAY": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "Days since greenup started (dimensionless). Drives greenup fraction GREN."
+    }
+  },
+  "reference": {
+    "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/nfdrs.jl:426\nUpstream `HerbaceousFuelMoisture` is an MTK `@component` whose inputs are `@parameters` and whose single output (MCHERB) is a time-indexed `@variable` with one algebraic equation — a nested `ifelse` selecting between cured/frozen, greenup, green, and transition stages based on climate class, annual/perennial type, and seasonal flags (Cohen & Deeming 1985, pages 6-8).\n\nThe intermediate bindings (X1000_pct, HERBGA, HERBGB, ANNTA, ANNTB, PERTA, PERTB, GREN, MCHRBP) are inlined into the equation tree exactly as MTK inlines them at System construction time.\n\nTODO_GAP: gt-p3ep - non-standard op 'max' likely requires a registered function declaration\nTODO_GAP: gt-p3ep - non-standard op 'min' likely requires a registered function declaration"
+  },
+  "tolerance": {
+    "rel": 1e-12
+  },
+  "equations": [
+    {
+      "lhs": "MCHERB",
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              0.5,
+              "is_cured"
+            ],
+            "op": "<"
+          },
+          {
+            "args": [
+              {
+                "args": [
+                  0.5,
+                  "is_annual"
+                ],
+                "op": "<"
+              },
+              "MC1",
+              {
+                "args": [
+                  0.3,
+                  {
+                    "args": [
+                      1.5,
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              {
+                                "args": [
+                                  100,
+                                  "X1000",
+                                  {
+                                    "args": [
+                                      {
+                                        "args": [
+                                          "CLIMAT",
+                                          1.5
+                                        ],
+                                        "op": "<"
+                                      },
+                                      7.4,
+                                      {
+                                        "args": [
+                                          {
+                                            "args": [
+                                              "CLIMAT",
+                                              2.5
+                                            ],
+                                            "op": "<"
+                                          },
+                                          8.3,
+                                          {
+                                            "args": [
+                                              {
+                                                "args": [
+                                                  "CLIMAT",
+                                                  3.5
+                                                ],
+                                                "op": "<"
+                                              },
+                                              9.8,
+                                              12.2
+                                            ],
+                                            "op": "ifelse"
+                                          }
+                                        ],
+                                        "op": "ifelse"
+                                      }
+                                    ],
+                                    "op": "ifelse"
+                                  }
+                                ],
+                                "op": "*"
+                              },
+                              {
+                                "args": [
+                                  {
+                                    "args": [
+                                      "CLIMAT",
+                                      1.5
+                                    ],
+                                    "op": "<"
+                                  },
+                                  11.2,
+                                  {
+                                    "args": [
+                                      {
+                                        "args": [
+                                          "CLIMAT",
+                                          2.5
+                                        ],
+                                        "op": "<"
+                                      },
+                                      -10.3,
+                                      {
+                                        "args": [
+                                          {
+                                            "args": [
+                                              "CLIMAT",
+                                              3.5
+                                            ],
+                                            "op": "<"
+                                          },
+                                          -42.7,
+                                          -93.5
+                                        ],
+                                        "op": "ifelse"
+                                      }
+                                    ],
+                                    "op": "ifelse"
+                                  }
+                                ],
+                                "op": "ifelse"
+                              }
+                            ],
+                            "op": "+"
+                          },
+                          100
+                        ],
+                        "op": "/"
+                      }
+                    ],
+                    "op": "min"
+                  }
+                ],
+                "op": "max"
+              }
+            ],
+            "op": "ifelse"
+          },
+          {
+            "args": [
+              {
+                "args": [
+                  0.5,
+                  "is_greenup"
+                ],
+                "op": "<"
+              },
+              {
+                "args": [
+                  0.3,
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          1,
+                          {
+                            "args": [
+                              "GRNDAY",
+                              {
+                                "args": [
+                                  7,
+                                  "CLIMAT"
+                                ],
+                                "op": "*"
+                              }
+                            ],
+                            "op": "/"
+                          }
+                        ],
+                        "op": "min"
+                      },
+                      {
+                        "args": [
+                          -0.3,
+                          {
+                            "args": [
+                              0.3,
+                              {
+                                "args": [
+                                  {
+                                    "args": [
+                                      {
+                                        "args": [
+                                          {
+                                            "args": [
+                                              "CLIMAT",
+                                              1.5
+                                            ],
+                                            "op": "<"
+                                          },
+                                          -70,
+                                          {
+                                            "args": [
+                                              {
+                                                "args": [
+                                                  "CLIMAT",
+                                                  2.5
+                                                ],
+                                                "op": "<"
+                                              },
+                                              -100,
+                                              {
+                                                "args": [
+                                                  {
+                                                    "args": [
+                                                      "CLIMAT",
+                                                      3.5
+                                                    ],
+                                                    "op": "<"
+                                                  },
+                                                  -137.5,
+                                                  -185
+                                                ],
+                                                "op": "ifelse"
+                                              }
+                                            ],
+                                            "op": "ifelse"
+                                          }
+                                        ],
+                                        "op": "ifelse"
+                                      },
+                                      {
+                                        "args": [
+                                          100,
+                                          "X1000",
+                                          {
+                                            "args": [
+                                              {
+                                                "args": [
+                                                  "CLIMAT",
+                                                  1.5
+                                                ],
+                                                "op": "<"
+                                              },
+                                              12.8,
+                                              {
+                                                "args": [
+                                                  {
+                                                    "args": [
+                                                      "CLIMAT",
+                                                      2.5
+                                                    ],
+                                                    "op": "<"
+                                                  },
+                                                  14,
+                                                  {
+                                                    "args": [
+                                                      {
+                                                        "args": [
+                                                          "CLIMAT",
+                                                          3.5
+                                                        ],
+                                                        "op": "<"
+                                                      },
+                                                      15.5,
+                                                      17.4
+                                                    ],
+                                                    "op": "ifelse"
+                                                  }
+                                                ],
+                                                "op": "ifelse"
+                                              }
+                                            ],
+                                            "op": "ifelse"
+                                          }
+                                        ],
+                                        "op": "*"
+                                      }
+                                    ],
+                                    "op": "+"
+                                  },
+                                  100
+                                ],
+                                "op": "/"
+                              }
+                            ],
+                            "op": "max"
+                          }
+                        ],
+                        "op": "+"
+                      }
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "+"
+              },
+              {
+                "args": [
+                  {
+                    "args": [
+                      1.2,
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              {
+                                "args": [
+                                  {
+                                    "args": [
+                                      "CLIMAT",
+                                      1.5
+                                    ],
+                                    "op": "<"
+                                  },
+                                  -70,
+                                  {
+                                    "args": [
+                                      {
+                                        "args": [
+                                          "CLIMAT",
+                                          2.5
+                                        ],
+                                        "op": "<"
+                                      },
+                                      -100,
+                                      {
+                                        "args": [
+                                          {
+                                            "args": [
+                                              "CLIMAT",
+                                              3.5
+                                            ],
+                                            "op": "<"
+                                          },
+                                          -137.5,
+                                          -185
+                                        ],
+                                        "op": "ifelse"
+                                      }
+                                    ],
+                                    "op": "ifelse"
+                                  }
+                                ],
+                                "op": "ifelse"
+                              },
+                              {
+                                "args": [
+                                  100,
+                                  "X1000",
+                                  {
+                                    "args": [
+                                      {
+                                        "args": [
+                                          "CLIMAT",
+                                          1.5
+                                        ],
+                                        "op": "<"
+                                      },
+                                      12.8,
+                                      {
+                                        "args": [
+                                          {
+                                            "args": [
+                                              "CLIMAT",
+                                              2.5
+                                            ],
+                                            "op": "<"
+                                          },
+                                          14,
+                                          {
+                                            "args": [
+                                              {
+                                                "args": [
+                                                  "CLIMAT",
+                                                  3.5
+                                                ],
+                                                "op": "<"
+                                              },
+                                              15.5,
+                                              17.4
+                                            ],
+                                            "op": "ifelse"
+                                          }
+                                        ],
+                                        "op": "ifelse"
+                                      }
+                                    ],
+                                    "op": "ifelse"
+                                  }
+                                ],
+                                "op": "*"
+                              }
+                            ],
+                            "op": "+"
+                          },
+                          100
+                        ],
+                        "op": "/"
+                      }
+                    ],
+                    "op": "<"
+                  },
+                  {
+                    "args": [
+                      2.5,
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              {
+                                "args": [
+                                  {
+                                    "args": [
+                                      "CLIMAT",
+                                      1.5
+                                    ],
+                                    "op": "<"
+                                  },
+                                  -70,
+                                  {
+                                    "args": [
+                                      {
+                                        "args": [
+                                          "CLIMAT",
+                                          2.5
+                                        ],
+                                        "op": "<"
+                                      },
+                                      -100,
+                                      {
+                                        "args": [
+                                          {
+                                            "args": [
+                                              "CLIMAT",
+                                              3.5
+                                            ],
+                                            "op": "<"
+                                          },
+                                          -137.5,
+                                          -185
+                                        ],
+                                        "op": "ifelse"
+                                      }
+                                    ],
+                                    "op": "ifelse"
+                                  }
+                                ],
+                                "op": "ifelse"
+                              },
+                              {
+                                "args": [
+                                  100,
+                                  "X1000",
+                                  {
+                                    "args": [
+                                      {
+                                        "args": [
+                                          "CLIMAT",
+                                          1.5
+                                        ],
+                                        "op": "<"
+                                      },
+                                      12.8,
+                                      {
+                                        "args": [
+                                          {
+                                            "args": [
+                                              "CLIMAT",
+                                              2.5
+                                            ],
+                                            "op": "<"
+                                          },
+                                          14,
+                                          {
+                                            "args": [
+                                              {
+                                                "args": [
+                                                  "CLIMAT",
+                                                  3.5
+                                                ],
+                                                "op": "<"
+                                              },
+                                              15.5,
+                                              17.4
+                                            ],
+                                            "op": "ifelse"
+                                          }
+                                        ],
+                                        "op": "ifelse"
+                                      }
+                                    ],
+                                    "op": "ifelse"
+                                  }
+                                ],
+                                "op": "*"
+                              }
+                            ],
+                            "op": "+"
+                          },
+                          100
+                        ],
+                        "op": "/"
+                      }
+                    ],
+                    "op": "min"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          0.5,
+                          "is_annual"
+                        ],
+                        "op": "<"
+                      },
+                      {
+                        "args": [
+                          0.3,
+                          {
+                            "args": [
+                              1.5,
+                              {
+                                "args": [
+                                  {
+                                    "args": [
+                                      {
+                                        "args": [
+                                          100,
+                                          "X1000",
+                                          {
+                                            "args": [
+                                              {
+                                                "args": [
+                                                  "CLIMAT",
+                                                  1.5
+                                                ],
+                                                "op": "<"
+                                              },
+                                              18.4,
+                                              {
+                                                "args": [
+                                                  {
+                                                    "args": [
+                                                      "CLIMAT",
+                                                      2.5
+                                                    ],
+                                                    "op": "<"
+                                                  },
+                                                  19.6,
+                                                  {
+                                                    "args": [
+                                                      {
+                                                        "args": [
+                                                          "CLIMAT",
+                                                          3.5
+                                                        ],
+                                                        "op": "<"
+                                                      },
+                                                      22,
+                                                      24.3
+                                                    ],
+                                                    "op": "ifelse"
+                                                  }
+                                                ],
+                                                "op": "ifelse"
+                                              }
+                                            ],
+                                            "op": "ifelse"
+                                          }
+                                        ],
+                                        "op": "*"
+                                      },
+                                      {
+                                        "args": [
+                                          {
+                                            "args": [
+                                              "CLIMAT",
+                                              1.5
+                                            ],
+                                            "op": "<"
+                                          },
+                                          -150.5,
+                                          {
+                                            "args": [
+                                              {
+                                                "args": [
+                                                  "CLIMAT",
+                                                  2.5
+                                                ],
+                                                "op": "<"
+                                              },
+                                              -187.7,
+                                              {
+                                                "args": [
+                                                  {
+                                                    "args": [
+                                                      "CLIMAT",
+                                                      3.5
+                                                    ],
+                                                    "op": "<"
+                                                  },
+                                                  -245.2,
+                                                  -305.2
+                                                ],
+                                                "op": "ifelse"
+                                              }
+                                            ],
+                                            "op": "ifelse"
+                                          }
+                                        ],
+                                        "op": "ifelse"
+                                      }
+                                    ],
+                                    "op": "+"
+                                  },
+                                  100
+                                ],
+                                "op": "/"
+                              }
+                            ],
+                            "op": "min"
+                          }
+                        ],
+                        "op": "max"
+                      },
+                      {
+                        "args": [
+                          0.3,
+                          {
+                            "args": [
+                              1.5,
+                              {
+                                "args": [
+                                  {
+                                    "args": [
+                                      {
+                                        "args": [
+                                          100,
+                                          "X1000",
+                                          {
+                                            "args": [
+                                              {
+                                                "args": [
+                                                  "CLIMAT",
+                                                  1.5
+                                                ],
+                                                "op": "<"
+                                              },
+                                              7.4,
+                                              {
+                                                "args": [
+                                                  {
+                                                    "args": [
+                                                      "CLIMAT",
+                                                      2.5
+                                                    ],
+                                                    "op": "<"
+                                                  },
+                                                  8.3,
+                                                  {
+                                                    "args": [
+                                                      {
+                                                        "args": [
+                                                          "CLIMAT",
+                                                          3.5
+                                                        ],
+                                                        "op": "<"
+                                                      },
+                                                      9.8,
+                                                      12.2
+                                                    ],
+                                                    "op": "ifelse"
+                                                  }
+                                                ],
+                                                "op": "ifelse"
+                                              }
+                                            ],
+                                            "op": "ifelse"
+                                          }
+                                        ],
+                                        "op": "*"
+                                      },
+                                      {
+                                        "args": [
+                                          {
+                                            "args": [
+                                              "CLIMAT",
+                                              1.5
+                                            ],
+                                            "op": "<"
+                                          },
+                                          11.2,
+                                          {
+                                            "args": [
+                                              {
+                                                "args": [
+                                                  "CLIMAT",
+                                                  2.5
+                                                ],
+                                                "op": "<"
+                                              },
+                                              -10.3,
+                                              {
+                                                "args": [
+                                                  {
+                                                    "args": [
+                                                      "CLIMAT",
+                                                      3.5
+                                                    ],
+                                                    "op": "<"
+                                                  },
+                                                  -42.7,
+                                                  -93.5
+                                                ],
+                                                "op": "ifelse"
+                                              }
+                                            ],
+                                            "op": "ifelse"
+                                          }
+                                        ],
+                                        "op": "ifelse"
+                                      }
+                                    ],
+                                    "op": "+"
+                                  },
+                                  100
+                                ],
+                                "op": "/"
+                              }
+                            ],
+                            "op": "min"
+                          }
+                        ],
+                        "op": "max"
+                      }
+                    ],
+                    "op": "ifelse"
+                  }
+                ],
+                "op": "ifelse"
+              }
+            ],
+            "op": "ifelse"
+          }
+        ],
+        "op": "ifelse"
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "perennial_transition_low_x1000",
+      "description": "Perennial transition path (MCHRBP ≤ 1.2): is_cured=0, is_greenup=0, is_annual=0, CLIMAT=2 (PERTA=-10.3, PERTB=8.3 per spec). X1000=0.03 ⇒ MCHRBP_pct = (-10.3 + 8.3*3)/100 = 0.146 < 1.2, so the transition perennial formula applies: max(0.3, min(1.5, 0.146)) = 0.3.",
+      "parameter_overrides": {
+        "X1000": 0.03,
+        "MC1": 0.1,
+        "CLIMAT": 2.0,
+        "is_annual": 0.0,
+        "GRNDAY": 0.0,
+        "is_greenup": 0.0,
+        "is_cured": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MCHERB",
+          "time": 0.0,
+          "expected": 0.3
+        }
+      ]
+    },
+    {
+      "id": "greenup_stage",
+      "description": "Greenup stage: is_cured=0, is_greenup=1, CLIMAT=2, X1000=0.02, GRNDAY=14. GREN = min(1, 14/(7*2)) = 1. MCHRBP = (-100 + 14*2)/100 = 0.28. MCHERB = 0.3 + (max(0.3, 0.28) - 0.3) * 1 = 0.3.",
+      "parameter_overrides": {
+        "X1000": 0.02,
+        "MC1": 0.1,
+        "CLIMAT": 2.0,
+        "is_annual": 0.0,
+        "GRNDAY": 14.0,
+        "is_greenup": 1.0,
+        "is_cured": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MCHERB",
+          "time": 0.0,
+          "expected": 0.3
+        }
+      ]
+    },
+    {
+      "id": "cured_annual_uses_mc1",
+      "description": "Cured annual: is_cured=1 ⇒ MCHERB = MC1 directly.",
+      "parameter_overrides": {
+        "X1000": 0.02,
+        "MC1": 0.15,
+        "CLIMAT": 2.0,
+        "is_annual": 1.0,
+        "GRNDAY": 0.0,
+        "is_greenup": 0.0,
+        "is_cured": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MCHERB",
+          "time": 0.0,
+          "expected": 0.15
+        }
+      ]
+    },
+    {
+      "id": "cured_perennial_transition",
+      "description": "Cured perennial: is_cured=1, is_annual=0 ⇒ max(0.3, min(1.5, (PERTA + PERTB*X1000_pct)/100)). CLIMAT=2 ⇒ PERTA=-10.3, PERTB=8.3. X1000=0.02 ⇒ X1000_pct=2. MCHERB = max(0.3, min(1.5, (-10.3 + 8.3*2)/100)) = max(0.3, min(1.5, 0.063)) = 0.3.",
+      "parameter_overrides": {
+        "X1000": 0.02,
+        "MC1": 0.1,
+        "CLIMAT": 2.0,
+        "is_annual": 0.0,
+        "GRNDAY": 0.0,
+        "is_greenup": 0.0,
+        "is_cured": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MCHERB",
+          "time": 0.0,
+          "expected": 0.3
+        }
+      ]
+    },
+    {
+      "id": "high_climate_class",
+      "description": "Climate class 4: CLIMAT=4 ⇒ HERBGA=-185, HERBGB=17.4, ANNTA=-305.2, ANNTB=24.3, PERTA=-93.5, PERTB=12.2. X1000=0.04 ⇒ X1000_pct=4. MCHRBP = (-185 + 17.4*4)/100 = -1.154. Transition perennial: max(0.3, min(1.5, (-93.5 + 12.2*4)/100)) = max(0.3, min(1.5, -0.447)) = 0.3.",
+      "parameter_overrides": {
+        "X1000": 0.04,
+        "MC1": 0.1,
+        "CLIMAT": 4.0,
+        "is_annual": 0.0,
+        "GRNDAY": 0.0,
+        "is_greenup": 0.0,
+        "is_cured": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MCHERB",
+          "time": 0.0,
+          "expected": 0.3
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

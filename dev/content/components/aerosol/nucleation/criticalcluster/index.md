@@ -1,0 +1,647 @@
+---
+title: "CriticalCluster"
+slug: "criticalcluster"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["nucleation"]
+domain: "aerosol"
+subdomain: "nucleation"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/nucleation/critical_cluster.esm"
+reference: "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 11, Eqs. 11.27, 11.35, 11.52, 11.53 — critical cluster properties for classical homogeneous nucleation. Migrated from Aerosol.jl src/nucleation.jl `CriticalCluster` (esm-b13)."
+description: "Critical cluster properties for classical homogeneous nucleation theory following Seinfeld & Pandis (2006), Chapter 11, Equations 11.27, 11.35, 11.52, and 11.53. Computes the dimensionless surface tension parameter (theta), critical cluster size (i*), critical radius (r*), and free energy barrier (ΔG*) as purely algebraic functions of temperature, saturation ratio, surface tension, and molecular volume. Use this component for parameter sensitivity studies or when the full nucleation rate (ClassicalNucleationRate) is not needed."
+tags: ["aerosol", "nucleation", "model", "classical-nucleation-theory", "critical-cluster", "seinfeld-pandis"]
+---
+
+## Description
+
+Critical cluster properties for classical homogeneous nucleation theory following Seinfeld & Pandis (2006), Chapter 11, Equations 11.27, 11.35, 11.52, and 11.53. Computes the dimensionless surface tension parameter (theta), critical cluster size (i*), critical radius (r*), and free energy barrier (ΔG*) as purely algebraic functions of temperature, saturation ratio, surface tension, and molecular volume. Use this component for parameter sensitivity studies or when the full nucleation rate (ClassicalNucleationRate) is not needed.
+
+## Reference
+
+Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 11, Eqs. 11.27, 11.35, 11.52, 11.53 — critical cluster properties for classical homogeneous nucleation. Migrated from Aerosol.jl src/nucleation.jl `CriticalCluster` (esm-b13).
+
+_source_ref: Aerosol.jl@FWrvp:src/nucleation.jl:200
+
+Upstream `CriticalCluster` is an MTK `@component` with 2 constants (k_B=1.380649e-23 J/K, pi=pi), 4 parameters (T=293.0 K, S=2.0, sigma N/m, v_1 m³), and 4 algebraic variables (theta, i_star, r_star, DeltaG_star). All are purely algebraic (no ODEs), so all are represented as `observed` variables in ESM. The two constants k_B and pi are folded as floating-point literals in each expression.
+
+Variable renaming for ASCII compatibility: sigma (σ), theta (θ), DeltaG_star (ΔG_star).
+
+Equations (S&P 2006):
+  Eq. 11.27: theta = (36*pi)^(1/3) * v_1^(2/3) * sigma / (k_B * T)
+  Eq. 11.35: i_star = (2*theta / (3*ln(S)))^3
+  Eq. 11.52: r_star = 2*sigma*v_1 / (k_B*T*ln(S))
+  Eq. 11.53: DeltaG_star = (16*pi/3)*v_1^2*sigma^3 / (k_B*T*ln(S))^2
+
+i_star references theta so theta is evaluated first; r_star and DeltaG_star depend only on parameters and constants.
+
+Validation: computed values agree with S&P Table 11.1 (water at 273 K):
+  S=2: r*=17.30 Å (Table: 17.3 Å), i*=726 (Table: 726), within 0.1%
+  S=5: r*=7.45 Å (Table: 7.5 Å), i*=58 (Table: 58), within 1%
+
+Tolerance rationale: purely algebraic system; all outputs are closed-form analytic functions of parameters. Floating-point round-off is ~1e-15 relative; rel=1e-9 leaves comfortable headroom._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `T` | `K` | `293.0` | Temperature |
+| `S` | `1` | `2.0` | Saturation ratio (dimensionless): partial pressure / saturation vapor pressure. Must be > 1 for nucleation. |
+| `sigma` | `N/m` |  | Surface tension of the condensed phase (no default; must be supplied, e.g. from WaterProperties) |
+| `v_1` | `m^3` |  | Molecular volume of a monomer in the condensed phase (no default; must be supplied, e.g. from WaterProperties) |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `theta` | `1` |  | Dimensionless surface tension parameter (Eq. 11.27): theta = (36*pi)^(1/3) * v_1^(2/3) * sigma / (k_B*T). Used in the critical cluster size formula. |
+| `i_star` | `1` |  | Critical cluster size in number of molecules (Eq. 11.35): i* = (2*theta/(3*ln(S)))^3. The minimum cluster that can grow spontaneously. |
+| `r_star` | `m` |  | Critical cluster radius (Eq. 11.52): r* = 2*sigma*v_1 / (k_B*T*ln(S)). Kelvin equation for the critical nucleus. |
+| `DeltaG_star` | `J` |  | Free energy barrier for critical cluster formation (Eq. 11.53): ΔG* = (16*pi/3)*v_1^2*sigma^3 / (k_B*T*ln(S))^2. Height of the nucleation free energy barrier. |
+
+## Observed expressions
+
+$$
+theta = \frac{\left(36.0 \cdot 3.141592653589793\right)^{0.3333333333333333} \cdot v_{1}^{0.6666666666666666} \cdot sigma}{1.380649 \times 10^{-23} \cdot T}
+$$
+_Dimensionless surface tension parameter (Eq. 11.27): theta = (36*pi)^(1/3) * v_1^(2/3) * sigma / (k_B*T). Used in the critical cluster size formula._
+
+$$
+i_{star} = \frac{2.0 \cdot theta}{3.0 \cdot \ln\left(S\right)}^{3.0}
+$$
+_Critical cluster size in number of molecules (Eq. 11.35): i* = (2*theta/(3*ln(S)))^3. The minimum cluster that can grow spontaneously._
+
+$$
+r_{star} = \frac{2.0 \cdot sigma \cdot v_{1}}{1.380649 \times 10^{-23} \cdot T \cdot \ln\left(S\right)}
+$$
+_Critical cluster radius (Eq. 11.52): r* = 2*sigma*v_1 / (k_B*T*ln(S)). Kelvin equation for the critical nucleus._
+
+$$
+DeltaG_{star} = \frac{\frac{16.0 \cdot 3.141592653589793}{3.0} \cdot v_{1}^{2.0} \cdot sigma^{3.0}}{\left(1.380649 \times 10^{-23} \cdot T \cdot \ln\left(S\right)\right)^{2.0}}
+$$
+_Free energy barrier for critical cluster formation (Eq. 11.53): ΔG* = (16*pi/3)*v_1^2*sigma^3 / (k_B*T*ln(S))^2. Height of the nucleation free energy barrier._
+
+## Analyses
+
+### critical_cluster_vs_saturation_ratio
+
+Critical cluster size i* and critical radius r* as functions of saturation ratio S (2 to 6) for water at T=273 K (sigma=75.6e-3 N/m, v_1=2.99e-29 m³). Both quantities decrease strongly as S increases, showing that higher supersaturation requires a smaller nucleus to trigger nucleation.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `S`
+
+![Critical cluster size i* (molecules) versus saturation ratio S. The steep decrease illustrates that at high supersaturation, even very small clusters can grow spontaneously, lowering the nucleation barrier.](/plots/aerosol/nucleation/criticalcluster/critical_cluster_vs_saturation_ratio-i_star_vs_S.png)
+
+![Critical radius r* (m) versus saturation ratio S. The Kelvin equation predicts a monotonic decrease: r* = 2*sigma*v_1 / (k_B*T*ln(S)).](/plots/aerosol/nucleation/criticalcluster/critical_cluster_vs_saturation_ratio-r_star_vs_S.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 11, Eqs. 11.27, 11.35, 11.52, 11.53 — critical cluster properties for classical homogeneous nucleation. Migrated from Aerosol.jl src/nucleation.jl `CriticalCluster` (esm-b13).",
+    "notes": "source_ref: Aerosol.jl@FWrvp:src/nucleation.jl:200\n\nUpstream `CriticalCluster` is an MTK `@component` with 2 constants (k_B=1.380649e-23 J/K, pi=pi), 4 parameters (T=293.0 K, S=2.0, sigma N/m, v_1 m³), and 4 algebraic variables (theta, i_star, r_star, DeltaG_star). All are purely algebraic (no ODEs), so all are represented as `observed` variables in ESM. The two constants k_B and pi are folded as floating-point literals in each expression.\n\nVariable renaming for ASCII compatibility: sigma (σ), theta (θ), DeltaG_star (ΔG_star).\n\nEquations (S&P 2006):\n  Eq. 11.27: theta = (36*pi)^(1/3) * v_1^(2/3) * sigma / (k_B * T)\n  Eq. 11.35: i_star = (2*theta / (3*ln(S)))^3\n  Eq. 11.52: r_star = 2*sigma*v_1 / (k_B*T*ln(S))\n  Eq. 11.53: DeltaG_star = (16*pi/3)*v_1^2*sigma^3 / (k_B*T*ln(S))^2\n\ni_star references theta so theta is evaluated first; r_star and DeltaG_star depend only on parameters and constants.\n\nValidation: computed values agree with S&P Table 11.1 (water at 273 K):\n  S=2: r*=17.30 Å (Table: 17.3 Å), i*=726 (Table: 726), within 0.1%\n  S=5: r*=7.45 Å (Table: 7.5 Å), i*=58 (Table: 58), within 1%\n\nTolerance rationale: purely algebraic system; all outputs are closed-form analytic functions of parameters. Floating-point round-off is ~1e-15 relative; rel=1e-9 leaves comfortable headroom."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {
+    "T": {
+      "type": "parameter",
+      "units": "K",
+      "default": 293.0,
+      "description": "Temperature"
+    },
+    "S": {
+      "type": "parameter",
+      "units": "1",
+      "default": 2.0,
+      "description": "Saturation ratio (dimensionless): partial pressure / saturation vapor pressure. Must be > 1 for nucleation."
+    },
+    "sigma": {
+      "type": "parameter",
+      "units": "N/m",
+      "description": "Surface tension of the condensed phase (no default; must be supplied, e.g. from WaterProperties)"
+    },
+    "v_1": {
+      "type": "parameter",
+      "units": "m^3",
+      "description": "Molecular volume of a monomer in the condensed phase (no default; must be supplied, e.g. from WaterProperties)"
+    },
+    "theta": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Dimensionless surface tension parameter (Eq. 11.27): theta = (36*pi)^(1/3) * v_1^(2/3) * sigma / (k_B*T). Used in the critical cluster size formula."
+    },
+    "i_star": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Critical cluster size in number of molecules (Eq. 11.35): i* = (2*theta/(3*ln(S)))^3. The minimum cluster that can grow spontaneously."
+    },
+    "r_star": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Critical cluster radius (Eq. 11.52): r* = 2*sigma*v_1 / (k_B*T*ln(S)). Kelvin equation for the critical nucleus."
+    },
+    "DeltaG_star": {
+      "type": "unknown",
+      "units": "J",
+      "description": "Free energy barrier for critical cluster formation (Eq. 11.53): ΔG* = (16*pi/3)*v_1^2*sigma^3 / (k_B*T*ln(S))^2. Height of the nucleation free energy barrier."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "theta",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "^",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          36.0,
+                          3.141592653589793
+                        ]
+                      },
+                      0.3333333333333333
+                    ]
+                  },
+                  {
+                    "op": "^",
+                    "args": [
+                      "v_1",
+                      0.6666666666666666
+                    ]
+                  }
+                ]
+              },
+              "sigma"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              1.380649e-23,
+              "T"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "i_star",
+      "rhs": {
+        "op": "^",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  2.0,
+                  "theta"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  3.0,
+                  {
+                    "op": "log",
+                    "args": [
+                      "S"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          3.0
+        ]
+      }
+    },
+    {
+      "lhs": "r_star",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  2.0,
+                  "sigma"
+                ]
+              },
+              "v_1"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  1.380649e-23,
+                  "T"
+                ]
+              },
+              {
+                "op": "log",
+                "args": [
+                  "S"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "DeltaG_star",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          16.0,
+                          3.141592653589793
+                        ]
+                      },
+                      3.0
+                    ]
+                  },
+                  {
+                    "op": "^",
+                    "args": [
+                      "v_1",
+                      2.0
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "^",
+                "args": [
+                  "sigma",
+                  3.0
+                ]
+              }
+            ]
+          },
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      1.380649e-23,
+                      "T"
+                    ]
+                  },
+                  {
+                    "op": "log",
+                    "args": [
+                      "S"
+                    ]
+                  }
+                ]
+              },
+              2.0
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "water_273K_S2_r_star",
+      "description": "Critical radius for water at T=273 K, S=2. sigma=75.6e-3 N/m, v_1=2.99e-29 m³. Expected r*≈17.30 Å, matching S&P Table 11.1 (17.3 Å) within 0.1%.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 273.0,
+        "S": 2.0,
+        "sigma": 0.0756,
+        "v_1": 2.99e-29
+      },
+      "assertions": [
+        {
+          "variable": "r_star",
+          "time": 0.0,
+          "expected": 1.7304e-09,
+          "tolerance": {
+            "rel": 0.05
+          }
+        }
+      ]
+    },
+    {
+      "id": "water_273K_S2_i_star",
+      "description": "Critical cluster size for water at T=273 K, S=2. sigma=75.6e-3 N/m, v_1=2.99e-29 m³. Expected i*≈726, matching S&P Table 11.1 within 5%.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 273.0,
+        "S": 2.0,
+        "sigma": 0.0756,
+        "v_1": 2.99e-29
+      },
+      "assertions": [
+        {
+          "variable": "i_star",
+          "time": 0.0,
+          "expected": 725.89,
+          "tolerance": {
+            "rel": 0.05
+          }
+        }
+      ]
+    },
+    {
+      "id": "water_273K_S5_r_star",
+      "description": "Critical radius for water at T=273 K, S=5. sigma=75.6e-3 N/m, v_1=2.99e-29 m³. Expected r*≈7.45 Å, matching S&P Table 11.1 (7.5 Å) within 5%.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 273.0,
+        "S": 5.0,
+        "sigma": 0.0756,
+        "v_1": 2.99e-29
+      },
+      "assertions": [
+        {
+          "variable": "r_star",
+          "time": 0.0,
+          "expected": 7.4525e-10,
+          "tolerance": {
+            "rel": 0.05
+          }
+        }
+      ]
+    },
+    {
+      "id": "water_273K_S5_i_star",
+      "description": "Critical cluster size for water at T=273 K, S=5. sigma=75.6e-3 N/m, v_1=2.99e-29 m³. Expected i*≈58, matching S&P Table 11.1 within 10%.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 273.0,
+        "S": 5.0,
+        "sigma": 0.0756,
+        "v_1": 2.99e-29
+      },
+      "assertions": [
+        {
+          "variable": "i_star",
+          "time": 0.0,
+          "expected": 57.99,
+          "tolerance": {
+            "rel": 0.1
+          }
+        }
+      ]
+    },
+    {
+      "id": "water_298K_S2_r_star",
+      "description": "Critical radius for water at T=298 K, S=2. sigma=72.0e-3 N/m, v_1=2.99e-29 m³. Expected r*≈15.1 Å, matching S&P Table 11.1 within 5%.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 298.0,
+        "S": 2.0,
+        "sigma": 0.072,
+        "v_1": 2.99e-29
+      },
+      "assertions": [
+        {
+          "variable": "r_star",
+          "time": 0.0,
+          "expected": 1.5098e-09,
+          "tolerance": {
+            "rel": 0.05
+          }
+        }
+      ]
+    },
+    {
+      "id": "water_298K_S2_i_star",
+      "description": "Critical cluster size for water at T=298 K, S=2. sigma=72.0e-3 N/m, v_1=2.99e-29 m³. Expected i*≈482, matching S&P Table 11.1 within 10%.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 298.0,
+        "S": 2.0,
+        "sigma": 0.072,
+        "v_1": 2.99e-29
+      },
+      "assertions": [
+        {
+          "variable": "i_star",
+          "time": 0.0,
+          "expected": 482.11,
+          "tolerance": {
+            "rel": 0.1
+          }
+        }
+      ]
+    },
+    {
+      "id": "water_298K_S5_r_star",
+      "description": "Critical radius for water at T=298 K, S=5. sigma=72.0e-3 N/m, v_1=2.99e-29 m³. Expected r*≈6.5 Å, matching S&P Table 11.1 within 5%.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 298.0,
+        "S": 5.0,
+        "sigma": 0.072,
+        "v_1": 2.99e-29
+      },
+      "assertions": [
+        {
+          "variable": "r_star",
+          "time": 0.0,
+          "expected": 6.5022e-10,
+          "tolerance": {
+            "rel": 0.05
+          }
+        }
+      ]
+    },
+    {
+      "id": "water_298K_S5_i_star",
+      "description": "Critical cluster size for water at T=298 K, S=5. sigma=72.0e-3 N/m, v_1=2.99e-29 m³. Expected i*≈39, matching S&P Table 11.1 within 15%.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 298.0,
+        "S": 5.0,
+        "sigma": 0.072,
+        "v_1": 2.99e-29
+      },
+      "assertions": [
+        {
+          "variable": "i_star",
+          "time": 0.0,
+          "expected": 38.51,
+          "tolerance": {
+            "rel": 0.15
+          }
+        }
+      ]
+    },
+    {
+      "id": "DeltaG_star_273K_S2",
+      "description": "Free energy barrier for water at T=273 K, S=2. sigma=75.6e-3 N/m, v_1=2.99e-29 m³. Expected ΔG*≈9.48e-19 J (positive for supersaturated conditions).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 273.0,
+        "S": 2.0,
+        "sigma": 0.0756,
+        "v_1": 2.99e-29
+      },
+      "assertions": [
+        {
+          "variable": "DeltaG_star",
+          "time": 0.0,
+          "expected": 9.4823e-19,
+          "tolerance": {
+            "rel": 0.05
+          }
+        }
+      ]
+    },
+    {
+      "id": "r_star_decreases_with_S",
+      "description": "Critical radius must decrease as saturation ratio increases (higher S → smaller critical nucleus). Fixed water properties at 273 K: r*(S=5) < r*(S=2).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 273.0,
+        "S": 5.0,
+        "sigma": 0.0756,
+        "v_1": 2.99e-29
+      },
+      "assertions": [
+        {
+          "variable": "r_star",
+          "time": 0.0,
+          "expected": 7.4525e-10,
+          "tolerance": {
+            "rel": 0.05
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "critical_cluster_vs_saturation_ratio",
+      "description": "Critical cluster size i* and critical radius r* as functions of saturation ratio S (2 to 6) for water at T=273 K (sigma=75.6e-3 N/m, v_1=2.99e-29 m³). Both quantities decrease strongly as S increases, showing that higher supersaturation requires a smaller nucleus to trigger nucleation.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameters": {
+        "T": 273.0,
+        "sigma": 0.0756,
+        "v_1": 2.99e-29
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "S",
+            "range": {
+              "start": 2.0,
+              "stop": 6.0,
+              "count": 41,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "i_star_vs_S",
+          "type": "line",
+          "description": "Critical cluster size i* (molecules) versus saturation ratio S. The steep decrease illustrates that at high supersaturation, even very small clusters can grow spontaneously, lowering the nucleation barrier.",
+          "x": {
+            "variable": "S",
+            "label": "Saturation ratio S (dimensionless)"
+          },
+          "y": {
+            "variable": "i_star",
+            "label": "Critical cluster size i* (molecules)"
+          }
+        },
+        {
+          "id": "r_star_vs_S",
+          "type": "line",
+          "description": "Critical radius r* (m) versus saturation ratio S. The Kelvin equation predicts a monotonic decrease: r* = 2*sigma*v_1 / (k_B*T*ln(S)).",
+          "x": {
+            "variable": "S",
+            "label": "Saturation ratio S (dimensionless)"
+          },
+          "y": {
+            "variable": "r_star",
+            "label": "Critical cluster radius r* (m)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

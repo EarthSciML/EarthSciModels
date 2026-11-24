@@ -1,0 +1,10206 @@
+---
+title: "GWDOMomentumTendency"
+slug: "gwdomomentumtendency"
+domains: ["atmospheric_dynamics"]
+component_types: ["model"]
+subdomains: ["gwdo"]
+domain: "atmospheric_dynamics"
+subdomain: "gwdo"
+component_type: "model"
+esm_version: "1.2.0"
+esm_path: "components/atmospheric_dynamics/gwdo/momentum_tendency.esm"
+reference: "Hong, S.-Y., and co-authors (2025). Revision of the orographic gravity wave drag parameterization in the KIAPS Integrated Model. Wea. Forecasting."
+description: "What GWDO returns to the model: the wind tendencies and the surface stress. Lines 594-662 of `phys/physics_mmm/bl_gwdo.F90` (WRF 4.8, NCAR/MMM-physics CCPP kernel `bl_gwdo_run`)."
+tags: ["atmospheric_dynamics", "gwdo", "model", "wrf", "gravity-wave-drag", "momentum-tendency", "column"]
+---
+
+## Description
+
+What GWDO returns to the model: the wind tendencies and the surface stress. Lines 594-662 of `phys/physics_mmm/bl_gwdo.F90` (WRF 4.8, NCAR/MMM-physics CCPP kernel `bl_gwdo_run`).
+
+The drag on a layer is the DIVERGENCE OF THE STRESS the wave and the blocked flow carry across it. In pressure coordinates that is -g dtau/dp, and the scheme writes it as (tau[k+1] - tau[k]) g / del[k] -- a conservative finite-volume difference of an interface flux. It is written here as `D(taup, wrt: lev)` on the column-mass coordinate ze = (p_i[1] - p_i)/g that the column stage already built, lowered by the EarthSciDiscretizations `face_flux_D_lev_supplied_faces` rule; the layer measure dz is then del/g and the rule reproduces the Fortran difference exactly. The column-integrated stress is the same operator's adjoint, the whole-column integral of the tendency against that measure, lowered by `integral_lev_whole`. Nothing here is a hand-written stencil.
+
+TWO LIMITERS, and they are a legitimate part of the tendency rather than a time-stepping device -- but they are parameterised BY the time step. The first prevents the drag from reversing the wind within one step: it scales the tendency down until |dtau| dt does not exceed the projected wind speed. The second reduces the drag in the mesosphere by the ratio of the local density to 0.01 kg/m^3, above 7.5 hPa. Both therefore make `deltim` a PARAMETER OF THE TENDENCY, not the integrator's step, and a document that mounts this component must prescribe it rather than inherit it -- the same situation as WSM6's operator-split sub-step. On the reference set neither limiter ever binds: over all 5250 dumped columns and 262500 cells the damping factor is exactly 1, so the tendency there is the unlimited stress divergence. The limiter branches are therefore tested on PERTURBED inputs replayed through the unmodified real64 Fortran (gwdo_real/perturbed_tests.py): `s1440_j81_i39_col4_dt1500_wind_reversal_limiter` (deltim = 1500 s; the wind-reversal limiter binds at three of eleven active levels) and `s1440_j91_i1_col2_lifted_column_mesosphere_limiter` (every pressure x 0.005 and deltim = 1800 s; the mesosphere limiter binds at levels 42-49, the top-layer copy carries it into level 50, and the wind-reversal limiter binds at level 1). That is stated in the test descriptions rather than hidden.
+
+The tendency is an OBSERVED and the wind is not owned here. WRF's own interface is in-out -- `rublten` arrives carrying the PBL tendency and leaves carrying PBL plus GWDO -- but GWDO's own contribution is a rate, `dtaux3d`, that the scheme computes and returns separately, so this component exposes exactly that and adds nothing to it. A coupled document adds it to whatever else drives the wind.
+
+The final rotation takes the tendencies from earth-relative back onto the model grid, undoing the rotation the column stage applied to the wind on the way in.
+
+## Reference
+
+- Hong, S.-Y., and co-authors (2025). Revision of the orographic gravity wave drag parameterization in the KIAPS Integrated Model. Wea. Forecasting.
+- Kim, Y.-J., and A. Arakawa (1995). Improvement of orographic gravity wave parameterization using a mesoscale gravity wave model. J. Atmos. Sci. 52, 1875-1902.
+- NCAR/MMM-physics bl_gwdo.F90 at commit 52cfbd7 (WRF 4.8 phys/physics_mmm submodule).
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `deltim` | `s` |  | The time step the two limiters are scaled against. It is a PARAMETER OF THE TENDENCY, not the integrator's step: the wind-reversal limiter asks whether the drag would reverse the wind within one model step, so the tendency GWDO returns depends on how long the host intends to apply it. A document that mounts this component prescribes it explicitly. |
+| `kgwdmax` | `1` |  | NLEV/2 in integer arithmetic, read from the mounted column state: the level at which the wind-reversal limiter hands over to the mesosphere density limiter. |
+| `sina` | `1` |  | Sine of the map-rotation angle, read from the mounted column state. |
+| `cosa` | `1` |  | Cosine of the map-rotation angle, read from the mounted column state. |
+| `xn` | `1` |  | Zonal component of the unit vector along the low-level wind, read from the launch stage; zero where the column produces no drag. |
+| `yn` | `1` |  | Meridional component of the same unit vector. |
+| `taup` | `Pa` |  | Total interface stress -- saturating wave plus flow blocking -- read from the blocking stage. Bound to a bare interface-shaped observed of this document so that the face-flux divergence rule matches it. |
+| `ze` | `kg/m^2` |  | The column-mass vertical coordinate, read from the column state: the air mass per unit area below each interface. The stress divergence and the column integral below are both taken with respect to it. |
+| `dz` | `kg/m^2` |  | Layer mass per unit area, del/g, read from the column state. It is the measure both imported rules read by bare name; with it, `D(taup, wrt: lev)` IS the Fortran's (taup[k+1] - taup[k]) g / del[k] and `integral(f, var: lev)` IS its sum f del / g. |
+| `prsl` | `Pa` |  | Layer mid-point pressure, read from the column state; the mesosphere limiter is gated on it. |
+| `rho` | `kg/m^3` |  | Air density, read from the column state; the mesosphere limiter scales by it. |
+| `velco` | `m/s` |  | Projected wind speed at the layer interface, read from the column state. The wind-reversal limiter compares the momentum the drag would remove in one step against it. |
+| `taud_raw` | `m/s^2` |  | Unlimited drag on the layer: the divergence of the interface stress, -g dtau/dp. |
+| `taud_safe` | `m/s^2` |  | taud_raw with values below the qmin threshold replaced by qmin itself, so that the limiter's reciprocal is finite everywhere. Wherever the substitution acts, the limiter's own `\|taud\| >= qmin` test has already selected the unlimited branch, so it cannot reach an answer. |
+| `denfac` | `1` |  | Mesosphere density reduction min(rho/pcutoff_den, 1), which falls below one only above about 7.5 hPa where the air is thinner than 0.01 kg/m^3. |
+| `dtfac_raw` | `1` |  | The damping factor as the two limiter loops compute it: the wind-reversal form below kgwdmax, the density-scaled form from kgwdmax to NLEV-1 and only where the pressure is at or below pcutoff, and one elsewhere. |
+| `dtfac` | `1` |  | The damping factor as the Fortran's array finally holds it: dtfac_raw below the top layer, and dtfac_raw[NLEV-1] copied into the top layer, which is what `dtfac(:,kte) = dtfac(:,kte-1)` does. On the whole reference set it is EXACTLY 1 in all 262500 cells -- neither limiter binds anywhere -- so the two perturbed-input tests `s1440_j81_i39_col4_dt1500_wind_reversal_limiter` and `s1440_j91_i1_col2_lifted_column_mesosphere_limiter` exercise the branches, both dtfac_raw forms and the top-layer copy, against the real64 Fortran. |
+| `taud` | `m/s^2` |  | Limited drag on the layer, taud_raw dtfac. |
+| `dtaux2d` | `m/s^2` |  | Earth-relative zonal wind tendency: the drag is anti-parallel to the low-level wind, so it is the drag magnitude times that direction's zonal component. |
+| `dtauy2d` | `m/s^2` |  | Earth-relative meridional wind tendency. |
+| `dusfc` | `Pa` |  | Earth-relative zonal surface stress: minus the mass-weighted column integral of the zonal tendency, which is the momentum per unit area per unit time the scheme removes from the column and hands to the ground. |
+| `dvsfc` | `Pa` |  | Earth-relative meridional surface stress. |
+| `dtaux3d` | `m/s^2` |  | GRID-relative zonal wind tendency -- the scheme's primary output, added to `rublten` by the WRF wrapper. It is an instantaneous rate, not an increment over a step. |
+| `dtauy3d` | `m/s^2` |  | Grid-relative meridional wind tendency, the scheme's other primary output. |
+| `dusfcg` | `Pa` |  | Grid-relative zonal surface stress (WRF `DUSFCG`). |
+| `dvsfcg` | `Pa` |  | Grid-relative meridional surface stress (WRF `DVSFCG`). |
+| `z_sfc` | `kg/m^2` |  | Lower boundary of the column, ze[1]: the free name the EarthSciDiscretizations column_nonuniform_1d integral rules match as the lower bound of a bottom-anchored integral (ESD #39). |
+| `z_top` | `kg/m^2` |  | Upper boundary of the column, ze[NLEV+1]: the free name the EarthSciDiscretizations column_nonuniform_1d integral rules match as the upper bound of a top-anchored integral (ESD #39). |
+
+## Observed expressions
+
+$$
+deltim = \mathrm{input_deltim}\left(\right)
+$$
+_The time step the two limiters are scaled against. It is a PARAMETER OF THE TENDENCY, not the integrator's step: the wind-reversal limiter asks whether the drag would reverse the wind within one model step, so the tendency GWDO returns depends on how long the host intends to apply it. A document that mounts this component prescribes it explicitly._
+
+$$
+kgwdmax = blk.sat.oro.col.kgwdmax
+$$
+_NLEV/2 in integer arithmetic, read from the mounted column state: the level at which the wind-reversal limiter hands over to the mesosphere density limiter._
+
+$$
+sina = blk.sat.oro.col.sina
+$$
+_Sine of the map-rotation angle, read from the mounted column state._
+
+$$
+cosa = blk.sat.oro.col.cosa
+$$
+_Cosine of the map-rotation angle, read from the mounted column state._
+
+$$
+xn = blk.sat.oro.xn
+$$
+_Zonal component of the unit vector along the low-level wind, read from the launch stage; zero where the column produces no drag._
+
+$$
+yn = blk.sat.oro.yn
+$$
+_Meridional component of the same unit vector._
+
+$$
+taup = blk.taup
+$$
+_Total interface stress -- saturating wave plus flow blocking -- read from the blocking stage. Bound to a bare interface-shaped observed of this document so that the face-flux divergence rule matches it._
+
+$$
+ze = blk.sat.oro.col.ze
+$$
+_The column-mass vertical coordinate, read from the column state: the air mass per unit area below each interface. The stress divergence and the column integral below are both taken with respect to it._
+
+$$
+dz = blk.sat.oro.col.dz
+$$
+_Layer mass per unit area, del/g, read from the column state. It is the measure both imported rules read by bare name; with it, `D(taup, wrt: lev)` IS the Fortran's (taup[k+1] - taup[k]) g / del[k] and `integral(f, var: lev)` IS its sum f del / g._
+
+$$
+prsl = blk.sat.oro.col.prsl
+$$
+_Layer mid-point pressure, read from the column state; the mesosphere limiter is gated on it._
+
+$$
+rho = blk.sat.oro.col.rho
+$$
+_Air density, read from the column state; the mesosphere limiter scales by it._
+
+$$
+velco = blk.sat.oro.col.velco
+$$
+_Projected wind speed at the layer interface, read from the column state. The wind-reversal limiter compares the momentum the drag would remove in one step against it._
+
+$$
+taud_{raw} = \mathrm{D}\left(taup\right)
+$$
+_Unlimited drag on the layer: the divergence of the interface stress, -g dtau/dp._
+
+$$
+taud_{safe} = \mathrm{ifelse}\left(\mathrm{>=}\left(\left|taud_{raw}\right|, par.qmin\right), taud_{raw}, par.qmin\right)
+$$
+_taud_raw with values below the qmin threshold replaced by qmin itself, so that the limiter's reciprocal is finite everywhere. Wherever the substitution acts, the limiter's own `|taud| >= qmin` test has already selected the unlimited branch, so it cannot reach an answer._
+
+$$
+denfac = \mathrm{min}\left(\frac{rho}{par.pcutoff_{den}}, 1.0\right)
+$$
+_Mesosphere density reduction min(rho/pcutoff_den, 1), which falls below one only above about 7.5 hPa where the air is thinner than 0.01 kg/m^3._
+
+$$
+dtfac_{raw} = \mathrm{faq}\left(taud_{raw}, taud_{safe}, velco, prsl, rho, denfac\right)
+$$
+_The damping factor as the two limiter loops compute it: the wind-reversal form below kgwdmax, the density-scaled form from kgwdmax to NLEV-1 and only where the pressure is at or below pcutoff, and one elsewhere._
+
+$$
+dtfac = \mathrm{faq}\left(dtfac_{raw}\right)
+$$
+_The damping factor as the Fortran's array finally holds it: dtfac_raw below the top layer, and dtfac_raw[NLEV-1] copied into the top layer, which is what `dtfac(:,kte) = dtfac(:,kte-1)` does. On the whole reference set it is EXACTLY 1 in all 262500 cells -- neither limiter binds anywhere -- so the two perturbed-input tests `s1440_j81_i39_col4_dt1500_wind_reversal_limiter` and `s1440_j91_i1_col2_lifted_column_mesosphere_limiter` exercise the branches, both dtfac_raw forms and the top-layer copy, against the real64 Fortran._
+
+$$
+taud = taud_{raw} \cdot dtfac
+$$
+_Limited drag on the layer, taud_raw dtfac._
+
+$$
+dtaux2d = taud \cdot xn
+$$
+_Earth-relative zonal wind tendency: the drag is anti-parallel to the low-level wind, so it is the drag magnitude times that direction's zonal component._
+
+$$
+dtauy2d = taud \cdot yn
+$$
+_Earth-relative meridional wind tendency._
+
+$$
+dusfc = -\mathrm{integral}\left(dtaux2d\right)
+$$
+_Earth-relative zonal surface stress: minus the mass-weighted column integral of the zonal tendency, which is the momentum per unit area per unit time the scheme removes from the column and hands to the ground._
+
+$$
+dvsfc = -\mathrm{integral}\left(dtauy2d\right)
+$$
+_Earth-relative meridional surface stress._
+
+$$
+dtaux3d = dtaux2d \cdot cosa + dtauy2d \cdot sina
+$$
+_GRID-relative zonal wind tendency -- the scheme's primary output, added to `rublten` by the WRF wrapper. It is an instantaneous rate, not an increment over a step._
+
+$$
+dtauy3d = dtauy2d \cdot cosa - dtaux2d \cdot sina
+$$
+_Grid-relative meridional wind tendency, the scheme's other primary output._
+
+$$
+dusfcg = dusfc \cdot cosa + dvsfc \cdot sina
+$$
+_Grid-relative zonal surface stress (WRF `DUSFCG`)._
+
+$$
+dvsfcg = dvsfc \cdot cosa - dusfc \cdot sina
+$$
+_Grid-relative meridional surface stress (WRF `DVSFCG`)._
+
+$$
+z_{sfc} = \mathrm{index}\left(ze, 1\right)
+$$
+_Lower boundary of the column, ze[1]: the free name the EarthSciDiscretizations column_nonuniform_1d integral rules match as the lower bound of a bottom-anchored integral (ESD #39)._
+
+$$
+z_{top} = \mathrm{index}\left(ze, NLEV + 1\right)
+$$
+_Upper boundary of the column, ze[NLEV+1]: the free name the EarthSciDiscretizations column_nonuniform_1d integral rules match as the upper bound of a top-anchored integral (ESD #39)._
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "expression_template_imports": [
+    {
+      "ref": "${ESD_ROOT}/grids/column_nonuniform_1d/grid.esm",
+      "bindings": {
+        "NLEV": "NLEV"
+      }
+    },
+    {
+      "ref": "${ESD_ROOT}/grids/column_nonuniform_1d/rules/face_flux_D_lev_supplied_faces.esm",
+      "bindings": {
+        "NLEV": "NLEV"
+      }
+    },
+    {
+      "ref": "${ESD_ROOT}/grids/column_nonuniform_1d/rules/integral_lev_whole.esm",
+      "bindings": {
+        "NLEV": "NLEV"
+      }
+    }
+  ],
+  "subsystems": {
+    "wrf": {
+      "ref": "../../../lib/wrf_constants.esm"
+    },
+    "par": {
+      "ref": "./gwdo_parameters.esm"
+    },
+    "blk": {
+      "ref": "./blocking_drag.esm",
+      "bindings": {
+        "NLEV": "NLEV"
+      }
+    }
+  },
+  "variables": {
+    "deltim": {
+      "type": "unknown",
+      "units": "s",
+      "description": "The time step the two limiters are scaled against. It is a PARAMETER OF THE TENDENCY, not the integrator's step: the wind-reversal limiter asks whether the drag would reverse the wind within one model step, so the tendency GWDO returns depends on how long the host intends to apply it. A document that mounts this component prescribes it explicitly."
+    },
+    "kgwdmax": {
+      "type": "unknown",
+      "units": "1",
+      "description": "NLEV/2 in integer arithmetic, read from the mounted column state: the level at which the wind-reversal limiter hands over to the mesosphere density limiter."
+    },
+    "sina": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Sine of the map-rotation angle, read from the mounted column state."
+    },
+    "cosa": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Cosine of the map-rotation angle, read from the mounted column state."
+    },
+    "xn": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Zonal component of the unit vector along the low-level wind, read from the launch stage; zero where the column produces no drag."
+    },
+    "yn": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Meridional component of the same unit vector."
+    },
+    "taup": {
+      "type": "unknown",
+      "units": "Pa",
+      "shape": [
+        "lev_nodes"
+      ],
+      "description": "Total interface stress -- saturating wave plus flow blocking -- read from the blocking stage. Bound to a bare interface-shaped observed of this document so that the face-flux divergence rule matches it."
+    },
+    "ze": {
+      "type": "unknown",
+      "units": "kg/m^2",
+      "shape": [
+        "lev_nodes"
+      ],
+      "description": "The column-mass vertical coordinate, read from the column state: the air mass per unit area below each interface. The stress divergence and the column integral below are both taken with respect to it."
+    },
+    "dz": {
+      "type": "unknown",
+      "units": "kg/m^2",
+      "shape": [
+        "lev"
+      ],
+      "description": "Layer mass per unit area, del/g, read from the column state. It is the measure both imported rules read by bare name; with it, `D(taup, wrt: lev)` IS the Fortran's (taup[k+1] - taup[k]) g / del[k] and `integral(f, var: lev)` IS its sum f del / g."
+    },
+    "prsl": {
+      "type": "unknown",
+      "units": "Pa",
+      "shape": [
+        "lev"
+      ],
+      "description": "Layer mid-point pressure, read from the column state; the mesosphere limiter is gated on it."
+    },
+    "rho": {
+      "type": "unknown",
+      "units": "kg/m^3",
+      "shape": [
+        "lev"
+      ],
+      "description": "Air density, read from the column state; the mesosphere limiter scales by it."
+    },
+    "velco": {
+      "type": "unknown",
+      "units": "m/s",
+      "shape": [
+        "lev"
+      ],
+      "description": "Projected wind speed at the layer interface, read from the column state. The wind-reversal limiter compares the momentum the drag would remove in one step against it."
+    },
+    "taud_raw": {
+      "type": "unknown",
+      "units": "m/s^2",
+      "shape": [
+        "lev"
+      ],
+      "description": "Unlimited drag on the layer: the divergence of the interface stress, -g dtau/dp."
+    },
+    "taud_safe": {
+      "type": "unknown",
+      "units": "m/s^2",
+      "shape": [
+        "lev"
+      ],
+      "description": "taud_raw with values below the qmin threshold replaced by qmin itself, so that the limiter's reciprocal is finite everywhere. Wherever the substitution acts, the limiter's own `|taud| >= qmin` test has already selected the unlimited branch, so it cannot reach an answer."
+    },
+    "denfac": {
+      "type": "unknown",
+      "units": "1",
+      "shape": [
+        "lev"
+      ],
+      "description": "Mesosphere density reduction min(rho/pcutoff_den, 1), which falls below one only above about 7.5 hPa where the air is thinner than 0.01 kg/m^3."
+    },
+    "dtfac_raw": {
+      "type": "unknown",
+      "units": "1",
+      "shape": [
+        "lev"
+      ],
+      "description": "The damping factor as the two limiter loops compute it: the wind-reversal form below kgwdmax, the density-scaled form from kgwdmax to NLEV-1 and only where the pressure is at or below pcutoff, and one elsewhere."
+    },
+    "dtfac": {
+      "type": "unknown",
+      "units": "1",
+      "description": "The damping factor as the Fortran's array finally holds it: dtfac_raw below the top layer, and dtfac_raw[NLEV-1] copied into the top layer, which is what `dtfac(:,kte) = dtfac(:,kte-1)` does. On the whole reference set it is EXACTLY 1 in all 262500 cells -- neither limiter binds anywhere -- so the two perturbed-input tests `s1440_j81_i39_col4_dt1500_wind_reversal_limiter` and `s1440_j91_i1_col2_lifted_column_mesosphere_limiter` exercise the branches, both dtfac_raw forms and the top-layer copy, against the real64 Fortran.",
+      "shape": [
+        "lev"
+      ]
+    },
+    "taud": {
+      "type": "unknown",
+      "units": "m/s^2",
+      "shape": [
+        "lev"
+      ],
+      "description": "Limited drag on the layer, taud_raw dtfac."
+    },
+    "dtaux2d": {
+      "type": "unknown",
+      "units": "m/s^2",
+      "shape": [
+        "lev"
+      ],
+      "description": "Earth-relative zonal wind tendency: the drag is anti-parallel to the low-level wind, so it is the drag magnitude times that direction's zonal component."
+    },
+    "dtauy2d": {
+      "type": "unknown",
+      "units": "m/s^2",
+      "shape": [
+        "lev"
+      ],
+      "description": "Earth-relative meridional wind tendency."
+    },
+    "dusfc": {
+      "type": "unknown",
+      "units": "Pa",
+      "description": "Earth-relative zonal surface stress: minus the mass-weighted column integral of the zonal tendency, which is the momentum per unit area per unit time the scheme removes from the column and hands to the ground."
+    },
+    "dvsfc": {
+      "type": "unknown",
+      "units": "Pa",
+      "description": "Earth-relative meridional surface stress."
+    },
+    "dtaux3d": {
+      "type": "unknown",
+      "units": "m/s^2",
+      "shape": [
+        "lev"
+      ],
+      "description": "GRID-relative zonal wind tendency -- the scheme's primary output, added to `rublten` by the WRF wrapper. It is an instantaneous rate, not an increment over a step."
+    },
+    "dtauy3d": {
+      "type": "unknown",
+      "units": "m/s^2",
+      "shape": [
+        "lev"
+      ],
+      "description": "Grid-relative meridional wind tendency, the scheme's other primary output."
+    },
+    "dusfcg": {
+      "type": "unknown",
+      "units": "Pa",
+      "description": "Grid-relative zonal surface stress (WRF `DUSFCG`)."
+    },
+    "dvsfcg": {
+      "type": "unknown",
+      "units": "Pa",
+      "description": "Grid-relative meridional surface stress (WRF `DVSFCG`)."
+    },
+    "z_sfc": {
+      "type": "unknown",
+      "units": "kg/m^2",
+      "description": "Lower boundary of the column, ze[1]: the free name the EarthSciDiscretizations column_nonuniform_1d integral rules match as the lower bound of a bottom-anchored integral (ESD #39)."
+    },
+    "z_top": {
+      "type": "unknown",
+      "units": "kg/m^2",
+      "description": "Upper boundary of the column, ze[NLEV+1]: the free name the EarthSciDiscretizations column_nonuniform_1d integral rules match as the upper bound of a top-anchored integral (ESD #39)."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "deltim",
+      "rhs": {
+        "op": "input_deltim",
+        "args": []
+      }
+    },
+    {
+      "lhs": "kgwdmax",
+      "rhs": "blk.sat.oro.col.kgwdmax"
+    },
+    {
+      "lhs": "sina",
+      "rhs": "blk.sat.oro.col.sina"
+    },
+    {
+      "lhs": "cosa",
+      "rhs": "blk.sat.oro.col.cosa"
+    },
+    {
+      "lhs": "xn",
+      "rhs": "blk.sat.oro.xn"
+    },
+    {
+      "lhs": "yn",
+      "rhs": "blk.sat.oro.yn"
+    },
+    {
+      "lhs": "taup",
+      "rhs": "blk.taup"
+    },
+    {
+      "lhs": "ze",
+      "rhs": "blk.sat.oro.col.ze"
+    },
+    {
+      "lhs": "dz",
+      "rhs": "blk.sat.oro.col.dz"
+    },
+    {
+      "lhs": "prsl",
+      "rhs": "blk.sat.oro.col.prsl"
+    },
+    {
+      "lhs": "rho",
+      "rhs": "blk.sat.oro.col.rho"
+    },
+    {
+      "lhs": "velco",
+      "rhs": "blk.sat.oro.col.velco"
+    },
+    {
+      "lhs": "taud_raw",
+      "rhs": {
+        "op": "D",
+        "args": [
+          "taup"
+        ],
+        "wrt": "lev"
+      }
+    },
+    {
+      "lhs": "taud_safe",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">=",
+            "args": [
+              {
+                "op": "abs",
+                "args": [
+                  "taud_raw"
+                ]
+              },
+              "par.qmin"
+            ]
+          },
+          "taud_raw",
+          "par.qmin"
+        ]
+      }
+    },
+    {
+      "lhs": "denfac",
+      "rhs": {
+        "op": "min",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              "rho",
+              "par.pcutoff_den"
+            ]
+          },
+          1.0
+        ]
+      }
+    },
+    {
+      "lhs": "dtfac_raw",
+      "rhs": {
+        "op": "faq",
+        "output_idx": [
+          "k"
+        ],
+        "args": [
+          "taud_raw",
+          "taud_safe",
+          "velco",
+          "prsl",
+          "rho",
+          "denfac"
+        ],
+        "ranges": {
+          "k": {
+            "from": "lev"
+          }
+        },
+        "expr": {
+          "op": "ifelse",
+          "args": [
+            {
+              "op": "<=",
+              "args": [
+                "k",
+                {
+                  "op": "-",
+                  "args": [
+                    "kgwdmax",
+                    1.0
+                  ]
+                }
+              ]
+            },
+            {
+              "op": "ifelse",
+              "args": [
+                {
+                  "op": ">=",
+                  "args": [
+                    {
+                      "op": "abs",
+                      "args": [
+                        {
+                          "op": "index",
+                          "args": [
+                            "taud_raw",
+                            "k"
+                          ]
+                        }
+                      ]
+                    },
+                    "par.qmin"
+                  ]
+                },
+                {
+                  "op": "min",
+                  "args": [
+                    1.0,
+                    {
+                      "op": "abs",
+                      "args": [
+                        {
+                          "op": "/",
+                          "args": [
+                            {
+                              "op": "index",
+                              "args": [
+                                "velco",
+                                "k"
+                              ]
+                            },
+                            {
+                              "op": "*",
+                              "args": [
+                                "deltim",
+                                {
+                                  "op": "index",
+                                  "args": [
+                                    "taud_safe",
+                                    "k"
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                1.0
+              ]
+            },
+            {
+              "op": "ifelse",
+              "args": [
+                {
+                  "op": "and",
+                  "args": [
+                    {
+                      "op": "<",
+                      "args": [
+                        "k",
+                        "NLEV"
+                      ]
+                    },
+                    {
+                      "op": "and",
+                      "args": [
+                        {
+                          "op": ">=",
+                          "args": [
+                            {
+                              "op": "abs",
+                              "args": [
+                                {
+                                  "op": "index",
+                                  "args": [
+                                    "taud_raw",
+                                    "k"
+                                  ]
+                                }
+                              ]
+                            },
+                            "par.qmin"
+                          ]
+                        },
+                        {
+                          "op": "<=",
+                          "args": [
+                            {
+                              "op": "index",
+                              "args": [
+                                "prsl",
+                                "k"
+                              ]
+                            },
+                            "par.pcutoff"
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "op": "min",
+                  "args": [
+                    1.0,
+                    {
+                      "op": "*",
+                      "args": [
+                        {
+                          "op": "index",
+                          "args": [
+                            "denfac",
+                            "k"
+                          ]
+                        },
+                        {
+                          "op": "abs",
+                          "args": [
+                            {
+                              "op": "/",
+                              "args": [
+                                {
+                                  "op": "index",
+                                  "args": [
+                                    "velco",
+                                    "k"
+                                  ]
+                                },
+                                {
+                                  "op": "*",
+                                  "args": [
+                                    "deltim",
+                                    {
+                                      "op": "index",
+                                      "args": [
+                                        "taud_safe",
+                                        "k"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                1.0
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "lhs": "dtfac",
+      "rhs": {
+        "op": "faq",
+        "output_idx": [
+          "k"
+        ],
+        "args": [
+          "dtfac_raw"
+        ],
+        "ranges": {
+          "k": {
+            "from": "lev"
+          }
+        },
+        "expr": {
+          "op": "ifelse",
+          "args": [
+            {
+              "op": "<",
+              "args": [
+                "k",
+                "NLEV"
+              ]
+            },
+            {
+              "op": "index",
+              "args": [
+                "dtfac_raw",
+                "k"
+              ]
+            },
+            {
+              "op": "index",
+              "args": [
+                "dtfac_raw",
+                {
+                  "op": "-",
+                  "args": [
+                    "NLEV",
+                    1
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "lhs": "taud",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "taud_raw",
+          "dtfac"
+        ]
+      }
+    },
+    {
+      "lhs": "dtaux2d",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "taud",
+          "xn"
+        ]
+      }
+    },
+    {
+      "lhs": "dtauy2d",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "taud",
+          "yn"
+        ]
+      }
+    },
+    {
+      "lhs": "dusfc",
+      "rhs": {
+        "op": "-",
+        "args": [
+          {
+            "op": "integral",
+            "args": [
+              "dtaux2d"
+            ],
+            "var": "lev",
+            "lower": "z_sfc",
+            "upper": "z_top"
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "dvsfc",
+      "rhs": {
+        "op": "-",
+        "args": [
+          {
+            "op": "integral",
+            "args": [
+              "dtauy2d"
+            ],
+            "var": "lev",
+            "lower": "z_sfc",
+            "upper": "z_top"
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "dtaux3d",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "dtaux2d",
+              "cosa"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "dtauy2d",
+              "sina"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "dtauy3d",
+      "rhs": {
+        "op": "-",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "dtauy2d",
+              "cosa"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "dtaux2d",
+              "sina"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "dusfcg",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "dusfc",
+              "cosa"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "dvsfc",
+              "sina"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "dvsfcg",
+      "rhs": {
+        "op": "-",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "dvsfc",
+              "cosa"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "dusfc",
+              "sina"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "z_sfc",
+      "rhs": {
+        "op": "index",
+        "args": [
+          "ze",
+          1
+        ]
+      }
+    },
+    {
+      "lhs": "z_top",
+      "rhs": {
+        "op": "index",
+        "args": [
+          "ze",
+          {
+            "op": "+",
+            "args": [
+              "NLEV",
+              1
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "s2_j61_i39_col30_night_launch_over_the_sangre_de_cristo",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 2 = 2012-06-25 12:01Z, global row j = 61 across the Sangre de Cristo range, tile column 30 of the dump that starts at i = 39. Drag is ON (ELVMAX = 1770 m, var = 54 m); wind-rose sector 3 (south-west), aspect ratio od = 1.59, Froude number 0.42, launch stress 0.30 Pa. Above the reference level kref = 5 it has 8 saturating levels, 24 no-wave-breaking levels and a flow-blocking layer, so one column exercises the whole scheme. Reference build: the real64 (kind_phys = real64) replay of the same dumped row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo, with the six scalar constants g, cp, R_d, R_v, eps_1 and pi supplied at binary64 precision instead of WRF's real32 module values (gwdo_real/mkflat64.py). They are subroutine arguments, not internal parameters, so that is what a double-precision kernel reference means for this scheme, and it is what lib/wrf_constants.esm carries for g, cp, R_d, R_v and eps_1 (pi is the truncated literal 3.141592653 WRF passes, gwdo_parameters.esm `pi`: replaying all 140 rows with that value instead of math.pi, gwdo_real/run_diag64p.py, reproduces every field of this reference bit for bit); promoting them flips no branch on any of the 140 dumped rows and moves the outputs by a median 2.7e-8 of the row maximum. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s2_j61_i39_col30_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.007160256951892369,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0004882503825829665,
+                    -0.0003550535550900089,
+                    -6.814943182082099e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -7.792966015976751e-05,
+                    -0.0001706026256331638,
+                    -0.00012805957162132544,
+                    -5.273682529591364e-05,
+                    -7.534804788050085e-06,
+                    -1.3693492040466435e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 7.160256951892369e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.004028531771648545,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0002747013399058537,
+                    -0.00019976161985902542,
+                    -3.834249987878096e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -4.3845090199511086e-05,
+                    -9.598511649895797e-05,
+                    -7.20493770553678e-05,
+                    -2.9670998913568075e-05,
+                    -4.2392613401684e-06,
+                    -7.704286050133458e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 4.028531771648545e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.005919477289587421,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.00040364292381552013,
+                    -0.0002935273789842307,
+                    -5.634001917417504e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -6.44254607900758e-05,
+                    -0.00014103940330138562,
+                    -0.0001058685087727735,
+                    -4.359821746084074e-05,
+                    -6.229120843568225e-06,
+                    -1.1320587472390142e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 5.9194772895874216e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.004068699202385742,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0002774403147159167,
+                    -0.00020175339043065337,
+                    -3.8724802860480345e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -4.428225806204338e-05,
+                    -9.694215885019551e-05,
+                    -7.276776244403396e-05,
+                    -2.9966840639864428e-05,
+                    -4.281529900008605e-06,
+                    -7.781103460008732e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 4.068699202385742e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.005891940828651856,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.00040176524153720235,
+                    -0.0002921619365964145,
+                    -5.607793442222783e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -6.41257638578108e-05,
+                    -0.00014038331057066164,
+                    -0.00010537602541427561,
+                    -4.339540553113159e-05,
+                    -6.200143970378163e-06,
+                    -1.1267925911334834e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 5.891940828651857e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": 0.28996778057718514
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": 0.4260752525072707
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": 0.2928589730519032
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": 0.4240932186261854
+        }
+      ]
+    },
+    {
+      "id": "s880_j141_i39_col22_evening_saturating_wave_over_wyoming",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 880 = 06-25 23Z, global row j = 141 over the southern Wyoming ranges, tile column 22 of the dump that starts at i = 39. The strongest saturating column in the dumped set: launch stress 2.06 Pa, |dtaux3d| up to 1.6e-2 m/s^2, six saturating levels and no flow blocking. Wind-rose sector 7 (north-east) and the widest cross-wind orography of the base regimes, od = 2.73. Reference build: the real64 (kind_phys = real64) replay of the same dumped row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo, with the six scalar constants g, cp, R_d, R_v, eps_1 and pi supplied at binary64 precision instead of WRF's real32 module values (gwdo_real/mkflat64.py). They are subroutine arguments, not internal parameters, so that is what a double-precision kernel reference means for this scheme, and it is what lib/wrf_constants.esm carries for g, cp, R_d, R_v and eps_1 (pi is the truncated literal 3.141592653 WRF passes, gwdo_parameters.esm `pi`: replaying all 140 rows with that value instead of math.pi, gwdo_real/run_diag64p.py, reproduces every field of this reference bit for bit); promoting them flips no branch on any of the 140 dumped rows and moves the outputs by a median 2.7e-8 of the row maximum. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s880_j141_i39_col22_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.02386161162011993,
+                    -0.003386133465175943,
+                    -0.0005623772611372097,
+                    -0.00013778479854488658,
+                    -0.00017599770623243964,
+                    -4.675116041520285e-05,
+                    -6.113600729159568e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 2.386161162011993e-11,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    0.016064331953848585,
+                    0.0022796436758175907,
+                    0.00037860875241916794,
+                    9.276073960372702e-05,
+                    0.00011848678207677685,
+                    3.147424290085187e-05,
+                    4.11585408018708e-06,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.6064331953848586e-11,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    0.017644085354191694,
+                    0.0025038219895370567,
+                    0.0004158408306501306,
+                    0.00010188275564699128,
+                    0.00013013867631173493,
+                    3.456939446947554e-05,
+                    4.520603838668876e-06,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.7644085354191694e-11,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    0.016352368266918344,
+                    0.0023205180901027106,
+                    0.0003853972743107759,
+                    9.44239560704834e-05,
+                    0.0001206112710349821,
+                    3.2038581642597774e-05,
+                    4.18965207177466e-06,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.6352368266918344e-11,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.017377471985266384,
+                    0.0024659876443489026,
+                    0.00040955721080978614,
+                    0.00010034324231018999,
+                    0.0001281721980147622,
+                    3.4047028898452886e-05,
+                    4.452294635057034e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.7377471985266385e-11,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": -1.3836870418064615
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": -1.519757705409798
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": -1.408496795184899
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": -1.4967931984004708
+        }
+      ]
+    },
+    {
+      "id": "s1440_j61_i39_col18_predawn_flow_blocking_only",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 1440 = 06-26 06Z, global row j = 61, tile column 18 of the dump that starts at i = 39. The largest |dtaux3d| anywhere in the dumped set, 1.72e-2 m/s^2, and all of it is flow blocking: a critical level sits at the reference level kref = 11 itself, so no level ever reaches the saturation test. ELVMAX = 3649 m and var = 283 m, the deepest launch layer of these tests; sector 3, od = 0.98, launch stress 2.82 Pa. Reference build: the real64 (kind_phys = real64) replay of the same dumped row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo, with the six scalar constants g, cp, R_d, R_v, eps_1 and pi supplied at binary64 precision instead of WRF's real32 module values (gwdo_real/mkflat64.py). They are subroutine arguments, not internal parameters, so that is what a double-precision kernel reference means for this scheme, and it is what lib/wrf_constants.esm carries for g, cp, R_d, R_v and eps_1 (pi is the truncated literal 3.141592653 WRF passes, gwdo_parameters.esm `pi`: replaying all 140 rows with that value instead of math.pi, gwdo_real/run_diag64p.py, reproduces every field of this reference bit for bit); promoting them flips no branch on any of the 140 dumped rows and moves the outputs by a median 2.7e-8 of the row maximum. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s1440_j61_i39_col18_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.010750232153280817,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.02578656344617756,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 2.578656344617756e-11,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.007022991600776083,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.01684603791929422,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.684603791929422e-11,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0081391080791977,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.019523264603683522,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.9523264603683524e-11,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.007176998622120191,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.01721545429751026,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.7215454297510263e-11,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.008003635364516922,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.01919830643510335,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.919830643510335e-11,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": 2.0221227651535174
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": 2.343485037511913
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": 2.066465848778876
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": 2.304478517785636
+        }
+      ]
+    },
+    {
+      "id": "s1440_j91_i1_col2_wave_reaching_the_model_top",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 1440 = 06-26 06Z, global row j = 91 over the Front Range, tile column 2 of the dump that starts at i = 1. One of only twelve columns in the whole dumped set in which no critical level is ever found above the reference level, so the wave-saturation sweep runs uninterrupted from kref = 12 to the model top: 8 saturating and 30 no-wave-breaking levels. Wind-rose sector 2 (south), and the only regime here with a NEGATIVE along-wind asymmetry, oa = -0.48. Reference build: the real64 (kind_phys = real64) replay of the same dumped row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo, with the six scalar constants g, cp, R_d, R_v, eps_1 and pi supplied at binary64 precision instead of WRF's real32 module values (gwdo_real/mkflat64.py). They are subroutine arguments, not internal parameters, so that is what a double-precision kernel reference means for this scheme, and it is what lib/wrf_constants.esm carries for g, cp, R_d, R_v and eps_1 (pi is the truncated literal 3.141592653 WRF passes, gwdo_parameters.esm `pi`: replaying all 140 rows with that value instead of math.pi, gwdo_real/run_diag64p.py, reproduces every field of this reference bit for bit); promoting them flips no branch on any of the 140 dumped rows and moves the outputs by a median 2.7e-8 of the row maximum. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s1440_j91_i1_col2_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.00842681452567941,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.007235508030891451,
+                    -0.007370561134859333,
+                    -0.0034489282399593185,
+                    -0.00209246016465678,
+                    -0.0009840099763759882,
+                    -0.0004214707443466481,
+                    -0.0002046690098294573,
+                    -7.230480108449182e-05,
+                    -5.5117069893373174e-05
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 8.42681452567941e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.002083622712833575,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.001789059059756588,
+                    -0.0018224524273225445,
+                    -0.0008527854972734162,
+                    -0.0005173838241594422,
+                    -0.00024330730552854233,
+                    -0.00010421328403982471,
+                    -5.0606667109412e-05,
+                    -1.787815850550173e-05,
+                    -1.3628302645644e-05
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 2.083622712833575e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.008165152750608255,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.007010837620840862,
+                    -0.0071416971787415535,
+                    -0.003341835259259351,
+                    -0.0020274869960553708,
+                    -0.0009534553941763157,
+                    -0.0004083836183905427,
+                    -0.00019831381401366787,
+                    -7.005965820870157e-05,
+                    -5.340562480328937e-05
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 8.165152750608255e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0027029256961222966,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0023208106125510056,
+                    -0.0023641292953039566,
+                    -0.0011062539391913683,
+                    -0.0006711627899164078,
+                    -0.00031562411184941967,
+                    -0.000135187988484474,
+                    -6.564819056858796e-05,
+                    -2.3191978915487925e-05,
+                    -1.7678963273225205e-05
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 2.702925696122297e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.007981565950986846,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.006853204655385358,
+                    -0.006981121942863359,
+                    -0.0032666968192511464,
+                    -0.0019819006046860113,
+                    -0.0009320177273322313,
+                    -0.0003992014458325896,
+                    -0.0001938548896619131,
+                    -6.84844239386327e-05,
+                    -5.220484289033774e-05
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 7.981565950986846e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": 0.49154989982808917
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": 1.9262508475847617
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": 0.6376503994645234
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": 1.8829406684396417
+        }
+      ]
+    },
+    {
+      "id": "s2_j81_i76_col30_near_critical_richardson_number",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 2 = 06-25 12:01Z, global row j = 81, tile column 30 of the dump that starts at i = 76. THE column FORTRAN_BUGS N85 was measured on. Its one saturating level sits at Ri = 0.25664, 1.6e-3 above the critical value ric = 0.25, so the saturation factor 2 sqrt(temc) - temc is only 1.301e-2 and a perturbation of Ri is amplified 37-fold in the stress. Weak orography: ELVMAX = 932 m, var = 13.9 m, Fr = 0.064, launch stress 0.012 Pa. Reference build: the real64 (kind_phys = real64) replay of the same dumped row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo, with the six scalar constants g, cp, R_d, R_v, eps_1 and pi supplied at binary64 precision instead of WRF's real32 module values (gwdo_real/mkflat64.py). They are subroutine arguments, not internal parameters, so that is what a double-precision kernel reference means for this scheme, and it is what lib/wrf_constants.esm carries for g, cp, R_d, R_v and eps_1 (pi is the truncated literal 3.141592653 WRF passes, gwdo_parameters.esm `pi`: replaying all 140 rows with that value instead of math.pi, gwdo_real/run_diag64p.py, reproduces every field of this reference bit for bit); promoting them flips no branch on any of the 140 dumped rows and moves the outputs by a median 2.7e-8 of the row maximum. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s2_j81_i76_col30_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -2.9149506606516925e-05,
+                    -4.193389542635802e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 4.1933895426358023e-14,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -2.3709530631247515e-05,
+                    -3.410805512147111e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 3.410805512147111e-14,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -1.6957355119514053e-05,
+                    -2.4394510887890702e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 2.4394510887890704e-14,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -2.3163001416196748e-05,
+                    -3.332182915680024e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 3.3321829156800244e-14,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -1.7696583814800148e-05,
+                    -2.545795045902087e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 2.5457950459020868e-14,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": 0.009762814962496437
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": 0.006982488302276719
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": 0.009537771975306001
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": 0.007286878679264375
+        }
+      ]
+    },
+    {
+      "id": "s720_j101_i39_col3_daytime_mixed_layer_drag_off",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 720 = 06-25 21Z (15:00 local), global row j = 101, tile column 3 of the dump that starts at i = 39. The all-off branch: ELVMAX = 3304 m and var = 361 m clear the two orography gates by a wide margin, but the afternoon mixed layer is statically unstable below the reference level, so the low-level mean N^2 is -1.71e-5 s^-2 and the sixth condition of ldrag fires. Every dumped column of the 17Z, 19Z and 21Z rows is off this way. NOTE that the FIRST condition, omax <= 50 m, is not exercised by any test: with ELVMAX supplied it is 231-4227 m across the domain. That condition is precisely FORTRAN_BUGS B17 -- under WPS 4.3, which writes no ELVMAX, it is the only one that ever fires and it fires everywhere. Reference build: the real64 (kind_phys = real64) replay of the same dumped row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo, with the six scalar constants g, cp, R_d, R_v, eps_1 and pi supplied at binary64 precision instead of WRF's real32 module values (gwdo_real/mkflat64.py). They are subroutine arguments, not internal parameters, so that is what a double-precision kernel reference means for this scheme, and it is what lib/wrf_constants.esm carries for g, cp, R_d, R_v and eps_1 (pi is the truncated literal 3.141592653 WRF passes, gwdo_parameters.esm `pi`: replaying all 140 rows with that value instead of math.pi, gwdo_real/run_diag64p.py, reproduces every field of this reference bit for bit); promoting them flips no branch on any of the 140 dumped rows and moves the outputs by a median 2.7e-8 of the row maximum. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s720_j101_i39_col3_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": -0.0
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": -0.0
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": -0.0
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "s1440_j81_i39_col11_westerly_sector_strong_drag",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 1440 = 06-26 06Z, global row j = 81, tile column 11 of the dump that starts at i = 39. Wind-rose sector 1 (west) -- the W-E orographic axis read in the positive direction, so the asymmetry keeps its sign and is the largest of any regime here, oa = +0.86, which drives the shape coefficient coefm to 1.68. Launch stress 1.18 Pa and |dtaux3d| 1.59e-2 m/s^2, the second largest in the set. Reference build: the real64 (kind_phys = real64) replay of the same dumped row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo, with the six scalar constants g, cp, R_d, R_v, eps_1 and pi supplied at binary64 precision instead of WRF's real32 module values (gwdo_real/mkflat64.py). They are subroutine arguments, not internal parameters, so that is what a double-precision kernel reference means for this scheme, and it is what lib/wrf_constants.esm carries for g, cp, R_d, R_v and eps_1 (pi is the truncated literal 3.141592653 WRF passes, gwdo_parameters.esm `pi`: replaying all 140 rows with that value instead of math.pi, gwdo_real/run_diag64p.py, reproduces every field of this reference bit for bit); promoting them flips no branch on any of the 140 dumped rows and moves the outputs by a median 2.7e-8 of the row maximum. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s1440_j81_i39_col11_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.01590108806825649,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.590108806825649e-11,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.015900008725040455,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.5900008725040457e-11,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.00018526817882829553,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.8526817882829553e-13,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.01589925852281846,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.5899258522818462e-11,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.00024118637413896008,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 2.411863741389601e-13,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": 1.1844599867394632
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": 0.013801422906932969
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": 1.184404100951645
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": -0.01796700960701171
+        }
+      ]
+    },
+    {
+      "id": "s1440_j81_i39_col14_northwesterly_sector_saturation_and_blocking",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 1440 = 06-26 06Z, global row j = 81, tile column 14 of the dump that starts at i = 39. Wind-rose sector 4 (north-west), the fourth orographic axis in its positive direction; four saturating levels, sixteen no-wave-breaking levels and a flow-blocking layer. Its minimum saturation margin is 1.69e-2, the second-closest approach to the critical Richardson number in these regimes after the N85 column. Reference build: the real64 (kind_phys = real64) replay of the same dumped row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo, with the six scalar constants g, cp, R_d, R_v, eps_1 and pi supplied at binary64 precision instead of WRF's real32 module values (gwdo_real/mkflat64.py). They are subroutine arguments, not internal parameters, so that is what a double-precision kernel reference means for this scheme, and it is what lib/wrf_constants.esm carries for g, cp, R_d, R_v and eps_1 (pi is the truncated literal 3.141592653 WRF passes, gwdo_parameters.esm `pi`: replaying all 140 rows with that value instead of math.pi, gwdo_real/run_diag64p.py, reproduces every field of this reference bit for bit); promoting them flips no branch on any of the 140 dumped rows and moves the outputs by a median 2.7e-8 of the row maximum. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s1440_j81_i39_col14_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0030302165657799664,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0009348808852172807,
+                    0.0,
+                    -8.505784827527226e-05,
+                    0.0,
+                    -0.0003902505164364567,
+                    -0.00016023953342449073,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -3.115331181281887e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 3.0302165657799666e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0027887315007445357,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0008603780348545158,
+                    0.0,
+                    -7.827938885607199e-05,
+                    0.0,
+                    -0.0003591505375088743,
+                    -0.000147469669188632,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -2.8670631329138254e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 2.7887315007445357e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0011854067033227297,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    0.0003657210777143256,
+                    -0.0,
+                    3.327423678372065e-05,
+                    -0.0,
+                    0.00015266419680464653,
+                    6.268496423779723e-05,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    1.2187031471829207e-06,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.1854067033227298e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0027597171059967835,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0008514265284334424,
+                    0.0,
+                    -7.746495796221344e-05,
+                    0.0,
+                    -0.0003554138796533698,
+                    -0.000145935371894677,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -2.837233763724687e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 2.759717105996784e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0012514687440120425,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    0.0003861025051595907,
+                    -0.0,
+                    3.5128591055676814e-05,
+                    -0.0,
+                    0.00016117208557635704,
+                    6.617836160637787e-05,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    1.2866207797319182e-06,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.2514687440120426e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": 0.20856806837982425
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": -0.08865607402165086
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": 0.2063980938712949
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": -0.09359682655236985
+        }
+      ]
+    },
+    {
+      "id": "s1440_j81_i114_col21_easterly_sector_widest_obstacle",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 1440 = 06-26 06Z, global row j = 81, tile column 21 of the dump that starts at i = 114. Wind-rose sector 5 (east) -- the W-E axis read in the NEGATIVE direction, so the sign flip 1 - 2 int((nwd-1)/4) fires and the stored asymmetry +0.228 is used as -0.228. The widest obstacle of any regime here, od = 4.07 from a cross-wind ridge fraction four times the along-wind one, over weak terrain (ELVMAX = 487 m, var = 16.7 m). Reference build: the real64 (kind_phys = real64) replay of the same dumped row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo, with the six scalar constants g, cp, R_d, R_v, eps_1 and pi supplied at binary64 precision instead of WRF's real32 module values (gwdo_real/mkflat64.py). They are subroutine arguments, not internal parameters, so that is what a double-precision kernel reference means for this scheme, and it is what lib/wrf_constants.esm carries for g, cp, R_d, R_v and eps_1 (pi is the truncated literal 3.141592653 WRF passes, gwdo_parameters.esm `pi`: replaying all 140 rows with that value instead of math.pi, gwdo_real/run_diag64p.py, reproduces every field of this reference bit for bit); promoting them flips no branch on any of the 140 dumped rows and moves the outputs by a median 2.7e-8 of the row maximum. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s1440_j81_i114_col21_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    -0.0028642741648545337,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 2.864274164854534e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0,
+                    -0.0,
+                    0.0027464452358361875,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 2.7464452358361875e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    -0.0008130836722046779,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 8.130836722046779e-13,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0,
+                    -0.0,
+                    0.002791480161575245,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 2.7914801615752454e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    -0.0006416424293497699,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 6.4164242934977e-13,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": -0.1353472044141653
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": 0.04006946890903548
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": -0.13756656463305755
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": 0.03162069569523534
+        }
+      ]
+    },
+    {
+      "id": "s1040_j141_i76_col1_northerly_sector_rare_case",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 1040 = 06-26 01Z, global row j = 141, tile column 1 of the dump that starts at i = 76. Wind-rose sector 6 (north), which only SEVEN of the 1473 drag-producing columns in the whole dumped set reach; it is the S-N axis read in the negative direction. Three saturating levels and a flow-blocking layer. Reference build: the real64 (kind_phys = real64) replay of the same dumped row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo, with the six scalar constants g, cp, R_d, R_v, eps_1 and pi supplied at binary64 precision instead of WRF's real32 module values (gwdo_real/mkflat64.py). They are subroutine arguments, not internal parameters, so that is what a double-precision kernel reference means for this scheme, and it is what lib/wrf_constants.esm carries for g, cp, R_d, R_v and eps_1 (pi is the truncated literal 3.141592653 WRF passes, gwdo_parameters.esm `pi`: replaying all 140 rows with that value instead of math.pi, gwdo_real/run_diag64p.py, reproduces every field of this reference bit for bit); promoting them flips no branch on any of the 140 dumped rows and moves the outputs by a median 2.7e-8 of the row maximum. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s1040_j141_i76_col1_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.003981250460665973,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0037406611165497765,
+                    -0.0012544473156722758,
+                    -0.0003095174972992867,
+                    -3.8636162192062367e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 3.981250460665973e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0011927665122955019,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0011206869192851856,
+                    -0.0003758273347421061,
+                    -9.273018851628512e-05,
+                    -1.1575237700217626e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.192766512295502e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.003798376400213576,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    0.0035688382448368964,
+                    0.0011968257526716339,
+                    0.00029530017485966404,
+                    3.686145549371063e-05,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 3.798376400213576e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0011979710835313233,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.00112557697517152,
+                    -0.0003774672366976614,
+                    -9.313481160627725e-05,
+                    -1.1625745614852493e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.1979710835313233e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0037967380806522804,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.003567298929905578,
+                    0.0011963095365741575,
+                    0.00029517280568874685,
+                    3.684555637334179e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 3.796738080652281e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": 0.18086228545937183
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": -0.5759576829965296
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": 0.18165146811904861
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": -0.5757092603445568
+        }
+      ]
+    },
+    {
+      "id": "s2_j61_i1_col19_southeasterly_sector_deep_wave_column",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 2 = 06-25 12:01Z, global row j = 61, tile column 19 of the dump that starts at i = 1. Wind-rose sector 8 (south-east), the fourth axis in its negative direction, so this is the second of the two sign-flip regimes. Three saturating levels, twenty-two no-wave-breaking levels and a three-layer blocking depth. Reference build: the real64 (kind_phys = real64) replay of the same dumped row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo, with the six scalar constants g, cp, R_d, R_v, eps_1 and pi supplied at binary64 precision instead of WRF's real32 module values (gwdo_real/mkflat64.py). They are subroutine arguments, not internal parameters, so that is what a double-precision kernel reference means for this scheme, and it is what lib/wrf_constants.esm carries for g, cp, R_d, R_v and eps_1 (pi is the truncated literal 3.141592653 WRF passes, gwdo_parameters.esm `pi`: replaying all 140 rows with that value instead of math.pi, gwdo_real/run_diag64p.py, reproduces every field of this reference bit for bit); promoting them flips no branch on any of the 140 dumped rows and moves the outputs by a median 2.7e-8 of the row maximum. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s2_j61_i1_col19_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.005203678094661122,
+                    -0.004397349588882838,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.003654347868072991,
+                    -0.0006120794629239415,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -8.090359744988502e-05,
+                    -3.577536753400006e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 5.203678094661122e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.004023513972531071,
+                    0.0034000561124498353,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    0.002825562888443493,
+                    0.00047326337766751713,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    6.255512905412341e-05,
+                    2.7661720907211048e-05,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0,
+                    -0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 4.023513972531071e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0032999395487952874,
+                    -0.002788602129928287,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.002317423721363981,
+                    -0.00038815337727758317,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -5.130543742484813e-05,
+                    -2.268713553193415e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 3.2999395487952877e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.00382862095592303,
+                    0.0032353624648283996,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0026886968358576084,
+                    0.00045033920542568196,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    5.9525051890505656e-05,
+                    2.6321828398080602e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 3.82862095592303e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0035241917154806546,
+                    -0.0029781056224659442,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0024749076034046875,
+                    -0.00041453090164542144,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -5.479197265833839e-05,
+                    -2.4228872652778732e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 3.5241917154806548e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": -0.6679328277054595
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": 0.5478141667039764
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": -0.635579157612159
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": 0.5850416710287615
+        }
+      ]
+    },
+    {
+      "id": "s2_j81_i39_col16_enhancement_factor_at_its_clamp",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 2 = 06-25 12:01Z, global row j = 81, tile column 16 of the dump that starts at i = 39. The CLAMP regime: the Froude number reaches 5.38, the largest in the dumped set, which drives the asymmetry enhancement (oa + 2)^(ce Fr) to 12.9 and pins it at efacmax = 10 -- the only branch of the launch block that the other regimes leave untested. The convexity factor is correspondingly saturated at 0.986 and the non-hydrostatic correction has almost cancelled the stress, 1 + nhd = 5.1e-3, leaving a launch stress of only 5e-4 Pa. An eight-layer blocking depth. Reference build: the real64 (kind_phys = real64) replay of the same dumped row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo, with the six scalar constants g, cp, R_d, R_v, eps_1 and pi supplied at binary64 precision instead of WRF's real32 module values (gwdo_real/mkflat64.py). They are subroutine arguments, not internal parameters, so that is what a double-precision kernel reference means for this scheme, and it is what lib/wrf_constants.esm carries for g, cp, R_d, R_v and eps_1 (pi is the truncated literal 3.141592653 WRF passes, gwdo_parameters.esm `pi`: replaying all 140 rows with that value instead of math.pi, gwdo_real/run_diag64p.py, reproduces every field of this reference bit for bit); promoting them flips no branch on any of the 140 dumped rows and moves the outputs by a median 2.7e-8 of the row maximum. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s2_j81_i39_col16_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.00038267888535287734,
+                    -0.0003241593660793491,
+                    -0.0002754032164695483,
+                    -0.00023484762392269083,
+                    -0.0002010980799584177,
+                    -0.00017307556619625128,
+                    -0.0001498072072224192,
+                    4.624652500614758e-20,
+                    0.0,
+                    -5.569961226479299e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 3.826788853528774e-13,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.00031675108634592535,
+                    -0.00026831329159997594,
+                    -0.00022795683623738652,
+                    -0.0001943881485247781,
+                    -0.00016645296546782584,
+                    -0.00014325816163608335,
+                    -0.00012399846828861275,
+                    3.827918810287479e-20,
+                    0.0,
+                    -4.61037004371199e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 3.167510863459254e-13,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.00021473676581712026,
+                    -0.00018189907137682626,
+                    -0.00015454000276437884,
+                    -0.00013178260194442372,
+                    -0.00011284435320355618,
+                    -9.711977522010011e-05,
+                    -8.406294782993719e-05,
+                    2.595081565825942e-20,
+                    0.0,
+                    -3.1255329344810743e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 2.1473676581712027e-13,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.00032133523383424105,
+                    -0.000272196428090395,
+                    -0.00023125591808217857,
+                    -0.00019720141099247178,
+                    -0.00016886193887459327,
+                    -0.00014533145063224979,
+                    -0.00012579302335555086,
+                    3.8833179711935655e-20,
+                    0.0,
+                    -4.677093149542184e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 3.2133523383424107e-13,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.00020781432153601465,
+                    -0.00017603521205306557,
+                    -0.0001495581145708619,
+                    -0.00012753434144879757,
+                    -0.00010920660284200751,
+                    -9.398893626014664e-05,
+                    -8.135302030428087e-05,
+                    2.5114242215607607e-20,
+                    0.0,
+                    -3.0247754908017176e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 2.0781432153601468e-13,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": 0.05713862536608911
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": 0.03873629529071347
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": 0.05796555823940437
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": 0.03748755782004305
+        }
+      ]
+    },
+    {
+      "id": "s1440_j81_i39_col4_dt1500_wind_reversal_limiter",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 1440 = 2012-06-26 06Z, global row j = 81 across the Sawatch range, tile column 4 of the dump that starts at i = 39 (ELVMAX = 4045 m, var = 219 m; drag ON, wind-rose sector 1 (west), kref = 10, a flow-blocking layer to kblk = 10 and one saturating level; nonzero stress divergence in levels 1-11). PERTURBATION: the time step `deltim` is raised from 45 s to 1500 s and nothing else is changed. That makes the WIND-REVERSAL limiter (bl_gwdo.F90:604-610, k < kgwdmax = 25: dtfac = min(dtfac, |velco/(deltim taud)|) where |taud| >= qmin) bind at three of the eleven active levels -- dtfac = 0.660 at level 1, 0.808 at level 9 and 0.0793 at level 10 -- while levels 2-8 and 11 stay unlimited (dtfac = 1), so both outcomes of the min are pinned in one column. The mesosphere branch cannot act here: no layer is at or above pcutoff = 7.5 hPa. No column of the reference set reaches this branch (over all 140 dumped rows and 5250 columns: dtfac is exactly 1 in every cell, no column has var <= 0 or omax <= hmt_min, and every row runs with if_nonhyd = .true.), so the inputs are perturbed and the Fortran rerun on them. Reference build: the real64 (kind_phys = real64) replay of the PERTURBED row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo -- the unmodified bl_gwdo.F90 physics -- with g, cp, R_d, R_v and eps_1 at binary64 and pi = 3.141592653, the literal WRF passes (gwdo_real/mkflat64x.py, driven by gwdo_real/perturbed_tests.py; reference diag64x/s1440_j81_i39_col4_dt1500_wind_reversal_limiter.json). The injected input library carries the same perturbation expressions, so the .esm and the Fortran see identical arguments. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s1440_j81_i39_col4_dt1500_wind_reversal_limiter_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.005224529671614604,
+                    -0.0044363625708729836,
+                    -0.0037787034316746375,
+                    -0.0032318830877770756,
+                    -0.0027772621601645808,
+                    -0.002399616095610596,
+                    -0.0020866616551983514,
+                    -0.0018275973266668115,
+                    -0.0016139132470517528,
+                    -0.0084095943491094,
+                    -1.545579652243544e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 8.409594349109401e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.6602569357156945,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    0.8079899791233425,
+                    0.07927453322849853,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1e-09,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.003214888999176868,
+                    -0.004134593743684242,
+                    -0.0035216696828198535,
+                    -0.0030120449763898667,
+                    -0.0025883481272198795,
+                    -0.002236390181743699,
+                    -0.0019447234275694458,
+                    -0.0017032810894272122,
+                    -0.0012153237121635605,
+                    -0.0006213188811978517,
+                    -1.4404467305011852e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 4.134593743684242e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.001250503661585681,
+                    -0.0016082435869388303,
+                    -0.0013698329349439635,
+                    -0.0011716028991360723,
+                    -0.0010067964434777143,
+                    -0.0008698944541229263,
+                    -0.0007564440848718886,
+                    -0.0006625296361969965,
+                    -0.00047272759727055955,
+                    -0.0002416760069007557,
+                    -5.602942780519174e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.6082435869388303e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0032557054167045266,
+                    -0.0041870867860856024,
+                    -0.0035663810057318655,
+                    -0.0030502860744184125,
+                    -0.0026212099454333824,
+                    -0.0022647835214316876,
+                    -0.001969413749199778,
+                    -0.0017249060451040106,
+                    -0.001230753532626921,
+                    -0.0006292071818139172,
+                    -1.4587347258856418e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 4.187086786085603e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.001140023357278171,
+                    -0.0014661574448956317,
+                    -0.0012488100510036199,
+                    -0.0010680933702955243,
+                    -0.0009178473417133167,
+                    -0.0007930404576419803,
+                    -0.0006896132748106931,
+                    -0.0006039960404400897,
+                    -0.0004309627545072975,
+                    -0.00022032425911589734,
+                    -5.107930376777475e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.4661574448956318e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": 1.0199764481360665
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": 0.396742868401329
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": 1.0329261283851077
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": 0.3616911734888708
+        }
+      ]
+    },
+    {
+      "id": "s1440_j91_i1_col2_lifted_column_mesosphere_limiter",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 1440 = 2012-06-26 06Z, global row j = 91, tile column 2 of the dump that starts at i = 1 (ELVMAX = 2998 m, var = 326 m; drag ON, kref = 12, wave stress reaching the model top with nonzero divergence in levels 42-50). PERTURBATION: the column is LIFTED into the mesosphere -- every pressure (prsi, prsl) multiplied by 0.005 and prslk by 0.005^(2/7), so theta, N^2, Ri and the heights are unchanged while p runs from 383 Pa at the lowest layer to 26 Pa in the top layer -- and `deltim` is raised to 1800 s. Every layer is then at or above pcutoff = 7.5 hPa, so from kgwdmax = 25 up the MESOSPHERE limiter (bl_gwdo.F90:614-622: dtfac = min(dtfac, min(rho/pcutoff_den, 1) |velco/(deltim taud)|)) applies, and it binds at every active level 42-49 (dtfac 0.058 to 0.667, with the density factor below 1); `dtfac(:,kte) = dtfac(:,kte-1)` then copies 0.667 into level 50. The wind-reversal branch also binds at level 1 (dtfac = 0.416), so this one column carries both dtfac_raw branches and the top-layer copy. No column of the reference set reaches this branch (over all 140 dumped rows and 5250 columns: dtfac is exactly 1 in every cell, no column has var <= 0 or omax <= hmt_min, and every row runs with if_nonhyd = .true.), so the inputs are perturbed and the Fortran rerun on them. Reference build: the real64 (kind_phys = real64) replay of the PERTURBED row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo -- the unmodified bl_gwdo.F90 physics -- with g, cp, R_d, R_v and eps_1 at binary64 and pi = 3.141592653, the literal WRF passes (gwdo_real/mkflat64x.py, driven by gwdo_real/perturbed_tests.py; reference diag64x/s1440_j91_i1_col2_lifted_column_mesosphere_limiter.json). The injected input library carries the same perturbation expressions, so the .esm and the Fortran see identical arguments. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s1440_j91_i1_col2_lifted_column_mesosphere_limiter_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.008426814525679581,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.007235508030891404,
+                    -0.007370561134859346,
+                    -0.0034489282399593115,
+                    -0.0020924601646567878,
+                    -0.000984009976375986,
+                    -0.00042147074434664515,
+                    -0.00020466900982945823,
+                    -7.230480108449185e-05,
+                    -5.511706989337329e-05
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 8.426814525679581e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.41629751446021246,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    0.08457570432159717,
+                    0.05829201220768394,
+                    0.09076566719637558,
+                    0.10614159091681599,
+                    0.15440543142746518,
+                    0.24866717325475965,
+                    0.34376861712234336,
+                    0.66689537349148,
+                    0.66689537349148
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1e-09,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.00086740695642548,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.00015131093005184686,
+                    -0.00010623441914140919,
+                    -7.740364463541439e-05,
+                    -5.491594221090958e-05,
+                    -3.756796947958858e-05,
+                    -2.591442275777839e-05,
+                    -1.739698396937342e-05,
+                    -1.192286119386646e-05,
+                    -9.088651982921698e-06
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 8.6740695642548e-13,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.003399132795266252,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0005929465296669625,
+                    -0.0004163038991267853,
+                    -0.00030332390696704713,
+                    -0.00021520069532447405,
+                    -0.00014721869148463757,
+                    -0.00010155159998872601,
+                    -6.81740655997365e-05,
+                    -4.672246192777748e-05,
+                    -3.561596409973558e-05
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 3.3991327952662524e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.0011252212490663743,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.00019628419215353738,
+                    -0.00013780985374240172,
+                    -0.00010040987687932303,
+                    -7.123828628589653e-05,
+                    -4.873407715902007e-05,
+                    -3.3616814954430916e-05,
+                    -2.2567787688347646e-05,
+                    -1.5466623440850852e-05,
+                    -1.1790018815039706e-05
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 1.1252212490663745e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.003322706066896153,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0005796146105892613,
+                    -0.0004069436455167219,
+                    -0.00029650391632760764,
+                    -0.00021036208322037362,
+                    -0.00014390859928677845,
+                    -9.926829509440239e-05,
+                    -6.664122734148062e-05,
+                    -4.567194548090332e-05,
+                    -3.4815168197415886e-05
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 3.3227060668961534e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": 0.00030623550348600736
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": 0.0012000539484531886
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": 0.0003972560897609065
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": 0.0011730717142563888
+        }
+      ]
+    },
+    {
+      "id": "s2_j61_i39_col30_hydrostatic_launch_stress",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 2 = 2012-06-25 12:01Z, global row j = 61 across the Sangre de Cristo range, tile column 30 of the dump that starts at i = 39 -- the column of test s2_j61_i39_col30_night_launch_over_the_sangre_de_cristo (drag ON, sector 3, Fr = 0.42, kref = 5, 8 saturating levels and a flow-blocking layer). PERTURBATION: if_nonhyd = .false. (the run itself has .true.). The launch stress is then the HYDROSTATIC one, taub = rhobar efac xlinv gfac ulow^3 / N with no (1 + nhd_effect) factor (bl_gwdo.F90:483-488 skipped): nhd = 0 and taub = 0.404 Pa instead of 0.301 Pa with nhd = -0.254, and the change carries through the saturation profile to the tendencies and surface stress. nhd itself is NOT asserted here: the Fortran evaluates nhd_effect only inside `if (if_nonhyd)`, so its diagnostic reads 0, while the .esm's nhd is the correction the column would receive and the switch is applied in taub. In its place taub_hyd -- the hydrostatic launch stress, which is exactly what the Fortran's taub is with the switch off -- is asserted against the Fortran taub. No column of the reference set reaches this branch (over all 140 dumped rows and 5250 columns: dtfac is exactly 1 in every cell, no column has var <= 0 or omax <= hmt_min, and every row runs with if_nonhyd = .true.), so the inputs are perturbed and the Fortran rerun on them. Reference build: the real64 (kind_phys = real64) replay of the PERTURBED row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo -- the unmodified bl_gwdo.F90 physics -- with g, cp, R_d, R_v and eps_1 at binary64 and pi = 3.141592653, the literal WRF passes (gwdo_real/mkflat64x.py, driven by gwdo_real/perturbed_tests.py; reference diag64x/s2_j61_i39_col30_hydrostatic_launch_stress.json). The injected input library carries the same perturbation expressions, so the .esm and the Fortran see identical arguments. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s2_j61_i39_col30_hydrostatic_launch_stress_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.007160256951892369,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0009336136122776103,
+                    -0.0003550535550900089,
+                    -6.814943182082099e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -7.792966015976751e-05,
+                    -0.0001706026256331638,
+                    -0.00012805957162132544,
+                    -5.273682529591364e-05,
+                    -7.534804788050085e-06,
+                    -1.3693492040466435e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 7.160256951892369e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.004028531771648545,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0005252733421123815,
+                    -0.00019976161985902542,
+                    -3.834249987878096e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -4.3845090199511086e-05,
+                    -9.598511649895797e-05,
+                    -7.20493770553678e-05,
+                    -2.9670998913568075e-05,
+                    -4.2392613401684e-06,
+                    -7.704286050133458e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 4.028531771648545e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.005919477289587421,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0007718304820983277,
+                    -0.0002935273789842307,
+                    -5.634001917417504e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -6.44254607900758e-05,
+                    -0.00014103940330138562,
+                    -0.0001058685087727735,
+                    -4.359821746084074e-05,
+                    -6.229120843568225e-06,
+                    -1.1320587472390142e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 5.9194772895874216e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.004068699202385742,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0005305107044526471,
+                    -0.00020175339043065337,
+                    -3.8724802860480345e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -4.428225806204338e-05,
+                    -9.694215885019551e-05,
+                    -7.276776244403396e-05,
+                    -2.9966840639864428e-05,
+                    -4.281529900008605e-06,
+                    -7.781103460008732e-06,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 4.068699202385742e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    -0.005891940828651856,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -0.0007682400502274995,
+                    -0.0002921619365964145,
+                    -5.607793442222783e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    -6.41257638578108e-05,
+                    -0.00014038331057066164,
+                    -0.00010537602541427561,
+                    -4.339540553113159e-05,
+                    -6.200143970378163e-06,
+                    -1.1267925911334834e-05,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 5.891940828651857e-12,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": 0.3476012567727768
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": 0.5107612058019055
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": 0.3510670974802636
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": 0.508385226420127
+        }
+      ]
+    },
+    {
+      "id": "s2_j61_i39_col30_zero_subgrid_variance_drag_off",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 2 = 2012-06-25 12:01Z, global row j = 61, tile column 30 of the dump that starts at i = 39 -- the column of test s2_j61_i39_col30_night_launch_over_the_sangre_de_cristo, where drag is ON with var = 54 m. PERTURBATION: the sub-grid orographic standard deviation var is set to 0 (ELVMAX = 1770 m is kept). The gate `ldrag = ldrag .or. var <= 0.` (bl_gwdo.F90:418) then switches the scheme off in the column: Fr, efac, gfac, taub and every tendency and surface stress are zero. Because var also sets the reference-level threshold 2 var, kref drops from 5 to 3. coefm and xlinv are not asserted: the Fortran leaves them undefined in a column without drag. No column of the reference set reaches this branch (over all 140 dumped rows and 5250 columns: dtfac is exactly 1 in every cell, no column has var <= 0 or omax <= hmt_min, and every row runs with if_nonhyd = .true.), so the inputs are perturbed and the Fortran rerun on them. Reference build: the real64 (kind_phys = real64) replay of the PERTURBED row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo -- the unmodified bl_gwdo.F90 physics -- with g, cp, R_d, R_v and eps_1 at binary64 and pi = 3.141592653, the literal WRF passes (gwdo_real/mkflat64x.py, driven by gwdo_real/perturbed_tests.py; reference diag64x/s2_j61_i39_col30_zero_subgrid_variance_drag_off.json). The injected input library carries the same perturbation expressions, so the .esm and the Fortran see identical arguments. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s2_j61_i39_col30_zero_subgrid_variance_drag_off_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": -0.0
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": -0.0
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": -0.0
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "s2_j61_i39_col30_omax_at_hmt_min_drag_off",
+      "description": "Reference run: WRF 4.8 real-terrain simulation of data/eqwefic/notes/gwdo_real_reference_run.md (Last Chance Gulch d01, Colorado Rockies, 8.1 km, 150 x 180 x 50, dt = 45 s, gwd_opt = 1 with ELVMAX supplied by WPS util/compute_gwdo.py -- without it GWDO is silently off everywhere, FORTRAN_BUGS B17). Step 2 = 2012-06-25 12:01Z, global row j = 61, tile column 30 of the dump that starts at i = 39 -- the column of test s2_j61_i39_col30_night_launch_over_the_sangre_de_cristo, where drag is ON with ELVMAX = 1770 m. PERTURBATION: the sub-grid maximum height omax (ELVMAX) is set to EXACTLY hmt_min = 50 m (var = 54 m is kept), so the inclusive gate `ldrag = omax <= hmt_min` (bl_gwdo.F90:416) is tested at its boundary and switches the scheme off: Fr, efac, gfac, taub and every tendency and surface stress are zero. This is also what every column looks like when WPS writes no ELVMAX (FORTRAN_BUGS B17). coefm and xlinv are not asserted: the Fortran leaves them undefined in a column without drag. No column of the reference set reaches this branch (over all 140 dumped rows and 5250 columns: dtfac is exactly 1 in every cell, no column has var <= 0 or omax <= hmt_min, and every row runs with if_nonhyd = .true.), so the inputs are perturbed and the Fortran rerun on them. Reference build: the real64 (kind_phys = real64) replay of the PERTURBED row through kernels/gwdo_diag_driver of WRF fork branch earthsciml-instrumented-gwdo -- the unmodified bl_gwdo.F90 physics -- with g, cp, R_d, R_v and eps_1 at binary64 and pi = 3.141592653, the literal WRF passes (gwdo_real/mkflat64x.py, driven by gwdo_real/perturbed_tests.py; reference diag64x/s2_j61_i39_col30_omax_at_hmt_min_drag_off.json). The injected input library carries the same perturbation expressions, so the .esm and the Fortran see identical arguments. Every assertion is on an algebraic observed at t = 0 and the document declares no ODE state, so the empty time_span is a single static evaluation.",
+      "parameter_overrides": {},
+      "expression_template_imports": [
+        {
+          "ref": "./tests/s2_j61_i39_col30_omax_at_hmt_min_drag_off_inputs.esm"
+        }
+      ],
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "taud_raw",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtfac",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy2d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtaux3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dtauy3d",
+          "time": 0.0,
+          "reduce": "Linf_error",
+          "expected": 0.0,
+          "reference": {
+            "op": "faq",
+            "output_idx": [
+              "k"
+            ],
+            "args": [],
+            "ranges": {
+              "k": {
+                "from": "lev"
+              }
+            },
+            "expr": {
+              "op": "index",
+              "args": [
+                {
+                  "op": "const",
+                  "args": [],
+                  "value": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                },
+                "k"
+              ]
+            }
+          },
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "dusfc",
+          "time": 0.0,
+          "expected": -0.0
+        },
+        {
+          "variable": "dvsfc",
+          "time": 0.0,
+          "expected": -0.0
+        },
+        {
+          "variable": "dusfcg",
+          "time": 0.0,
+          "expected": -0.0
+        },
+        {
+          "variable": "dvsfcg",
+          "time": 0.0,
+          "expected": 0.0
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

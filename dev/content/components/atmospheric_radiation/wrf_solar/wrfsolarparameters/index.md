@@ -1,0 +1,205 @@
+---
+title: "WRFSolarParameters"
+slug: "wrfsolarparameters"
+domains: ["atmospheric_radiation"]
+component_types: ["model"]
+subdomains: ["wrf_solar"]
+domain: "atmospheric_radiation"
+subdomain: "wrf_solar"
+component_type: "model"
+esm_version: "1.2.0"
+esm_path: "components/atmospheric_radiation/wrf_solar/wrf_solar_parameters.esm"
+reference: "Paltridge, G. W. and Platt, C. M. R. (1976). Radiative Processes in Meteorology and Climatology. Elsevier (eccentricity-factor Fourier series)."
+description: "Constants of WRF's solar geometry: the in-line literals of SUBROUTINE radconst and SUBROUTINE calc_coszen in phys/module_radiation_driver.F (WRF 4.8), plus DPD, the degrees-per-day constant of share/module_model_constants.F:74, which lib/wrf_constants.esm does not (yet) carry. Mounted by WRFSolarGeometry as subsystem `par`, which holds every physical and empirical constant (obliquity, equinox day, Fourier coefficients, solar constant, minutes per day/hour, degrees per hour, ...); only structural literals stay inline in the geometry: the harmonic multiplier 2 of cos(2 orbit_angle), sin(2 day_angle) and the like, the half-step radt/2, and the -1/1 bounds of the coszen clamp. Values are the nominal decimal values of the Fortran source; WRF evaluates them in single precision (default REAL), which the reference tests' rel 1e-5 tolerance absorbs."
+tags: ["atmospheric_radiation", "wrf_solar", "model", "wrf", "radiation", "solar-geometry", "scheme-constants"]
+---
+
+## Description
+
+Constants of WRF's solar geometry: the in-line literals of SUBROUTINE radconst and SUBROUTINE calc_coszen in phys/module_radiation_driver.F (WRF 4.8), plus DPD, the degrees-per-day constant of share/module_model_constants.F:74, which lib/wrf_constants.esm does not (yet) carry. Mounted by WRFSolarGeometry as subsystem `par`, which holds every physical and empirical constant (obliquity, equinox day, Fourier coefficients, solar constant, minutes per day/hour, degrees per hour, ...); only structural literals stay inline in the geometry: the harmonic multiplier 2 of cos(2 orbit_angle), sin(2 day_angle) and the like, the half-step radt/2, and the -1/1 bounds of the coszen clamp. Values are the nominal decimal values of the Fortran source; WRF evaluates them in single precision (default REAL), which the reference tests' rel 1e-5 tolerance absorbs.
+
+## Reference
+
+- Paltridge, G. W. and Platt, C. M. R. (1976). Radiative Processes in Meteorology and Climatology. Elsevier (eccentricity-factor Fourier series).
+- Spencer, J. W. (1971). Fourier series representation of the position of the sun. Search 2(5), 172 (equation-of-time series).
+- wrf-model/WRF v4.8.0 phys/module_radiation_driver.F:3469-3511 (radconst) and :3514-3541 (calc_coszen); share/module_model_constants.F:74 (DPD).
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `dpd` | `deg/day` | `0.9863013698630136` | Degrees of orbit per day, DPD = 360./365. (share/module_model_constants.F:74). |
+| `obliquity` | `deg` | `23.5` | Obliquity of the ecliptic, OBECL = 23.5 degrees (radconst). |
+| `equinox_day` | `day` | `80.0` | Day of year of the vernal equinox used by radconst's solar longitude, SXLONG = DPD (JULIAN - 80) for JULIAN >= 80. |
+| `equinox_complement` | `day` | `285.0` | Offset of radconst's pre-equinox branch, SXLONG = DPD (JULIAN + 285) for JULIAN < 80 (285 = 365 - 80). |
+| `solar_constant` | `W/m^2` | `1370.0` | Mean solar constant, SOLCON = 1370 ECCFAC (radconst). |
+| `ecc_a0` | `1` | `1.00011` | Constant term of the Paltridge-Platt eccentricity factor (radconst ECCFAC). |
+| `ecc_a1` | `1` | `0.034221` | cos(theta) coefficient of the eccentricity factor. |
+| `ecc_b1` | `1` | `0.00128` | sin(theta) coefficient of the eccentricity factor. |
+| `ecc_a2` | `1` | `0.000719` | cos(2 theta) coefficient of the eccentricity factor. |
+| `ecc_b2` | `1` | `7.7e-05` | sin(2 theta) coefficient of the eccentricity factor. |
+| `two_pi` | `1` | `6.283185307179586` | 2 pi as calc_coszen writes it (da = 6.2831853071795862 (julian - 0.5)/365). |
+| `eot_day_shift` | `day` | `0.5` | Half-day shift of calc_coszen's day angle, da = 2 pi (julian - 0.5)/365. |
+| `days_per_year` | `day` | `365.0` | Year length of calc_coszen's day angle. |
+| `eot_c0` | `1` | `7.5e-05` | Constant term of the Spencer equation-of-time series (calc_coszen). |
+| `eot_a1` | `1` | `0.001868` | cos(da) coefficient of the equation of time. |
+| `eot_b1` | `1` | `-0.032077` | sin(da) coefficient of the equation of time. |
+| `eot_a2` | `1` | `-0.014615` | cos(2 da) coefficient of the equation of time. |
+| `eot_b2` | `1` | `-0.040849` | sin(2 da) coefficient of the equation of time. |
+| `eot_scale` | `min` | `229.18` | Minutes per radian of the equation of time, 229.18 (calc_coszen). |
+| `minutes_per_day` | `min` | `1440.0` | Minutes per day, the period of calc_coszen's MOD(xtime, 1440.). |
+| `minutes_per_hour` | `min/h` | `60.0` | Minutes per hour (calc_coszen: xt24/60.). |
+| `degrees_per_hour` | `deg/h` | `15.0` | Degrees of Earth rotation per hour (calc_coszen: xlon/15. and 15. (tloctm - 12.)). |
+| `solar_noon` | `h` | `12.0` | Local solar time of solar noon (calc_coszen: tloctm - 12.). |
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "variables": {
+    "dpd": {
+      "type": "parameter",
+      "units": "deg/day",
+      "default": 0.9863013698630136,
+      "description": "Degrees of orbit per day, DPD = 360./365. (share/module_model_constants.F:74)."
+    },
+    "obliquity": {
+      "type": "parameter",
+      "units": "deg",
+      "default": 23.5,
+      "description": "Obliquity of the ecliptic, OBECL = 23.5 degrees (radconst)."
+    },
+    "equinox_day": {
+      "type": "parameter",
+      "units": "day",
+      "default": 80.0,
+      "description": "Day of year of the vernal equinox used by radconst's solar longitude, SXLONG = DPD (JULIAN - 80) for JULIAN >= 80."
+    },
+    "equinox_complement": {
+      "type": "parameter",
+      "units": "day",
+      "default": 285.0,
+      "description": "Offset of radconst's pre-equinox branch, SXLONG = DPD (JULIAN + 285) for JULIAN < 80 (285 = 365 - 80)."
+    },
+    "solar_constant": {
+      "type": "parameter",
+      "units": "W/m^2",
+      "default": 1370.0,
+      "description": "Mean solar constant, SOLCON = 1370 ECCFAC (radconst)."
+    },
+    "ecc_a0": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.00011,
+      "description": "Constant term of the Paltridge-Platt eccentricity factor (radconst ECCFAC)."
+    },
+    "ecc_a1": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.034221,
+      "description": "cos(theta) coefficient of the eccentricity factor."
+    },
+    "ecc_b1": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.00128,
+      "description": "sin(theta) coefficient of the eccentricity factor."
+    },
+    "ecc_a2": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.000719,
+      "description": "cos(2 theta) coefficient of the eccentricity factor."
+    },
+    "ecc_b2": {
+      "type": "parameter",
+      "units": "1",
+      "default": 7.7e-05,
+      "description": "sin(2 theta) coefficient of the eccentricity factor."
+    },
+    "two_pi": {
+      "type": "parameter",
+      "units": "1",
+      "default": 6.283185307179586,
+      "description": "2 pi as calc_coszen writes it (da = 6.2831853071795862 (julian - 0.5)/365)."
+    },
+    "eot_day_shift": {
+      "type": "parameter",
+      "units": "day",
+      "default": 0.5,
+      "description": "Half-day shift of calc_coszen's day angle, da = 2 pi (julian - 0.5)/365."
+    },
+    "days_per_year": {
+      "type": "parameter",
+      "units": "day",
+      "default": 365.0,
+      "description": "Year length of calc_coszen's day angle."
+    },
+    "eot_c0": {
+      "type": "parameter",
+      "units": "1",
+      "default": 7.5e-05,
+      "description": "Constant term of the Spencer equation-of-time series (calc_coszen)."
+    },
+    "eot_a1": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.001868,
+      "description": "cos(da) coefficient of the equation of time."
+    },
+    "eot_b1": {
+      "type": "parameter",
+      "units": "1",
+      "default": -0.032077,
+      "description": "sin(da) coefficient of the equation of time."
+    },
+    "eot_a2": {
+      "type": "parameter",
+      "units": "1",
+      "default": -0.014615,
+      "description": "cos(2 da) coefficient of the equation of time."
+    },
+    "eot_b2": {
+      "type": "parameter",
+      "units": "1",
+      "default": -0.040849,
+      "description": "sin(2 da) coefficient of the equation of time."
+    },
+    "eot_scale": {
+      "type": "parameter",
+      "units": "min",
+      "default": 229.18,
+      "description": "Minutes per radian of the equation of time, 229.18 (calc_coszen)."
+    },
+    "minutes_per_day": {
+      "type": "parameter",
+      "units": "min",
+      "default": 1440.0,
+      "description": "Minutes per day, the period of calc_coszen's MOD(xtime, 1440.)."
+    },
+    "minutes_per_hour": {
+      "type": "parameter",
+      "units": "min/h",
+      "default": 60.0,
+      "description": "Minutes per hour (calc_coszen: xt24/60.)."
+    },
+    "degrees_per_hour": {
+      "type": "parameter",
+      "units": "deg/h",
+      "default": 15.0,
+      "description": "Degrees of Earth rotation per hour (calc_coszen: xlon/15. and 15. (tloctm - 12.))."
+    },
+    "solar_noon": {
+      "type": "parameter",
+      "units": "h",
+      "default": 12.0,
+      "description": "Local solar time of solar noon (calc_coszen: tloctm - 12.)."
+    }
+  },
+  "equations": []
+}
+```
+
+</details>

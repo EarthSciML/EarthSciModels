@@ -1,0 +1,527 @@
+---
+title: "WRFWeselyParameters"
+slug: "wrfweselyparameters"
+domains: ["atmospheric_deposition"]
+component_types: ["model"]
+subdomains: ["wrf_wesely"]
+domain: "atmospheric_deposition"
+subdomain: "wrf_wesely"
+component_type: "model"
+esm_version: "1.1.0"
+esm_path: "components/atmospheric_deposition/wrf_wesely/wesely_parameters.esm"
+description: "Numeric constants of WRF-Chem's Wesely dry-deposition scheme, transcribed from chem/module_dep_simple.F of WRF v4.8.0. Several are places where the AtmosphericDeposition.jl-derived component in EarthSciModels differs; those are called out in the individual descriptions."
+tags: ["atmospheric_deposition", "wrf_wesely", "model"]
+---
+
+## Description
+
+Numeric constants of WRF-Chem's Wesely dry-deposition scheme, transcribed from chem/module_dep_simple.F of WRF v4.8.0. Several are places where the AtmosphericDeposition.jl-derived component in EarthSciModels differs; those are called out in the individual descriptions.
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `t_celsius` | `K` | `273.15` | Celsius offset, tc = t - 273.15 (module_dep_simple.F:940). The AtmosphericDeposition.jl-derived component uses 273.0, a systematic 0.15 K shift in every temperature threshold. |
+| `t_ref` | `K` | `298.0` | Reference temperature of the Henry's law correction, `REAL, parameter :: t0 = 298.` (:923). |
+| `rs_rad_num` | `W/m^2` | `200.0` | Numerator of the stomatal radiation term, z = 200./(rad+0.1). |
+| `rs_rad_eps` | `W/m^2` | `0.1` | The +0.1 guard in z = 200./(rad+0.1). NOT +1.0: at rad = 10 W/m^2 the difference in rs is 15.6 percent. |
+| `rs_t_num` | `K^2` | `400.0` | Numerator of the stomatal temperature term, 400./(tc (40-tc)). |
+| `rs_t_hi` | `K` | `40.0` | Upper temperature of the stomatal window. At or above it rs = 9999; the AtmosphericDeposition.jl-derived component omits this clamp and produces a NEGATIVE rs above 40 C. |
+| `r_big` | `s/m` | `9999.0` | Stomatal resistance outside the 0-40 C window. |
+| `rdc_a` | `s/m` | `100.0` | Leading coefficient of rdc = 100 (1 + 1000/(rad+10)) / (1 + 1000 rdtheta). |
+| `rdc_b` | `W/m^2` | `1000.0` | Radiation coefficient of rdc. |
+| `rdc_c` | `W/m^2` | `10.0` | Radiation offset of rdc. |
+| `rluo1_r` | `s/m` | `3000.0` | The 1/3000 term of rluo1, the O3 cuticle resistance under DEW. |
+| `rluo2_r` | `s/m` | `1000.0` | The 1/1000 term of rluo2, the O3 cuticle resistance under RAIN. |
+| `rluo_mult` | `1` | `3.0` | The factor 3 that appears in BOTH spellings of the cuticle conductance -- as `3./rlu` in rluo1/rluo2 (:963-964) and as `1./(3.*rlu)` in the general wet/rain branch (:1031,:1034). Those two are NOT the same thing and differ by a factor of 9; see FORTRAN_BUGS B4. This component transcribes each site as WRF spells it. |
+| `resice_a` | `s/m` | `1000.0` | Amplitude of the ice resistance, resice = 1000 exp(-(tc+4)). |
+| `resice_b` | `K` | `4.0` | Offset of the ice resistance. Applied UNCONDITIONALLY by WRF, not gated on tc < 0. |
+| `resice_tscale` | `K` | `1.0` | Temperature scale of the ice resistance's exponent, resice = 1000 exp(-(tc+4)/(1 K)). WRF writes exp(-(tc+4.)) with tc in degrees C; this 1 K reference only makes the exponent dimensionless and does not change any value. |
+| `rmx_h` | `(M/atm)/(m/s)` | `3000.0` | Henry's law divisor of the mesophyll resistance, rmx = 1/(hstary/3000 + 100 f0). Carries (M/atm)/(m/s) so that hstary/rmx_h is a conductance in m/s; the value is WRF's 3000 unchanged. |
+| `rmx_f` | `m/s` | `100.0` | Reactivity coefficient of the mesophyll resistance. Carries m/s so that rmx_f f0 is a conductance and rmx = 1/(hstary/rmx_h + rmx_f f0) comes out in s/m. |
+| `hstar_scale` | `1/(M/atm)` | `1e-05` | The 1.e-5 multiplying hstary in rclx, rgsx and the dry rlux. |
+| `hstar_scale_wet` | `(m/s)/(M/atm)` | `1e-07` | The 1.e-7 multiplying hstary in the wet and rain rlux, 1/rlux = 1/(3 rlu) + 1.e-7 hstary + f0/rluo1: every other term is a conductance, so Wesely's (1989) empirical coefficient carries (m/s)/(M/atm). Declared 1/(M/atm) until 2026-11-12, which the esm 2.1 validator rejected as adding a dimensionless term to conductances; the number is unchanged. (The dry 1.e-5, hstar_scale, sits inside a dimensionless bracket and is correctly 1/(M/atm).) |
+| `rc_floor` | `s/m` | `1.0` | Floor on Rc, `rcx(n) = max( 1.,rcx(n) )`. There is NO ceiling: WRF's Rc for NO reaches 5.6e9 s/m. The AtmosphericDeposition.jl-derived component clamps to [10, 9999], which is 10x too large for HNO3 and about a million times too small for the insoluble unreactive gases. |
+| `rs_t_eps` | `K^2` | `1e-30` | Guard keeping the discarded stomatal branch finite where its denominator tc (40 - tc) vanishes (tc = 0 or 40), so it carries that denominator's K^2. Split on 2026-11-12 from the dimensionless rc_eps, which the esm 2.1 validator rejected against both of its uses. |
+| `hstar_eps` | `M/atm` | `1e-30` | Floor keeping a discarded branch finite for a gas with hstar = 0, so it carries hstary's M/atm. Split on 2026-11-12 from the dimensionless rc_eps. |
+| `o3_rac_cap` | `s/m` | `100.0` | Cap on the in-canopy resistance in the OZONE branch only, min(100., rac) (:1054). For deciduous midsummer rac = 2000, so this is a factor of 7.3 on the ground-path conductance. |
+| `p_o3` | `1` | `6.0` | Gas index of O3 for chem_opt = 101. |
+| `p_so2` | `1` | `2.0` | Gas index of SO2. |
+| `usgs_water` | `1` | `16.0` | USGS land-use category of water, `iswater_temp = 16` (:19). |
+| `usgs_ice` | `1` | `24.0` | USGS land-use category of permanent ice, `isice_temp = 24` (:18). |
+| `season_snow` | `1` | `4.0` | Seasonal category 4, 'winter with snow'. Note that for every non-MOZART mechanism wesely_driver only ever produces iseason 1 or 2 (FORTRAN_BUGS B7), so this branch is unreachable in a RADM2 run; it is transcribed because the kernel sweep can reach it. |
+| `tc_warm` | `K` | `-1.0` | The -1 C threshold shared by the SO2 cuticle, the SO2/NH3 snow branches and the NH3 winter branches. |
+| `tc_cold` | `K` | `-5.0` | The -5 C threshold below which the SO2 cuticle and the NH3 winter branches take their coldest value. |
+| `so2_rh_split` | `%` | `81.3` | Relative humidity at which the SO2 cuticle resistance switches expression. |
+| `so2_rh_a1` | `s/m` | `25000.0` | Amplitude below 81.3 percent RH, rlux = 25000 exp(-0.0693 rh). |
+| `so2_rh_b1` | `1/%` | `-0.0693` | Exponent below 81.3 percent RH. |
+| `so2_rh_a2` | `s/m` | `580000000000.0` | Amplitude above 81.3 percent RH, rlux = 0.58e12 exp(-0.278 rh). |
+| `so2_rh_b2` | `1/%` | `-0.278` | Exponent above 81.3 percent RH. |
+| `so2_rlux_wet` | `s/m` | `1.0` | SO2 cuticle resistance on a wet or rained-on surface warmer than -1 C. |
+| `so2_rlux_cool` | `s/m` | `200.0` | SO2 cuticle resistance for -5 <= tc <= -1 C. |
+| `so2_rlux_cold` | `s/m` | `500.0` | SO2 cuticle resistance below -5 C. |
+| `so2_rgs_dry` | `s/m` | `1000.0` | SO2 ground resistance over a dry surface. |
+| `so2_rgs_wet` | `s/m` | `500.0` | SO2 ground resistance over a wet surface with ordinary NH3. |
+| `snow_tc_hi` | `K` | `2.0` | Upper temperature of the snow ramp, shared by SO2 and NH3. |
+| `snow_a` | `s/(m K)` | `70.0` | Slope of the snow ramp, 70 (2 - tc). |
+| `snow_cold` | `s/m` | `500.0` | Snow-covered resistance below the ramp. |
+| `nh3_cool` | `s/m` | `200.0` | NH3 resistance for -5 <= tc <= -1 C in the winter branches. |
+| `nh3_verycold` | `s/m` | `500.0` | NH3 resistance below -5 C in the winter branches. |
+| `nh3_grass_summer` | `s/m` | `1000.0` | NH3 over grassland in summer. |
+| `nh3_grass_day` | `s/m` | `50.0` | NH3 over grassland, winter, daytime. |
+| `nh3_grass_night` | `s/m` | `100.0` | NH3 over grassland, winter, night. |
+| `nh3_grass_wet` | `s/m` | `20.0` | NH3 over grassland, winter, wet. |
+| `nh3_agri_wet_s` | `s/m` | `50.0` | NH3 over agricultural land, summer, wet. |
+| `nh3_agri_night_s` | `s/m` | `200.0` | NH3 over agricultural land, summer, night. |
+| `nh3_agri_wet_w` | `s/m` | `100.0` | NH3 over agricultural land, winter, wet. |
+| `nh3_agri_night_w` | `s/m` | `300.0` | NH3 over agricultural land, winter, night. |
+| `nh3_forest_day` | `s/m` | `500.0` | NH3 over forest and semi-natural, daytime. |
+| `nh3_forest_night` | `s/m` | `1000.0` | NH3 over forest and semi-natural, night. |
+| `nh3_forest_wet_hi` | `s/m` | `100.0` | NH3 over forest, wet, in a high-NH3 regime (chem(nh3) > 2 chem(so2)); otherwise the wet forest value is 0. |
+| `nh3_urban_dry` | `s/m` | `50.0` | NH3 over urban and desert soils when dry; 0 when wet. |
+| `z_ref` | `m` | `2.0` | Reference height of the deposition velocity, `zr = 2.0` in landusevg (:1423 region). The 2 m value is then converted to a layer mean by cellvg; a component that evaluates the resistances at the first layer's MID-POINT instead is answering a different question. |
+| `prandtl_74` | `1` | `0.74` | The turbulent Prandtl number of the Businger heat profile, the 0.74 in every branch of polint and of cellvg's integral. Its absence inflates Ra by 1/0.74 = 1.351. |
+| `businger_c` | `1` | `9.0` | Coefficient of the unstable Businger HEAT function, (1 - 9 z/L)^(1/4). The momentum function uses 15 and carries an extra arctan term; this is not that. |
+| `busing_eps` | `1` | `0.001` | The +0.001 inside ((1-9 z rmol)^0.25 + 0.001)^2. |
+| `stable_c` | `1` | `4.7` | Coefficient of the stable branch, + 4.7 rmol (zr - z0). |
+| `rb_c` | `1` | `2.0` | The 2.0 of depv = ustar vk/(2 scpr23 + polint); with karman = 0.4 it makes Rb = 5 scpr23/ustar. |
+| `ustar_floor` | `m/s` | `0.0001` | Floor on the friction velocity in aer_res only, max(ustar,1.0e-4). |
+| `rmol_deadband` | `1/m` | `1e-06` | Below this magnitude depvel treats 1/L as exactly zero. |
+| `cell_b` | `1` | `0.164` | The 0.164/rmol coefficient of cellvg's unstable integral. |
+| `cell_stable_c` | `1` | `2.35` | The 2.35 rmol (dz-zr)^2 term of cellvg's stable integral. |
+| `cell_eps` | `1` | `1e-30` | Guard keeping a discarded cellvg branch finite when the log or square-root argument is degenerate. Dimensionless; the matching guard on rmol itself is rmol_eps. Also clamps the Businger base 1 - 9 z rmol and the log arguments (ar-1)/(ar+1), (ao-1)/(ao+1) of depvel's unstable polint, and the (pzr - 1) denominator of cellvg's log argument, so that the discarded branches stay finite at rmol = 0 and in stable states. None of these clamps is active on the branch actually selected (rmol < 0 gives 1 - 9 z rmol > 1, ar, ao > 1.001^2 and pzr - 1 > 0). |
+| `rmol_eps` | `1/m` | `1e-30` | Guard keeping cellvg's discarded unstable branch finite when rmol is zero: it stands in for rmol in `cell_b/rmol`, so it carries rmol's units (split from the dimensionless cell_eps on 2026-11-12, when the esm 2.1 validator rejected the ifelse mixing the two). |
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "variables": {
+    "t_celsius": {
+      "type": "parameter",
+      "units": "K",
+      "default": 273.15,
+      "description": "Celsius offset, tc = t - 273.15 (module_dep_simple.F:940). The AtmosphericDeposition.jl-derived component uses 273.0, a systematic 0.15 K shift in every temperature threshold."
+    },
+    "t_ref": {
+      "type": "parameter",
+      "units": "K",
+      "default": 298.0,
+      "description": "Reference temperature of the Henry's law correction, `REAL, parameter :: t0 = 298.` (:923)."
+    },
+    "rs_rad_num": {
+      "type": "parameter",
+      "units": "W/m^2",
+      "default": 200.0,
+      "description": "Numerator of the stomatal radiation term, z = 200./(rad+0.1)."
+    },
+    "rs_rad_eps": {
+      "type": "parameter",
+      "units": "W/m^2",
+      "default": 0.1,
+      "description": "The +0.1 guard in z = 200./(rad+0.1). NOT +1.0: at rad = 10 W/m^2 the difference in rs is 15.6 percent."
+    },
+    "rs_t_num": {
+      "type": "parameter",
+      "units": "K^2",
+      "default": 400.0,
+      "description": "Numerator of the stomatal temperature term, 400./(tc (40-tc))."
+    },
+    "rs_t_hi": {
+      "type": "parameter",
+      "units": "K",
+      "default": 40.0,
+      "description": "Upper temperature of the stomatal window. At or above it rs = 9999; the AtmosphericDeposition.jl-derived component omits this clamp and produces a NEGATIVE rs above 40 C."
+    },
+    "r_big": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 9999.0,
+      "description": "Stomatal resistance outside the 0-40 C window."
+    },
+    "rdc_a": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 100.0,
+      "description": "Leading coefficient of rdc = 100 (1 + 1000/(rad+10)) / (1 + 1000 rdtheta)."
+    },
+    "rdc_b": {
+      "type": "parameter",
+      "units": "W/m^2",
+      "default": 1000.0,
+      "description": "Radiation coefficient of rdc."
+    },
+    "rdc_c": {
+      "type": "parameter",
+      "units": "W/m^2",
+      "default": 10.0,
+      "description": "Radiation offset of rdc."
+    },
+    "rluo1_r": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 3000.0,
+      "description": "The 1/3000 term of rluo1, the O3 cuticle resistance under DEW."
+    },
+    "rluo2_r": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 1000.0,
+      "description": "The 1/1000 term of rluo2, the O3 cuticle resistance under RAIN."
+    },
+    "rluo_mult": {
+      "type": "parameter",
+      "units": "1",
+      "default": 3.0,
+      "description": "The factor 3 that appears in BOTH spellings of the cuticle conductance -- as `3./rlu` in rluo1/rluo2 (:963-964) and as `1./(3.*rlu)` in the general wet/rain branch (:1031,:1034). Those two are NOT the same thing and differ by a factor of 9; see FORTRAN_BUGS B4. This component transcribes each site as WRF spells it."
+    },
+    "resice_a": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 1000.0,
+      "description": "Amplitude of the ice resistance, resice = 1000 exp(-(tc+4))."
+    },
+    "resice_b": {
+      "type": "parameter",
+      "units": "K",
+      "default": 4.0,
+      "description": "Offset of the ice resistance. Applied UNCONDITIONALLY by WRF, not gated on tc < 0."
+    },
+    "resice_tscale": {
+      "type": "parameter",
+      "units": "K",
+      "default": 1.0,
+      "description": "Temperature scale of the ice resistance's exponent, resice = 1000 exp(-(tc+4)/(1 K)). WRF writes exp(-(tc+4.)) with tc in degrees C; this 1 K reference only makes the exponent dimensionless and does not change any value."
+    },
+    "rmx_h": {
+      "type": "parameter",
+      "units": "(M/atm)/(m/s)",
+      "default": 3000.0,
+      "description": "Henry's law divisor of the mesophyll resistance, rmx = 1/(hstary/3000 + 100 f0). Carries (M/atm)/(m/s) so that hstary/rmx_h is a conductance in m/s; the value is WRF's 3000 unchanged."
+    },
+    "rmx_f": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 100.0,
+      "description": "Reactivity coefficient of the mesophyll resistance. Carries m/s so that rmx_f f0 is a conductance and rmx = 1/(hstary/rmx_h + rmx_f f0) comes out in s/m."
+    },
+    "hstar_scale": {
+      "type": "parameter",
+      "units": "1/(M/atm)",
+      "default": 1e-05,
+      "description": "The 1.e-5 multiplying hstary in rclx, rgsx and the dry rlux."
+    },
+    "hstar_scale_wet": {
+      "type": "parameter",
+      "units": "(m/s)/(M/atm)",
+      "default": 1e-07,
+      "description": "The 1.e-7 multiplying hstary in the wet and rain rlux, 1/rlux = 1/(3 rlu) + 1.e-7 hstary + f0/rluo1: every other term is a conductance, so Wesely's (1989) empirical coefficient carries (m/s)/(M/atm). Declared 1/(M/atm) until 2026-11-12, which the esm 2.1 validator rejected as adding a dimensionless term to conductances; the number is unchanged. (The dry 1.e-5, hstar_scale, sits inside a dimensionless bracket and is correctly 1/(M/atm).)"
+    },
+    "rc_floor": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 1.0,
+      "description": "Floor on Rc, `rcx(n) = max( 1.,rcx(n) )`. There is NO ceiling: WRF's Rc for NO reaches 5.6e9 s/m. The AtmosphericDeposition.jl-derived component clamps to [10, 9999], which is 10x too large for HNO3 and about a million times too small for the insoluble unreactive gases."
+    },
+    "rs_t_eps": {
+      "type": "parameter",
+      "units": "K^2",
+      "default": 1e-30,
+      "description": "Guard keeping the discarded stomatal branch finite where its denominator tc (40 - tc) vanishes (tc = 0 or 40), so it carries that denominator's K^2. Split on 2026-11-12 from the dimensionless rc_eps, which the esm 2.1 validator rejected against both of its uses."
+    },
+    "hstar_eps": {
+      "type": "parameter",
+      "units": "M/atm",
+      "default": 1e-30,
+      "description": "Floor keeping a discarded branch finite for a gas with hstar = 0, so it carries hstary's M/atm. Split on 2026-11-12 from the dimensionless rc_eps."
+    },
+    "o3_rac_cap": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 100.0,
+      "description": "Cap on the in-canopy resistance in the OZONE branch only, min(100., rac) (:1054). For deciduous midsummer rac = 2000, so this is a factor of 7.3 on the ground-path conductance."
+    },
+    "p_o3": {
+      "type": "parameter",
+      "units": "1",
+      "default": 6.0,
+      "description": "Gas index of O3 for chem_opt = 101."
+    },
+    "p_so2": {
+      "type": "parameter",
+      "units": "1",
+      "default": 2.0,
+      "description": "Gas index of SO2."
+    },
+    "usgs_water": {
+      "type": "parameter",
+      "units": "1",
+      "default": 16.0,
+      "description": "USGS land-use category of water, `iswater_temp = 16` (:19)."
+    },
+    "usgs_ice": {
+      "type": "parameter",
+      "units": "1",
+      "default": 24.0,
+      "description": "USGS land-use category of permanent ice, `isice_temp = 24` (:18)."
+    },
+    "season_snow": {
+      "type": "parameter",
+      "units": "1",
+      "default": 4.0,
+      "description": "Seasonal category 4, 'winter with snow'. Note that for every non-MOZART mechanism wesely_driver only ever produces iseason 1 or 2 (FORTRAN_BUGS B7), so this branch is unreachable in a RADM2 run; it is transcribed because the kernel sweep can reach it."
+    },
+    "tc_warm": {
+      "type": "parameter",
+      "units": "K",
+      "default": -1.0,
+      "description": "The -1 C threshold shared by the SO2 cuticle, the SO2/NH3 snow branches and the NH3 winter branches."
+    },
+    "tc_cold": {
+      "type": "parameter",
+      "units": "K",
+      "default": -5.0,
+      "description": "The -5 C threshold below which the SO2 cuticle and the NH3 winter branches take their coldest value."
+    },
+    "so2_rh_split": {
+      "type": "parameter",
+      "units": "%",
+      "default": 81.3,
+      "description": "Relative humidity at which the SO2 cuticle resistance switches expression."
+    },
+    "so2_rh_a1": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 25000.0,
+      "description": "Amplitude below 81.3 percent RH, rlux = 25000 exp(-0.0693 rh)."
+    },
+    "so2_rh_b1": {
+      "type": "parameter",
+      "units": "1/%",
+      "default": -0.0693,
+      "description": "Exponent below 81.3 percent RH."
+    },
+    "so2_rh_a2": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 580000000000.0,
+      "description": "Amplitude above 81.3 percent RH, rlux = 0.58e12 exp(-0.278 rh)."
+    },
+    "so2_rh_b2": {
+      "type": "parameter",
+      "units": "1/%",
+      "default": -0.278,
+      "description": "Exponent above 81.3 percent RH."
+    },
+    "so2_rlux_wet": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 1.0,
+      "description": "SO2 cuticle resistance on a wet or rained-on surface warmer than -1 C."
+    },
+    "so2_rlux_cool": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 200.0,
+      "description": "SO2 cuticle resistance for -5 <= tc <= -1 C."
+    },
+    "so2_rlux_cold": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 500.0,
+      "description": "SO2 cuticle resistance below -5 C."
+    },
+    "so2_rgs_dry": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 1000.0,
+      "description": "SO2 ground resistance over a dry surface."
+    },
+    "so2_rgs_wet": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 500.0,
+      "description": "SO2 ground resistance over a wet surface with ordinary NH3."
+    },
+    "snow_tc_hi": {
+      "type": "parameter",
+      "units": "K",
+      "default": 2.0,
+      "description": "Upper temperature of the snow ramp, shared by SO2 and NH3."
+    },
+    "snow_a": {
+      "type": "parameter",
+      "units": "s/(m K)",
+      "default": 70.0,
+      "description": "Slope of the snow ramp, 70 (2 - tc)."
+    },
+    "snow_cold": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 500.0,
+      "description": "Snow-covered resistance below the ramp."
+    },
+    "nh3_cool": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 200.0,
+      "description": "NH3 resistance for -5 <= tc <= -1 C in the winter branches."
+    },
+    "nh3_verycold": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 500.0,
+      "description": "NH3 resistance below -5 C in the winter branches."
+    },
+    "nh3_grass_summer": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 1000.0,
+      "description": "NH3 over grassland in summer."
+    },
+    "nh3_grass_day": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 50.0,
+      "description": "NH3 over grassland, winter, daytime."
+    },
+    "nh3_grass_night": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 100.0,
+      "description": "NH3 over grassland, winter, night."
+    },
+    "nh3_grass_wet": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 20.0,
+      "description": "NH3 over grassland, winter, wet."
+    },
+    "nh3_agri_wet_s": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 50.0,
+      "description": "NH3 over agricultural land, summer, wet."
+    },
+    "nh3_agri_night_s": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 200.0,
+      "description": "NH3 over agricultural land, summer, night."
+    },
+    "nh3_agri_wet_w": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 100.0,
+      "description": "NH3 over agricultural land, winter, wet."
+    },
+    "nh3_agri_night_w": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 300.0,
+      "description": "NH3 over agricultural land, winter, night."
+    },
+    "nh3_forest_day": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 500.0,
+      "description": "NH3 over forest and semi-natural, daytime."
+    },
+    "nh3_forest_night": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 1000.0,
+      "description": "NH3 over forest and semi-natural, night."
+    },
+    "nh3_forest_wet_hi": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 100.0,
+      "description": "NH3 over forest, wet, in a high-NH3 regime (chem(nh3) > 2 chem(so2)); otherwise the wet forest value is 0."
+    },
+    "nh3_urban_dry": {
+      "type": "parameter",
+      "units": "s/m",
+      "default": 50.0,
+      "description": "NH3 over urban and desert soils when dry; 0 when wet."
+    },
+    "z_ref": {
+      "type": "parameter",
+      "units": "m",
+      "default": 2.0,
+      "description": "Reference height of the deposition velocity, `zr = 2.0` in landusevg (:1423 region). The 2 m value is then converted to a layer mean by cellvg; a component that evaluates the resistances at the first layer's MID-POINT instead is answering a different question."
+    },
+    "prandtl_74": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.74,
+      "description": "The turbulent Prandtl number of the Businger heat profile, the 0.74 in every branch of polint and of cellvg's integral. Its absence inflates Ra by 1/0.74 = 1.351."
+    },
+    "businger_c": {
+      "type": "parameter",
+      "units": "1",
+      "default": 9.0,
+      "description": "Coefficient of the unstable Businger HEAT function, (1 - 9 z/L)^(1/4). The momentum function uses 15 and carries an extra arctan term; this is not that."
+    },
+    "busing_eps": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.001,
+      "description": "The +0.001 inside ((1-9 z rmol)^0.25 + 0.001)^2."
+    },
+    "stable_c": {
+      "type": "parameter",
+      "units": "1",
+      "default": 4.7,
+      "description": "Coefficient of the stable branch, + 4.7 rmol (zr - z0)."
+    },
+    "rb_c": {
+      "type": "parameter",
+      "units": "1",
+      "default": 2.0,
+      "description": "The 2.0 of depv = ustar vk/(2 scpr23 + polint); with karman = 0.4 it makes Rb = 5 scpr23/ustar."
+    },
+    "ustar_floor": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 0.0001,
+      "description": "Floor on the friction velocity in aer_res only, max(ustar,1.0e-4)."
+    },
+    "rmol_deadband": {
+      "type": "parameter",
+      "units": "1/m",
+      "default": 1e-06,
+      "description": "Below this magnitude depvel treats 1/L as exactly zero."
+    },
+    "cell_b": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.164,
+      "description": "The 0.164/rmol coefficient of cellvg's unstable integral."
+    },
+    "cell_stable_c": {
+      "type": "parameter",
+      "units": "1",
+      "default": 2.35,
+      "description": "The 2.35 rmol (dz-zr)^2 term of cellvg's stable integral."
+    },
+    "cell_eps": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1e-30,
+      "description": "Guard keeping a discarded cellvg branch finite when the log or square-root argument is degenerate. Dimensionless; the matching guard on rmol itself is rmol_eps. Also clamps the Businger base 1 - 9 z rmol and the log arguments (ar-1)/(ar+1), (ao-1)/(ao+1) of depvel's unstable polint, and the (pzr - 1) denominator of cellvg's log argument, so that the discarded branches stay finite at rmol = 0 and in stable states. None of these clamps is active on the branch actually selected (rmol < 0 gives 1 - 9 z rmol > 1, ar, ao > 1.001^2 and pzr - 1 > 0)."
+    },
+    "rmol_eps": {
+      "type": "parameter",
+      "units": "1/m",
+      "default": 1e-30,
+      "description": "Guard keeping cellvg's discarded unstable branch finite when rmol is zero: it stands in for rmol in `cell_b/rmol`, so it carries rmol's units (split from the dimensionless cell_eps on 2026-11-12, when the esm 2.1 validator rejected the ifelse mixing the two)."
+    }
+  },
+  "equations": []
+}
+```
+
+</details>
