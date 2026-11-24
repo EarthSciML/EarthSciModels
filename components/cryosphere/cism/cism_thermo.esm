@@ -110,7 +110,7 @@
      ],
      "units": "degC",
      "default": 0.0,
-     "description": "Ice temperature on the INTERIOR sigma nodes (lev = the CISM layer midpoints stagsigma(1..10), the dump's temp_001..010 columns), degC; the ODE state of the heat equation d(temp)/dt = dTdt. The surface and bed nodes are algebraic in CISM (the matrix rows 1 and upn+1, F90:1405-1408 and 1473-1504) and are carried as u_sfc/u_top, entering the interior stencil as boundary values through the varcoeff_face_laplacian_lev_value_bc free-name contract (u_sfc at z_sfc, u_top at z_top)"
+     "description": "Ice temperature on the INTERIOR sigma nodes (lev = the CISM layer midpoints stagsigma(1..10), the dump's temp_001..010 columns), degC; the ODE state of the heat equation d(temp)/dt = dTdt. The surface and bed nodes are algebraic in CISM (the matrix rows 1 and upn+1, F90:1405-1408 and 1473-1504) and are carried as u_sfc/u_top, entering the interior stencil as boundary values through the varcoeff_face_laplacian_lev_value_bc free-name contract (u_sfc at z_sfc, u_top at z_top) Read temp_out for the profile with the thin-column reset applied."
     },
     "dTdt": {
      "type": "unknown",
@@ -119,7 +119,7 @@
      ],
      "units": "degC/s",
      "default": 0.0,
-     "description": "Interior temperature rate dT/dt = L*temp + dissip, with L the varcoeff_face_laplacian_lev_value_bc operator of the imported ESD rule (the dups stencil of glissade_temperature_matrix_elements, F90:151-163, 1410-1418, with the boundary faces built from the algebraic u_sfc/u_top) and dissip the strain heating on the interior nodes (the dumped dissip_001..010 columns; the Fortran RHS temp + dissip*dttem, F90:1418)"
+     "description": "Interior temperature rate dT/dt = L*temp + dissip, with L the varcoeff_face_laplacian_lev_value_bc operator of the imported ESD rule (the dups stencil of glissade_temperature_matrix_elements, F90:151-163, 1410-1418, with the boundary faces built from the algebraic u_sfc/u_top) and dissip the strain heating on the interior nodes (the dumped dissip_001..010 columns; the Fortran RHS temp + dissip*dttem, F90:1418) Zero in columns that bypass the solve."
     },
     "pmptemp": {
      "type": "unknown",
@@ -448,6 +448,27 @@
      "units": "W/m^2",
      "default": 1e-11,
      "description": "Small number eps11 = 1.0d-11 (glimmer_paramets): bflx_mlt is zeroed where |bflx_mlt| < eps11 (F90:1927-1929); a pure number in the Fortran, but it is compared against the flux bflx_mlt there, so it is declared here as a flux magnitude threshold (W/m2)"
+    },
+    "temp_out": {
+     "type": "unknown",
+     "units": "degC",
+     "default": 0.0,
+     "description": "Interior temperature after applying the thin-column bypass. Use this profile with u_sfc and u_top. Below the solve threshold every node is set to min(0, artm).",
+     "shape": [
+      "lev"
+     ]
+    },
+    "solve_active": {
+     "type": "unknown",
+     "units": "1",
+     "default": 0.0,
+     "description": "One when the supplied ice mask is set and the column exceeds thklim_temp."
+    },
+    "thklim_temp": {
+     "type": "parameter",
+     "units": "m",
+     "default": 1.0,
+     "description": "Minimum thickness for the temperature solve (thklim_temp in glissade_therm_driver)."
     }
    },
    "equations": [
@@ -464,40 +485,58 @@
     {
      "lhs": "dTdt",
      "rhs": {
-      "op": "+",
+      "op": "ifelse",
       "args": [
        {
-        "op": "/",
+        "op": "==",
+        "args": [
+         "solve_active",
+         1.0
+        ]
+       },
+       {
+        "op": "+",
         "args": [
          {
-          "op": "D",
+          "op": "/",
           "args": [
+           {
+            "op": "D",
+            "args": [
+             {
+              "op": "*",
+              "args": [
+               "coni_face",
+               {
+                "op": "D",
+                "args": [
+                 "temp"
+                ],
+                "wrt": "lev"
+               }
+              ]
+             }
+            ],
+            "wrt": "lev"
+           },
            {
             "op": "*",
             "args": [
-             "coni_face",
-             {
-              "op": "D",
-              "args": [
-               "temp"
-              ],
-              "wrt": "lev"
-             }
+             "rhoi",
+             "shci"
             ]
            }
-          ],
-          "wrt": "lev"
-         },
-         {
-          "op": "*",
-          "args": [
-           "rhoi",
-           "shci"
           ]
-         }
+         },
+         "dissip"
         ]
        },
-       "dissip"
+       {
+        "op": "const",
+        "args": [],
+        "value": 0.0,
+        "units": "degC/s"
+       }
       ]
      }
     },
@@ -514,13 +553,8 @@
        {
         "op": "==",
         "args": [
-         "ice_mask",
-         {
-          "op": "const",
-          "args": [],
-          "value": 1.0,
-          "units": "1"
-         }
+         "solve_active",
+         1.0
         ]
        },
        {
@@ -590,13 +624,8 @@
        {
         "op": "==",
         "args": [
-         "ice_mask",
-         {
-          "op": "const",
-          "args": [],
-          "value": 1.0,
-          "units": "1"
-         }
+         "solve_active",
+         1.0
         ]
        },
        {
@@ -688,13 +717,8 @@
        {
         "op": "==",
         "args": [
-         "ice_mask",
-         {
-          "op": "const",
-          "args": [],
-          "value": 1.0,
-          "units": "1"
-         }
+         "solve_active",
+         1.0
         ]
        },
        {
@@ -772,53 +796,65 @@
     {
      "lhs": "lcondflx_ground",
      "rhs": {
-      "op": "-",
+      "op": "ifelse",
       "args": [
        {
-        "op": "*",
+        "op": "==",
+        "args": [
+         "solve_active",
+         1.0
+        ]
+       },
+       {
+        "op": "-",
         "args": [
          {
-          "op": "index",
-          "args": [
-           "coni_face",
-           "UPN"
-          ]
-         },
-         {
-          "op": "/",
+          "op": "*",
           "args": [
            {
-            "op": "-",
+            "op": "index",
             "args": [
-             "u_top",
-             {
-              "op": "index",
-              "args": [
-               "temp",
-               {
-                "op": "-",
-                "args": [
-                 "UPN",
-                 1
-                ]
-               }
-              ]
-             }
+             "coni_face",
+             "UPN"
             ]
            },
            {
-            "op": "-",
+            "op": "/",
             "args": [
-             "z_top",
              {
-              "op": "index",
+              "op": "-",
               "args": [
-               "zc",
+               "u_top",
                {
-                "op": "-",
+                "op": "index",
                 "args": [
-                 "UPN",
-                 1
+                 "temp",
+                 {
+                  "op": "-",
+                  "args": [
+                   "UPN",
+                   1
+                  ]
+                 }
+                ]
+               }
+              ]
+             },
+             {
+              "op": "-",
+              "args": [
+               "z_top",
+               {
+                "op": "index",
+                "args": [
+                 "zc",
+                 {
+                  "op": "-",
+                  "args": [
+                   "UPN",
+                   1
+                  ]
+                 }
                 ]
                }
               ]
@@ -828,6 +864,12 @@
           ]
          }
         ]
+       },
+       {
+        "op": "const",
+        "args": [],
+        "value": 0.0,
+        "units": "W/m^2"
        }
       ]
      }
@@ -840,13 +882,8 @@
        {
         "op": "==",
         "args": [
-         "ice_mask",
-         {
-          "op": "const",
-          "args": [],
-          "value": 1.0,
-          "units": "1"
-         }
+         "solve_active",
+         1.0
         ]
        },
        {
@@ -929,13 +966,8 @@
        {
         "op": "==",
         "args": [
-         "ice_mask",
-         {
-          "op": "const",
-          "args": [],
-          "value": 1.0,
-          "units": "1"
-         }
+         "solve_active",
+         1.0
         ]
        },
        {
@@ -966,7 +998,7 @@
       "args": [],
       "name": "cism_internal_melt_rate",
       "bindings": {
-       "temp": "temp",
+       "temp": "temp_out",
        "pmptemp": "pmptemp",
        "rhoi": "rhoi",
        "shci": "shci"
@@ -1115,6 +1147,74 @@
       "args": [],
       "value": 0.0,
       "units": "1"
+     }
+    },
+    {
+     "lhs": "solve_active",
+     "rhs": {
+      "op": "ifelse",
+      "args": [
+       {
+        "op": "and",
+        "args": [
+         {
+          "op": "==",
+          "args": [
+           "ice_mask",
+           1.0
+          ]
+         },
+         {
+          "op": ">",
+          "args": [
+           "thck",
+           "thklim_temp"
+          ]
+         }
+        ]
+       },
+       1.0,
+       0.0
+      ]
+     }
+    },
+    {
+     "lhs": "temp_out",
+     "rhs": {
+      "op": "faq",
+      "args": [
+       "temp",
+       "solve_active",
+       "u_sfc"
+      ],
+      "output_idx": [
+       "l"
+      ],
+      "ranges": {
+       "l": {
+        "from": "lev"
+       }
+      },
+      "expr": {
+       "op": "ifelse",
+       "args": [
+        {
+         "op": "==",
+         "args": [
+          "solve_active",
+          1.0
+         ]
+        },
+        {
+         "op": "index",
+         "args": [
+          "temp",
+          "l"
+         ]
+        },
+        "u_sfc"
+       ]
+      }
      }
     }
    ],
@@ -2117,23 +2217,23 @@
     },
     {
      "id": "surface_law_thin_cell2811",
-     "description": "The surface Dirichlet law and the thin-ice bypass on an ice-free traced column, pinned from cism_thermo.csv step 1, cell (28,11) (thck = 0.0199584998190403 m <= thklim_temp = 1 m, ice_mask = 0, artm = -2.389185071557904 degC): the column bypasses the temperature solve entirely and is set to min(0, artm) on all 12 nodes (F90:1205; the exit temp_000..011 columns are all -2.389185071557904), so u_sfc = min(0, artm) holds there as everywhere and the bed temperature (the last node of the bypassed column) is min(0, artm) as well; the pmp and the basal outputs are not computed for ice_mask = 0 cells (the exit bpmp and btemp_ground columns are 0, hence bpmp = 0 and btemp_ground = 0), and the basal melt chain is zero (bmlt_ground = 0; melt_internal = 0: temp = min(0, artm) <= 0 while pmptemp = 0). The dTdt = 0 rows (the interior stencil sees a constant column, dissip = 0) assert the bypassed profile. The dissip of the unsolved column is 0 (the dumped dissip_001..010 columns).",
+     "description": "Thin traced column (cell 28,11) with an intentionally different incoming temperature and nonzero strain heating. The column skips the thermal solve and reports the dumped min(0, artm) profile.",
      "time_span": {
       "start": 0.0,
       "end": 0.0
      },
      "initial_conditions": {
       "temp": [
-       -2.389185071557904,
-       -2.389185071557904,
-       -2.389185071557904,
-       -2.389185071557904,
-       -2.389185071557904,
-       -2.389185071557904,
-       -2.389185071557904,
-       -2.389185071557904,
-       -2.389185071557904,
-       -2.389185071557904
+       -5.0,
+       -5.0,
+       -5.0,
+       -5.0,
+       -5.0,
+       -5.0,
+       -5.0,
+       -5.0,
+       -5.0,
+       -5.0
       ]
      },
      "parameter_overrides": {
@@ -2143,16 +2243,16 @@
       "btemp_ground_entry": -5.0000174906032,
       "ice_mask": 0.0,
       "dissip": [
-       0.0,
-       0.0,
-       0.0,
-       0.0,
-       0.0,
-       0.0,
-       0.0,
-       0.0,
-       0.0,
-       0.0
+       1e-06,
+       1e-06,
+       1e-06,
+       1e-06,
+       1e-06,
+       1e-06,
+       1e-06,
+       1e-06,
+       1e-06,
+       1e-06
       ]
      },
      "assertions": [
@@ -2200,6 +2300,48 @@
        "variable": "melt_internal",
        "time": 0.0,
        "expected": 0.0
+      },
+      {
+       "variable": "temp_out",
+       "time": 0.0,
+       "expected": -2.389185071557904,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       },
+       "coords": {
+        "lev": 1
+       }
+      },
+      {
+       "variable": "temp_out",
+       "time": 0.0,
+       "expected": -2.389185071557904,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       },
+       "coords": {
+        "lev": 10
+       }
+      },
+      {
+       "variable": "u_top",
+       "time": 0.0,
+       "expected": -2.389185071557904,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "lcondflx_ground",
+       "time": 0.0,
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
       }
      ]
     },
@@ -2427,6 +2569,136 @@
        "tolerance": {
         "rel": 1e-12,
         "abs": 0.0
+       }
+      }
+     ]
+    },
+    {
+     "id": "ice_free_temperature_bypass",
+     "description": "A zero-thickness column bypasses diffusion even when the input mask keeps its default value. The output profile uses the air temperature and the flux and melt diagnostics stay finite.",
+     "time_span": {
+      "start": 0.0,
+      "end": 0.0
+     },
+     "initial_conditions": {
+      "temp": [
+       -5.0,
+       -5.0,
+       -5.0,
+       -5.0,
+       -5.0,
+       -5.0,
+       -5.0,
+       -5.0,
+       -5.0,
+       -5.0
+      ]
+     },
+     "parameter_overrides": {
+      "thck": 0.0,
+      "artm": -3.0,
+      "bfricflx": 4.78126699283215e-06,
+      "btemp_ground_entry": -5.0000174906032,
+      "ice_mask": 1.0,
+      "dissip": [
+       1e-06,
+       1e-06,
+       1e-06,
+       1e-06,
+       1e-06,
+       1e-06,
+       1e-06,
+       1e-06,
+       1e-06,
+       1e-06
+      ]
+     },
+     "assertions": [
+      {
+       "variable": "u_sfc",
+       "time": 0.0,
+       "expected": -3.0,
+       "tolerance": {
+        "rel": 1e-12,
+        "abs": 0.0
+       }
+      },
+      {
+       "variable": "dTdt",
+       "time": 0.0,
+       "expected": 0.0,
+       "coords": {
+        "lev": 1
+       }
+      },
+      {
+       "variable": "dTdt",
+       "time": 0.0,
+       "expected": 0.0,
+       "coords": {
+        "lev": 10
+       }
+      },
+      {
+       "variable": "bpmp",
+       "time": 0.0,
+       "expected": 0.0
+      },
+      {
+       "variable": "btemp_ground",
+       "time": 0.0,
+       "expected": 0.0
+      },
+      {
+       "variable": "bmlt_ground",
+       "time": 0.0,
+       "expected": 0.0
+      },
+      {
+       "variable": "melt_internal",
+       "time": 0.0,
+       "expected": 0.0
+      },
+      {
+       "variable": "temp_out",
+       "time": 0.0,
+       "expected": -3.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       },
+       "coords": {
+        "lev": 1
+       }
+      },
+      {
+       "variable": "temp_out",
+       "time": 0.0,
+       "expected": -3.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       },
+       "coords": {
+        "lev": 10
+       }
+      },
+      {
+       "variable": "u_top",
+       "time": 0.0,
+       "expected": -3.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
+       }
+      },
+      {
+       "variable": "lcondflx_ground",
+       "time": 0.0,
+       "expected": 0.0,
+       "tolerance": {
+        "abs": 1e-09,
+        "rel": 0.0
        }
       }
      ]
