@@ -92,7 +92,7 @@ W/m/K, pmp_threshold = 1e-3 degC, eps08 = 1e-8, eps11 = 1e-11, dttem =
 | `cism_calving.esm` | Models `CalvingLaw` (the CALVING_FLOAT_ZERO threshold/margin criterion and removal law of `glissade_calving_solve` — ice_mask = thck > thklim = 0, floating_mask via the `cism_floating_mask` template, calving_fraction = 1 for timescale = 0, calving_thck = calving_fraction·thck where floating ∧ calving_domain_mask = 1, thck −= calving_thck, `glissade_calving.F90:1065-1188`), `IcebergRemoval` (the remove_icebergs pass as a per-cell law given the dumped connectivity mask: removal = thck where iceberg_mask = 1 — the flood fill itself has no esm operator and is a documented stage-3 gap; in the reference window the mask is 0 on every row, so only the no-op branch is pinned), `IceCapRemoval` (the glissade_handle_ice_caps removal as a per-cell law given the dumped ice_cap_mask: removal_thck += thck and thck = 0 where ice_cap_mask = 1 — exercised at init and in year 2 of the run) | `glissade_calving.F90`: 618-963, 1065-1188, 875-922, 4110-4324; `glissade_masks.F90`: 165-193, 701-889; `glissade_utils.F90`: 1141-1235; `glide_types.F90`: 183, 200, 1648 |
 | `cism_flowlaw.esm` | Model `FlowFactorColumn` — the per-layer flwa[k] = E·a·exp(−Q/(RT*)) with T* = tempcor + 273.15, the (a, Q) pair switching at T* = 263.15 K (the lev-indexed form of the scalar `FlowFactor` the calving3 lane folded in); the softness law imported by reference from `eqice_ice_rheology_templates.esm` `pb_softness`, the CISM constants (arrmlh/arrmll/actenh/actenl/gascon) bound at the call site, the T* construction CISM-specific | `glissade_therm.F90`: 2408-2640 (FLWA_PATERSON_BUDD 2585-2606, pmptemp 2170); `glimmer_physcon.F90`: 89-102 |
 | `cism_thermo.esm` | Model `IceTemperatureColumn` — the vertical heat equation ρᵢcᵢ ∂T/∂t = ∂/∂z(kᵢ ∂T/∂z) + ρᵢcᵢΦ with the ODE state on the UPN−1 = 10 INTERIOR σ nodes (PDE lowered by the EarthSciDiscretizations rule `varcoeff_face_laplacian_lev_value_bc`, imported from `${ESD_ROOT}` — the exact dups stencil of glissade_temperature_matrix_elements, contributed to ESD from this port; the surface and bed nodes are algebraic in CISM and are carried as u_sfc/u_top, feeding the interior stencil as boundary values through the rule's free-name contract), the pmp profile (EqIce imports), and the basal/internal melt laws + 10 tests | `glissade_therm.F90`: glissade_therm_driver, glissade_temperature_matrix_elements 1324-1507, glissade_basal_melting_ground 1930-2012, glissade_basal_melting_internal 2032-2159, glissade_pressure_melting_point 2163-2192 |
-| `cism_transport.esm` | Models `GladSmb` — the cap qsmb→acab conversion acab = qsmb·tstep_mbal·hours2seconds/rhoi·windows_per_year with the named glad/glimmer constants and the glad-level zeroing (ice-free ablation, ice-free ocean via the `cism_ocean` predicate); `MassBalance` — the SMB application: the rate law d(thck)/dt = ifelse(thck ≤ 0 ∧ net < 0, 0, net) with net = acab − bmlt, the per-step algebraic maps of the dumped entry state (melt_potential, the applied rates, the layer-1/layer-10 tracer blends via `cism_tracer_mix`, the column-mean law, the tracer zeroing of melted columns), and the ice-age increment d(age)/dt = 1 where thck > 0; `SurfaceUpdate` — calc_lsrf_usrf: lsrf = topg where grounded, lsrf = eus − (rhoi/rhoo)·thck where floating (the flotation test via the shared `cism_floating_mask` template), usrf = lsrf + thck. Declares a `solver` block (stiffness low, abstol 1e-10, reltol 1e-6) for the non-smooth clip — see 'The clip and the solver block' | `glad_main.F90`: 810-824; `glad_timestep.F90`: 171-187; `glissade_mass_balance.F90`: 819-1571; `glissade.F90`: 1203-1213; `glissade_transport.F90`: 139-208; `glimmer_utils.F90`: 344-378 |
+| `cism_transport.esm` | `GladSmb` converts cap qsmb to acab and applies the open-ocean and ice-free ablation masks. `MassBalance` clips surface ablation before applying basal melt or freeze-on, exposes the resulting step thickness and melt potential, and carries the tracer blends and ice-age increment. `SurfaceUpdate` calculates lower and upper elevations, including sea level over open ocean. | `glad_main.F90`: 810-824; `glad_timestep.F90`: 171-187; `glissade_mass_balance.F90`: 819-1571; `glissade.F90`: 1203-1213; `glissade_transport.F90`: 139-208; `glimmer_utils.F90`: 344-378 |
 | `cism_velo_discretization.esm` | Local ESD-format rule file: the σ-column `NLAYERS = 10` / `lev` / `lev_nodes` grid contract, the `cism_sigma_measure` / `cism_sigma_midpoint` templates, and the `integral_lev_whole` / `integral_lev_nodes_cumulative_to_top` rules imported by reference from EarthSciDiscretizations with `NLEV = NLAYERS` | `glissade_velo_higher.F90`: compute_integrals_diva 5570-5696 |
 | `cism_velo.esm` | Models `DivaGeometry` (the hybrid-margin surface gradient with the max_slope clamp, the 4-cell mean staggered thickness, the driving stress taudx = −rhoi·grav·stagthck·dusrf_dx, the DIVA slope angle θ = atan(\|dz_dx\|) and slope factor F = cos²θ + 4 sin²θ, and the bwat = 0 effective-pressure identity effecpress_stag = rhoi·g·stagthck), `DivaIntegrals` (the Goldberg (2011) σ-column integrals: efvs as the quad-point mean, omega_k and omega written as ESD integral operators, the `cism_stagger_masked_mean` vertex staggers, the active-cell guard), and `DivaVelocity` (beta_internal = f_ground·beta, the effective basal friction beta_eff = F·β/(F + β·ω·cosθ), btractx = β_internal·uvel_basal, the basal-velocity recovery uvel_basal = uvel_2d·beta_eff/beta_internal, and the 3-D profile uvel[k] = uvel_basal + btractx·stag_omega_k[k]·cosθ/F), plus the top-level mount of `BasalTraction` and the `variable_map` edges feeding `DivaVelocity` (the seven wiring edges are authored once in the EqESM stage2 coupling library `cism_velo_coupling.esm`, an EqESM-only coupling library not ported to the corpus; this port inlines those edges) | `glissade_velo_higher.F90`: glissade_velo_higher_solve, load_vector_gravity 4353-4384, compute_integrals_diva 5570-5696, compute_3d_velocity_diva 5700-5821, F90:5091, 5266-5272, 5578-5583, 5756-5770, 5780, 5800-5821; `glissade_grid_operators.F90`: surface_elevation_gradient 999-1079, glissade_stagger 69-157, glissade_slope_angle_staggered 1482+ |
 | `cism_diva.esm` | the `DivaBalance` component: the balance PDE on the 9×9 vertex grid of the patch, with the slope-correction chain and the column integral imported by reference (1 test, 24 assertions) | `glissade_velo_higher.F90`: glissade_velo_higher_solve (DIVA assembly); `glissade_grid_operators.F90` |
@@ -451,8 +451,7 @@ algebraic values enter the asserted dTdt. The thawed-bed row, the freeze-on
 branch, and the internal-melt cap are pinned synthetically from the source
 formulas (see gaps); the thin-cell surface law is pinned on cell (28,11)
 (thck = 0.02 m ≤ thklim_temp = 1 m: the column bypasses the solve — temp =
-min(0, artm) on all nodes, bpmp/u_top/bflx_mlt/btemp_ground = 0 via the
-ice_mask gate, dissip = 0).
+min(0, artm) on all nodes, the basal pressure and melt diagnostics are zero).
 
 ### Files
 
@@ -473,12 +472,12 @@ ice_mask gate, dissip = 0).
   128).
 - **waterfrac ≡ 0**: TEMP_PROGNOSTIC carries no internal water (the dump's
   waterfrac columns are all 0); the enthalpy scheme (waterfrac > 0) is deferred.
-- **Thin-ice bypass**: cells with thck ≤ thklim_temp = 1 m skip the solve
-  entirely (temp = min(0, artm) on all nodes; F90:1205). Transcribed as the
-  ice_mask gate: the pmptemp/bpmp/u_top/bflx_mlt/btemp_ground laws return 0
-  where ice_mask = 0 (the dumped column), so the gate itself is dump-pinned on
-  cell (28,11); the temp = min(0, artm) column profile is pinned there too.
-  21 of 128 traced rows are such cells.
+- **Thin-ice bypass**: the heat equation and conductive flux are disabled
+  when the ice mask is clear or thickness is at or below `thklim_temp`.
+  Read `temp_out` together with `u_sfc` and `u_top` for the applied
+  profile. Every bypassed node reports `min(0, artm)`, while the
+  interior ODE state `temp` is held constant. Tests exercise a thin
+  column initialized away from that profile and a zero-thickness column.
 - **Thawed-bed / freeze-on / internal-melt branches**: no traced row exercises
   them (the window is frozen: every entry temp_011 < bpmp − pmp_threshold, worst
   margin −1.425 degC; bmlt = bwat = bheatflx = bhydroflx = 0); pinned
@@ -548,33 +547,15 @@ cleanup (exit).
   and acab < 0 (ice-free ablation), and where GLIDE_IS_OCEAN (bed below sea
   level, no ice). Both fire independently; the esm `acab` equation nests
   them via the shared `cism_ocean` predicate template.
-- **MassBalance** (`glissade_mass_balance.F90:819-1571`): the Fortran walks
-  the 10 layers: accumulation adds s = acab·dt to layer 1 with the blend
-  T1′ = (H₁·T1 + s·Tsurf)/(H₁ + s) at the surface temperature; ablation
-  removes the top layers without changing their tracers; freeze-on adds
-  b = −bmlt·dt to layer 10 with the blend at the bed temperature; basal
-  melt removes the bottom layers; fully removed layers get tracer = 0; a
-  column that melts out entirely accumulates the excess into
-  `melt_potential` (a per-step diagnostic, zeroed at the top of every
-  `mass_balance_driver` call). The esm model is the layer-free continuous
-  limit with the RATE-LEVEL guard d(thck)/dt = ifelse(thck ≤ 0 ∧ net < 0,
-  0, net): the derivative stops exactly when the column is gone, which
-  reproduces the Fortran's layer-by-layer removal that clips the column at
-  zero (F90:1398-1419) without carrying a deficit into the next step (the
-  Fortran re-derives thck from the clipped layers every step; the
-  state-level max(0, thck_raw) of the first review round could not express
-  the per-step zeroing and was replaced by the guard). The per-step
-  bookkeeping — melt_potential = max(0, −(H_pre + net·dt)), the applied
-  rates acab_applied/bmlt_applied, and the tracer blends — is written as
-  algebraic maps of the dumped entry state (parameter `H_pre` + entry
-  tracers), evaluated at the step start, which is exact at the step
-  boundaries the tests evaluate. The tracer laws keep the layer-1
-  temperature, the layer-10 temperature, and the column mean through the
-  shared `cism_tracer_mix` law T′ = (H·T + s·T′)/(H + s); the ablation
-  mean law removes the ablated ice at the layer-1 temperature, which is
-  exact while the ablation stays within layer 1. The column-mean output
-  Tbar_out is derived (the Fortran has no column-mean state) and is
-  UNPINNED: no dump case discriminates it (see 'Coverage gaps').
+- **MassBalance** (`glissade_mass_balance.F90:819-1571`) clips the
+  surface and basal terms in the order CISM applies them. The surface rate
+  `acab_applied` cannot remove more than `H_pre` over the step. The basal
+  melt rate `bmlt_applied` is limited by the resulting `H_after_surface`,
+  and basal freeze-on adds to that remaining thickness. `melt_potential`
+  sums the unmet ablation from the two stages. Fully depleted surface
+  columns contribute zero pre-existing tracer mass to basal freeze-on.
+  The layer-free mean tracer treats surface ablation as removing ice at
+  the top-layer temperature, which is exact within that layer.
 - **The ocean mask**: `glissade_get_masks` with thklim = 0
   (`glissade_masks.F90:70-96`) — ocean = topg < eus ∧ thck ≤ 0 (the same
   `cism_ocean` predicate as the glad zeroing); the SMB and BMB are not
@@ -588,31 +569,17 @@ cleanup (exit).
   instantaneous reset — documented difference (unobservable in the window,
   which never refreezes). Unpinned: there is no age column in the dump
   (see 'Coverage gaps').
-- **SurfaceUpdate** (`glimmer_utils.F90:344-378`): lsrf = topg where
-  grounded (topg − eus ≥ −(rhoi/rhoo)·thck), lsrf = eus − (rhoi/rhoo)·thck
-  where floating, usrf = lsrf + thck.
+- **SurfaceUpdate** (`glimmer_utils.F90:344-378`): the lower surface
+  is `max(topg, eus − (rhoi/rhoo)·thck)` and the upper surface adds ice
+  thickness. Both are at sea level over ice-free ocean. The separate
+  diagnostic `floating_mask` requires ice to be present.
 
-### The clip and the solver block
-
-The rate guard is discontinuous at the clip, and the runner's default
-diffsol BDF arm chokes at the crossing:
-
-```
-simulate failed: diffsol error: ODE solver error: Step size is too small at time = 0.000009337527277120702
-```
-
-(exactly the analytic crossing time thck0/|net| of the failing cell; the
-same error appears at 0.07506885100532178 for the cell-29,13 pin). The
-document therefore declares its own numerics in the esm-spec §2.2 `solver`
-block — `stiffness: "low"` (the system is not stiff; the declaration steers
-other bindings to their explicit-RK arms, which cross the kink cleanly) and
-integration tolerances `abstol: 1e-10, reltol: 1e-6` (the runner's default
-reltol 1e-4 / abstol 1e-6 leaves the BDF step control stuck at the kink). Under these
-tolerances the BDF arm crosses the clip and freezes the state at its first
-negative step, landing within ~1e-9 m of 0; the full-melt pins assert
-thck = 0 with abs tolerance 1e-8 — still eight orders below the −0.35 m the
-unguarded law would give, so the clip stays fully discriminating. The ERK
-arm (TSIT45) lands on the clip to round-off and passes the same assertions.
+Initialize the thickness state to `H_pre` for each step and integrate it
+over `dt`. Its ODE applies the net of the two limited rates over that
+interval, and `H_post` exposes the same end-of-step update directly.
+The intermediate trajectory distributes the net change across the step.
+The full-melt pins continue to check end-of-step thickness against zero at
+an absolute tolerance of 1e-8 m.
 
 ### How each law is pinned
 
@@ -622,13 +589,13 @@ steps 3,4 ↔ cap_step 2; every row carries time = 0.5·step yr. All test
 inputs come from the dump entry phases (the pre-step state) and the
 cism_cap.csv import rows; all expected values come from the dump exit
 phases or from the source formulas (stated in the test descriptions).
-22 tests / 29 assertions.
+25 tests / 48 assertions. The source-formula cases include basal freeze-on after complete surface ablation, basal melt after surface accumulation, and open-ocean elevations.
 
 | Law | Pin | Tolerance | Residual |
 |---|---|---|---|
 | qsmb→acab | cap import rows at cells 25,11 (cap steps 1, 2) and 26,11 (cap step 1) | rel 1e-12 | ≤ 1.1e-16 (exact) |
 | glad zeroing (ice-free ablation) | cell 28,11 step 2 (thck = 0, raw acab = −0.7075 → 0; dump-verified); cell 28,11 step 3 (thck = 1.65e-5 > 0 → NOT zeroed; dump-verified) | exact | 0 |
-| d(thck)/dt = net | accumulation: cell 26,11 steps 1/2/4 (rel 1e-6 / 1e-9 / 1e-6); ablation: cell 25,11 steps 3/4 (rel 2e-4 / 3e-4); full melt: cells 28,11 (steps 1, 3), 29,13 (step 1) → thck = 0 (abs 1e-8) | see left | advection: +9.6e-7 / +9.6e-10 / −1.7e-6 m; +1.8e-5 / +1.9e-5 m; BDF clip landing ≤ ~1e-9 m |
+| d(thck)/dt = net_applied | accumulation: cell 26,11 steps 1/2/4 (rel 1e-6 / 1e-9 / 1e-6); ablation: cell 25,11 steps 3/4 (rel 2e-4 / 3e-4); full melt: cells 28,11 (steps 1, 3), 29,13 (step 1) → thck = 0 (abs 1e-8) | see left | advection: +9.6e-7 / +9.6e-10 / −1.7e-6 m; +1.8e-5 / +1.9e-5 m; full melt within the absolute tolerance |
 | full-melt clip + melt_potential | cells 28,11 (s1: 0.33379825832198695 m; s3: 0.8837069386692753 m), 29,13 (s1: 0.22629773133841058 m) — melt_potential is derived (not a dump column), from the Fortran's own conservation check | rel 1e-12 | exact |
 | acab_applied | clipped branch only (cell 28,11 s1: acab_applied = −H_pre/dt = −0.039916999638080596) | rel 1e-12 | exact (source-formula: not dump columns) |
 | layer-1 accumulation blend | cells 26,11 s1 (rel 1e-5), 27,11 s1 (rel 7e-5; s > H₁), 25,12 s1 (rel 2.5e-4) | see left | −1.7e-6 / −1.2e-5 / −3.6e-5 degC |
@@ -639,9 +606,7 @@ The tolerance convention: 1e-12 where the esm law is exact (pure algebra
 or linear-in-time integration), 5-10× the measured residual where the dump
 exit value carries a physics effect the pointwise model does not contain
 (horizontal advection, vertical remap) — each documented in the test
-description, following the MOSART scheme-gap pattern. The full-melt abs
-1e-8 covers the BDF arm's clip landing (see 'The clip and the solver
-block').
+description, following the MOSART scheme-gap pattern. Full-melt tests use an absolute tolerance of 1e-8 m.
 
 ### Coverage gaps (deferred or unpinnable)
 
@@ -653,9 +618,7 @@ block').
   bmlt_float = 0 on all 256 rows: the cold base melts nothing and the
   window has no shelf ice). The basal-melt (> 0) removal branches, the
   freeze-on (< 0) branch, and the layer-10 freeze-on blend T10′ are
-  transcribed from the source but have no dump pin (the earlier
-  freeze_on_blend_synthetic was dropped — synthetics pin the esm code, not
-  the Fortran).
+  covered by source-formula checks of the sequential update.
 - **No ocean cells in the window** (all 32 traced cells have topg ≥ 921 m):
   the glad-level ocean zeroing branch and the glissade-level
   ocean-no-application branch (net_applied = 0, melt_potential = 0) are
@@ -864,7 +827,8 @@ The laws:
 - **Basal recovery** (Goldberg 2011 eq. 34, F90:5801):
   `uvel_basal_recovered = uvel_2d·beta_eff_x/beta_internal`,
   `vvel_basal_recovered = vvel_2d·beta_eff_y/beta_internal` — pinned as
-  explicit unknowns so the recovery law is tested rather than assumed.
+  explicit unknowns. Both components use the depth-averaged velocity when
+  basal drag is zero.
 - `btractx = β_internal·uvel_basal = beta_eff_x·uvel_2d`,
   `btracty` analogously (exit form F90:3874, solve form F90:5780); and the
   vertical profile `uvel[k] = uvel_basal + btractx·stag_omega_k[k]·cosθ_x/F_x`
@@ -877,7 +841,7 @@ The laws:
 
 ### Velo testing
 
-15 tests / 155 assertions (manager review 2026-11-09 removed 20
+16 tests / 158 assertions (manager review 2026-11-09 removed 20
 lev_nodes = 11 pins the extractor still emits: uvel/vvel at the bed equal the
 uvel_basal/vvel_basal overrides, and omega_k/stag_omega_k there are
 identically 0).  Pinned rows (from the 128 exit rows of the 2026-11-09 dumps;
@@ -1139,9 +1103,7 @@ E_TREEWALK_CONSTARRAY_OOB error points at.
 
 All `tests` blocks are `time_span {0,0}` instantaneous pins with rel 1e-12
 (the dumps are written `es26.17`; the recomputations land at ≤ 4.5e-16
-relative, so 1e-12 is never stretched), except the transport ODE pins (the
-solver block and the tolerance convention are documented in the transport
-section) and the cap average-law pins that integrate one coupling interval.
+relative, so 1e-12 is never stretched), except the transport ODE pins and the cap average-law pins that integrate one coupling interval.
 Dump rows are cited by (file, cism_step, cell i,j, velo_iter/layer) in every
 test description.
 
@@ -1157,8 +1119,8 @@ them need `export ESD_ROOT=/path/to/EarthSciDiscretizations` for the
 `varcoeff_face_laplacian_lev_value_bc` (contributed to ESD from this port,
 with its stencils `interface_flux_K_two_point` and
 `varcoeff_face_laplacian_lev_frame`) — is on ESD `main`). Suite
-counts: **107 tests / 451 assertions** (basal 19/49, calving 15/52, cap
-22/48, flowlaw 10/27, thermo 10/88, transport 22/32, velo 15/155).
+counts: **112 tests / 485 assertions** (basal 19/49, calving 15/52, cap
+22/48, flowlaw 10/27, thermo 11/103, transport 25/48, velo 16/158).
 
 | File | Tests | Assertions | What is pinned |
 |---|---|---|---|
@@ -1167,9 +1129,9 @@ counts: **107 tests / 451 assertions** (basal 19/49, calving 15/52, cap
 | `cism_basal.esm` | 19 | 49 | **Effecpress** (7 tests): the bwat=0 overburden branch at three dump cells/steps, the Bueler–van Pelt mid-range plateau (min(·,P) cap at work), full saturation, the s clamp, and the floating zero — the last four from the source formula; **BasalWater** (4 tests): the lower-clamp step map dump-pinned from `cism_calcbwat.csv` (3 rows, steps 5/16/24 — bwat = bwat_next = 0 at rel 0.0) plus the Effecpress overburden pair rows of the same dump; the upper-clamp/interior branches are source-formula/unpinned (cold-based window); **BasalTraction** (8 tests): φ ramp + tanφ + speed + τ_c + β on dump rows covering both ramp-branch (φ = 34.33°, bed = 538 m) and phimax-branch (φ = 40°) cells, a 3-iteration Picard chain of one vertex (N/φ/τ_c invariant, β tracking the speed), the largest-N vertex (N = 1.79e6 Pa), a step-2 row, and the last iteration of the last step |
 | `cism_calving.esm` | 15 | 52 | **CalvingLaw** (12 tests): the floating/grounded mask split and the removal law on dump rows of `cism_calving.csv` (floating rows removed at calving_fraction = 1, grounded rows untouched, the marine-exit disagreement rows), the thklim = 0 threshold; **IcebergRemoval** (1 test): the no-op branch (iceberg_mask = 0 on every dumped row); **IceCapRemoval** (2 tests): the init ice-cap removal and the year-2 cap removal from `cism_calving_icecap.csv` |
 | `cism_flowlaw.esm` | 10 | 27 | **FlowFactorColumn** — warm-branch flwa at 6 (cell, layer, step) dump rows (incl. the largest \|pmptemp\| = 0.072 K traced), the cold branch, the branch boundary at T* = 263.15 K exactly, and both tempcor clamp bounds — the last four from the source formula; the column form re-pins the same rows over the lev index set (the calving3 lane folded the scalar `FlowFactor` into the column model) |
-| `cism_thermo.esm` | 10 | 88 | **IceTemperatureColumn**: the instantaneous operator identity at the exit state (5 pins, the 10 interior dTdt nodes each), u_sfc/bpmp/u_top/lcondflx_ground/bmlt_ground/btemp_ground at the pinned cells, the thin-ice surface law (the ice_mask gate zeroing bpmp/u_top/bflx_mlt/btemp_ground), and the thawed-bed / internal-melt / freeze-on / eps11 branches from the source formula |
-| `cism_transport.esm` | 22 | 32 | **GladSmb** (5 tests): the qsmb→acab chain at cap rows, the ice-free-ablation zeroing at thck = 0 and its non-firing at thck = 1.65e-5 m; **MassBalance** (14 tests): d(thck)/dt = net on accumulation/ablation/full-melt dump rows (rel 1e-6..3e-4, the advection residual), the melt_potential conservation check, acab_applied in the clipped branch, the layer-1 blend (rel 1e-5..2.5e-4), the tracer zeroing on full melt, and the ice-age increment; **SurfaceUpdate** (3 tests): lsrf/usrf on grounded, ice-free, and thin-ice rows (the floating lsrf via the `cism_floating_mask` template — the calving3 flotation-sign fix `topg − eus < −(rhoi/rhoo)·thck` is the shared template) |
-| `cism_velo.esm` | 15 | 155 | **DivaGeometry** (4 tests): dusrf/taud at rel 1e-11, θ/F/effecpress_stag at rel 1e-12, the max_slope clamp from the source formula; **DivaIntegrals** (5 tests): efvs, omega_k, omega, the staggers and the inactive-cell guard; **DivaVelocity** (6 tests): the exact β chain at rel 0.0 and the 3-D profile at ≤ 2.9e-16 |
+| `cism_thermo.esm` | 11 | 103 | Exit-state heat operator and flux balance, thin and ice-free temperature bypass, and source-formula thawed-bed, internal-melt, freeze-on and eps11 cases. |
+| `cism_transport.esm` | 25 | 48 | Cap conversion and zeroing, thickness and tracer dump rows, sequential surface and basal clipping, and grounded, marine and open-ocean elevations. |
+| `cism_velo.esm` | 16 | 158 | Hybrid-margin geometry and the slope chain, DIVA integrals and staggers, the coupled basal drag and 3-D velocity profile, and zero-drag recovery on floating ice. |
 | `cism_cap.esm` | 22 | 48 | see the cap section's test table |
 
 (`esm units --check` is clean on all eleven files; basal and velo report
