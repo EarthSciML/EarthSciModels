@@ -95,8 +95,8 @@ W/m/K, pmp_threshold = 1e-3 degC, eps08 = 1e-8, eps11 = 1e-11, dttem =
 | `cism_transport.esm` | `GladSmb` converts cap qsmb to acab and applies the open-ocean and ice-free ablation masks. `MassBalance` clips surface ablation before applying basal melt or freeze-on, exposes the resulting step thickness and melt potential, and carries the tracer blends and ice-age increment. `SurfaceUpdate` calculates lower and upper elevations, including sea level over open ocean. | `glad_main.F90`: 810-824; `glad_timestep.F90`: 171-187; `glissade_mass_balance.F90`: 819-1571; `glissade.F90`: 1203-1213; `glissade_transport.F90`: 139-208; `glimmer_utils.F90`: 344-378 |
 | `cism_velo_discretization.esm` | Local ESD-format rule file: the σ-column `NLAYERS = 10` / `lev` / `lev_nodes` grid contract, the `cism_sigma_measure` / `cism_sigma_midpoint` templates, and the `integral_lev_whole` / `integral_lev_nodes_cumulative_to_top` rules imported by reference from EarthSciDiscretizations with `NLEV = NLAYERS` | `glissade_velo_higher.F90`: compute_integrals_diva 5570-5696 |
 | `cism_velo.esm` | Models `DivaGeometry` (the hybrid-margin surface gradient with the max_slope clamp, the 4-cell mean staggered thickness, the driving stress taudx = −rhoi·grav·stagthck·dusrf_dx, the DIVA slope angle θ = atan(\|dz_dx\|) and slope factor F = cos²θ + 4 sin²θ, and the bwat = 0 effective-pressure identity effecpress_stag = rhoi·g·stagthck), `DivaIntegrals` (the Goldberg (2011) σ-column integrals: efvs as the quad-point mean, omega_k and omega written as ESD integral operators, the `cism_stagger_masked_mean` vertex staggers, the active-cell guard), and `DivaVelocity` (beta_internal = f_ground·beta, the effective basal friction beta_eff = F·β/(F + β·ω·cosθ), btractx = β_internal·uvel_basal, the basal-velocity recovery uvel_basal = uvel_2d·beta_eff/beta_internal, and the 3-D profile uvel[k] = uvel_basal + btractx·stag_omega_k[k]·cosθ/F), plus the top-level mount of `BasalTraction` and the `variable_map` edges feeding `DivaVelocity` (the seven wiring edges are authored once in the EqESM stage2 coupling library `cism_velo_coupling.esm`, an EqESM-only coupling library not ported to the corpus; this port inlines those edges) | `glissade_velo_higher.F90`: glissade_velo_higher_solve, load_vector_gravity 4353-4384, compute_integrals_diva 5570-5696, compute_3d_velocity_diva 5700-5821, F90:5091, 5266-5272, 5578-5583, 5756-5770, 5780, 5800-5821; `glissade_grid_operators.F90`: surface_elevation_gradient 999-1079, glissade_stagger 69-157, glissade_slope_angle_staggered 1482+ |
-| `cism_diva.esm` | the `DivaBalance` component: the balance PDE on the 9×9 vertex grid of the patch, with the slope-correction chain and the column integral imported by reference (1 test, 24 assertions) | `glissade_velo_higher.F90`: glissade_velo_higher_solve (DIVA assembly); `glissade_grid_operators.F90` |
-| `cism_diva_discretization.esm` | the seven local ESD-format rules of the vertex grid: `cism_stag_Dx_Dx` / `cism_stag_Dy_Dy` / `cism_stag_Dx_Dy` / `cism_stag_Dy_Dx` (the four staggered variable-coefficient second-derivative stencils), `cism_sigma_integral_field` (the whole-column integral of a `[lev,i,j]` field), and `cism_stag_vertex_gradient_x` / `cism_stag_vertex_gradient_y` (the plain vertex gradient of the slope-correction `z_mean`) | `glissade_velo_higher.F90`: glissade_velo_higher_solve (DIVA assembly); `glissade_grid_operators.F90` |
+| `cism_diva.esm` | the `DivaBalance` component: the balance PDE on a vertex patch, with the slope correction, column integral and residual-validity mask (2 tests, 69 assertions) | `glissade_velo_higher.F90`: glissade_velo_higher_solve (DIVA assembly); `glissade_grid_operators.F90` |
+| `cism_diva_discretization.esm` | the local ESD-format rules of the vertex grid and their shared interior predicate: `cism_stag_Dx_Dx` / `cism_stag_Dy_Dy` / `cism_stag_Dx_Dy` / `cism_stag_Dy_Dx` (the four staggered variable-coefficient second-derivative stencils), `cism_sigma_integral_field` (the whole-column integral of a `[lev,i,j]` field), and `cism_stag_vertex_gradient_x` / `cism_stag_vertex_gradient_y` (the plain vertex gradient of the slope-correction `z_mean`) | `glissade_velo_higher.F90`: glissade_velo_higher_solve (DIVA assembly); `glissade_grid_operators.F90` |
 | `eqice_basal_templates.esm` | **TEMPORARY COPY** of the EqIce basal_templates library (5 laws: `overburden_pressure`, `mohr_coulomb_N_interior`, `basal_speed_squared`, `basal_speed`, `pseudo_plastic_drag`), bodies byte-identical to `eqice/stage2/basal_templates.esm`; imported by reference by cism_basal/cism_thermo until EqIce is upstream | PISM v2.3.2 (MohrCoulombPointwise.cc, MohrCoulombYieldStress.cc, basal_resistance.cc) |
 | `eqice_ice_rheology_templates.esm` | **TEMPORARY COPY** of the EqIce ice_rheology_templates library (3 laws: `pressure_melting_temperature`, `arrhenius_softness`, `pb_softness`), bodies byte-identical to `eqice/stage2/ice_rheology_templates.esm`; imported by reference by cism_flowlaw/cism_thermo until EqIce is upstream | PISM v2.3.2 (FlowLaw.cc softness_paterson_budd, EnthalpyConverter.cc melting_temperature) |
 
@@ -917,9 +917,9 @@ patch cells (24..31, 14..21) of the fixed 2026-11-12 rerun
 
 The DIVA solve is the finite-element system that the pointwise laws of
 `cism_velo.esm` feed.  This file replaces the **system** with the PDE it
-discretizes: the depth-integrated membrane balance at every vertex of the
-patch, evaluated on the dumped converged FE solution, with each term of each
-momentum equation held accountable against the FE solve.  What is **not**
+discretizes: the depth-integrated membrane balance on the stencil interior of a vertex
+patch. The residual is compared with the dumped converged FE solution, and
+manufactured fields check all eight membrane terms.  What is **not**
 ported here is the FE assembly itself (the 9-point bilinear stencil with
 quad-point integration) and the Picard iteration — those are stage-3
 `eqesm.esm` concerns; the FD operator below is the honest stand-in whose
@@ -1012,8 +1012,10 @@ with `ifelse(2 ≤ i ≤ NX−2 ∧ 2 ≤ j ≤ NY−2, <stencil>, 0)`: the guar
 restores the correct placement and short-circuits the out-of-bounds stencil
 reads on the parameter arrays at the boundary ring (an ungarded const-array
 gather out of bounds is a build error, E_TREEWALK_CONSTARRAY_OOB).  The
-boundary ring of the term fields is then 0; the balance is asserted only at
-interior vertices.
+stencil terms are zero outside that interior. `residual_valid` uses the
+same predicate as the stencils. It is 1 where the full balance is defined
+and 0 elsewhere. Both residual arrays are zero-filled where the mask is
+0. Filter those entries out when interpreting the residual or computing norms.
 
 ### The FE-vs-FD difference, measured
 
@@ -1045,10 +1047,7 @@ tests pin:
 
 ### Testing
 
-`cism_diva.esm` carries 1 test / 24 assertions (time_span {0,0} on the
-step-4 fields; the numeric tuples are emitted by
-`stage1/analysis/extract_cism_diva_test_rows.py`, which re-verifies the whole
-chain first):
+`cism_diva.esm` carries two tests with 69 assertions.
 
 - `diva_balance_step4` (24 assertions): at the three pinned interior vertices
   (3,3), (4,4), (2,5) = global (26,16), (27,17), (25,18):
@@ -1063,15 +1062,14 @@ chain first):
     assertions) — R = membrane + basal − driving measured against CESM's own
     dumped driving stress (measured ratios 0.16–1.18%).
 
-The eight individual membrane terms and the exact sums are **not** pinned:
-they are not dump columns, so a pin would compare the model against a Python
-transcription of the same stencil and could not catch a transcription error.
-They are covered through the sums, which are failable (every term is computed
-from the overridden fields — a wrong stencil, sign or coefficient breaks the
-residual pins; verified by the must-fail probes below).
+- `manufactured_membrane_terms_and_mask` (45 assertions) uses quadratic
+  velocity fields and linear depth-integrated viscosity sampled at cell
+  centers. The analytic flux derivatives pin all eight terms at three
+  interior vertices. Nonzero driving stresses also check both residuals and
+  the validity mask on the interior and outside it.
 
-Run: `ESD_ROOT=/path/to/EarthSciDiscretizations ./esm test stage2/cism_diva.esm`
-→ 24P/0F/0E.
+Run from the repository root with
+`ESD_ROOT=/path/to/EarthSciDiscretizations esm test components/cryosphere/cism/cism_diva.esm`.
 
 **Must-fail probes** (both confirmed on the committed file, then reverted):
 flipping the sign of the T1x term breaks all 3 Rx pins (perturbed |Rx| =
@@ -1111,7 +1109,7 @@ Run the suite with
 
     esm test components/cryosphere/cism
 
-(`esm validate` and `esm units` pass for all eleven files; the velocity
+(`esm validate` and `esm units` pass for all thirteen files; the velocity
 discretization file, the thermo file and the velo file that lowers/lower
 them need `export ESD_ROOT=/path/to/EarthSciDiscretizations` for the
 `${ESD_ROOT}` ref expansion — every pinned ESD file —
@@ -1119,8 +1117,9 @@ them need `export ESD_ROOT=/path/to/EarthSciDiscretizations` for the
 `varcoeff_face_laplacian_lev_value_bc` (contributed to ESD from this port,
 with its stencils `interface_flux_K_two_point` and
 `varcoeff_face_laplacian_lev_frame`) — is on ESD `main`). Suite
-counts: **112 tests / 485 assertions** (basal 19/49, calving 15/52, cap
-22/48, flowlaw 10/27, thermo 11/103, transport 25/48, velo 16/158).
+counts: **114 tests / 554 assertions** (basal 19/49, calving 15/52, cap
+22/48, DIVA balance 2/69, flowlaw 10/27, thermo 11/103, transport 25/48,
+velo 16/158).
 
 | File | Tests | Assertions | What is pinned |
 |---|---|---|---|
@@ -1132,9 +1131,10 @@ counts: **112 tests / 485 assertions** (basal 19/49, calving 15/52, cap
 | `cism_thermo.esm` | 11 | 103 | Exit-state heat operator and flux balance, thin and ice-free temperature bypass, and source-formula thawed-bed, internal-melt, freeze-on and eps11 cases. |
 | `cism_transport.esm` | 25 | 48 | Cap conversion and zeroing, thickness and tracer dump rows, sequential surface and basal clipping, and grounded, marine and open-ocean elevations. |
 | `cism_velo.esm` | 16 | 158 | Hybrid-margin geometry and the slope chain, DIVA integrals and staggers, the coupled basal drag and 3-D velocity profile, and zero-drag recovery on floating ice. |
+| `cism_diva.esm` | 2 | 69 | CESM patch slope and friction, interior finite-element comparison, analytic membrane terms and residual mask. |
 | `cism_cap.esm` | 22 | 48 | see the cap section's test table |
 
-(`esm units --check` is clean on all eleven files; basal and velo report
+(`esm units --check` is clean on all thirteen files; basal and velo report
 the standard "no dimensional mismatch found; run without --check to see why
 equations were not checked" message for their fractional-exponent rows,
 unchanged from stage2.)
