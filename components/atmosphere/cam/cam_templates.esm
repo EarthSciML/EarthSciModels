@@ -1,0 +1,2563 @@
+{
+ "esm": "2.0.0",
+ "metadata": {
+ "name": "cam_templates",
+ "description": "Expression-template library for the CAM6 physics (stage 2 of the EqESM project): the pointwise saturation-thermodynamics laws of the wv_saturation/wv_sat_methods modules (components/cam/src/atmos_phys/to_be_ccppized/wv_saturation.F90 and wv_sat_methods.F90 of the instrumented cam6_4_212 fork), transcribed exactly for use by the stage-2 CAM components (cam_wv_saturation.esm, cam_rayleigh_friction.esm, cam_energy_fixer.esm). The library carries (a) the Goff-Gratch saturation vapor pressures goff_gratch_water and goff_gratch_ice (wv_sat_methods.F90:569-580 and 611-620, the esatw/esati branch of svp_water/svp_ice); (b) the mixed-phase weight ice_weight (wv_sat_methods.F90:494-498 and wv_saturation.F90:555-562) and the blended svp_trans (wv_sat_methods.F90:479-513) that generates the tabulated estbl of wv_saturation.F90:191-254 (the lookup law estbl_es0 and its estbl_tmax = 375.16 K clamp live here as templates; the 251-knot table data itself is declared by each consuming document's function_tables block - cam_wv_saturation.esm and cam_zm_evap.esm - because the CLI resolves table_lookup only against the declaring document); (c) the saturation specific humidity svp_to_qsat = epsilo es / (p - omeps es), unity when saturated (wv_sat_methods.F90:185-197); and (d) the latent-heat laws of calc_hltalt (wv_saturation.F90:521-573): hltalt_no_ip (no-ice-phase branch), hltalt_mixed (the full law, adding the ice-phase weight times LATICE) and tterm_transition (the pcf(5) polynomial of the water-minus-ice es correction, factored into the shared pcf_transition_poly(tc) template, Horner-evaluated in the Fortran order and divided by ttrice). Constants are SHR_CONST_* values (shr_const_mod.F90:24-55): LATVAP = 2.501e6 J/kg, LATICE = 3.337e5 J/kg, TKFRZ = 273.15 K, and the wv_saturation locals TBOIL = 373.16 K, TKTRIP = 273.16 K, TTRICE = 20 K, PCF = [5.04469588506e-01, -5.47288442819e+00, -3.67471858735e-01, -8.95963532403e-03, -7.78053686625e-05]. The repeated temperature constants are named as zero-parameter constant-fragment templates applied with empty bindings: tboil = TBOIL = 373.16 K, ttrice = TTRICE = 20 K (TKTRIP = 273.16 K stays inline in goff_gratch_ice), and the freezing point TKFRZ = 273.15 K is the shared tkfrz constant fragment of ./cdeps_templates.esm (SHR_CONST_TKFRZ; this library imports the CDEPS templates by reference so the constant has one canonical definition across the CAM and CDEPS lanes). The Goff-Gratch curve-fit coefficients are dimensionless (the fit as written is dimensionally incoherent: a log10 of an hPa-valued number, exponentiated and scaled by 100); the x100 hPa-to-Pa factor carries the Pa dimension so the analytic laws read as Pa. The library also carries (e) the two cam_export laws of the surface-exchange slice (camsrfexch.F90:496, 503): density_dry_air = p/(rair t) and exner_function = (p_surf/p)^cappa, both generic in their physical constants (rair, cappa taken as template parameters and bound by the caller to the named parameters of CamOutExport); and (f) the four laws of the vertical-diffusion slice (diffusion_solver.F90): interface_diffusivity = kv*dpidz_sq (the coef_q_diff of the z-coordinate finite-volume flux form, F90:524-528, 952), surface_layer_source (the g*F/dz[1] lowest-layer injection of a surface flux F, F90:440), surface_stress_coefficient = ksrftms + max(tau/ws, ksrfmin) (the implicit-surface-stress drag, F90:232-239) and wind_damping_rate = -g*ksrf/dz[1] in the lowest layer, 0 elsewhere (F90:274-285), all consumed by cam_vertical_diffusion.esm. All laws are pointwise; tests of the analytic branch structure live in the SvpTransLaw model of cam_wv_saturation.esm, pinned to the stage-1 qsat dumps (stage1/dumps/cam/cam_qsat.csv) through the estbl table they generate.",
+ "tags": [
+  "atmosphere",
+  "cam",
+  "expression-templates",
+  "saturation",
+  "cesm"
+ ],
+ "created": "2026-11-24T00:00:00Z",
+ "authors": [
+  "EqESM project contributors"
+ ],
+ "references": [
+  {
+   "citation": "CESM (Community Earth System Model), ESCOMP/CESM: CAM6 physics sources of the instrumented cam6_4_212 fork (components/cam/src/) - wv_saturation.F90, wv_sat_methods.F90, camsrfexch.F90, diffusion_solver.F90 - the reference implementation these components are transcribed from.",
+   "url": "https://github.com/ESCOMP/CESM"
+  },
+  {
+   "citation": "EarthSciModels - the authoritative .esm corpus this component lives in.",
+   "url": "https://github.com/EarthSciML/EarthSciModels"
+  }
+ ]
+},
+ "expression_template_imports": [
+  {
+   "ref": "../../data_models/cdeps/cdeps_templates.esm"
+  },
+  {
+   "ref": "esm:std/interp.esm",
+   "only": [
+    "linear"
+   ]
+  }
+ ],
+ "expression_templates": {
+  "ice_weight": {
+   "description": "Mixed-phase weight of calc_hltalt (wv_saturation.F90:555-562) and svp_trans (wv_sat_methods.F90:494-498): weight = min(1, max(0, (tmelt - t)/ttrice)), the clamp form of the Fortran's three-branch if (weight = 1 below tmelt - ttrice, 0 at and above tmelt, linear between). The clamp is bit-identical to the branches: (tmelt - t)/ttrice equals 1 exactly at t = tmelt - ttrice and 0 at t = tmelt, is positive below tmelt and negative above, so the outer min/max select the constant branches exactly where the Fortran does. tkfrz and ttrice are the tkfrz/ttrice constant-fragment templates (tkfrz = TKFRZ = 273.15 K, the shared ./cdeps_templates.esm fragment; ttrice = TTRICE = 20 K).",
+   "params": [
+    "t"
+   ],
+   "body": {
+    "op": "min",
+    "args": [
+     {
+      "op": "const",
+      "args": [],
+      "value": 1.0,
+      "units": "1"
+     },
+     {
+      "op": "max",
+      "args": [
+       {
+        "op": "const",
+        "args": [],
+        "value": 0.0,
+        "units": "1"
+       },
+       {
+        "op": "/",
+        "args": [
+         {
+          "op": "-",
+          "args": [
+           {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "tkfrz",
+            "bindings": {}
+           },
+           "t"
+          ]
+         },
+         {
+          "op": "apply_expression_template",
+          "args": [],
+          "name": "ttrice",
+          "bindings": {}
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "goff_gratch_water": {
+   "description": "Saturation vapor pressure over water, esatw branch of svp_water (wv_sat_methods.F90:569-580): es = 10^(-7.90298 (tboil/t - 1) + 5.02808 log10(tboil/t) - 1.3816e-7 (10^(11.344 (1 - t/tboil)) - 1) + 8.1328e-3 (10^(-3.49149 (tboil/t - 1)) - 1) + log10(1013.246)) x 100, tboil = 373.16 K. The curve-fit coefficients are dimensionless (dimensionally incoherent fit, see the file description); the x100 hPa-to-Pa factor carries the Pa dimension, so the template reads as es in Pa.",
+   "params": [
+    "t"
+   ],
+   "body": {
+    "op": "*",
+    "args": [
+     {
+      "op": "const",
+      "args": [],
+      "value": 100.0,
+      "units": "Pa"
+     },
+     {
+      "op": "^",
+      "args": [
+       {
+        "op": "const",
+        "args": [],
+        "value": 10.0,
+        "units": "1"
+       },
+       {
+        "op": "+",
+        "args": [
+         {
+          "op": "+",
+          "args": [
+           {
+            "op": "*",
+            "args": [
+             {
+              "op": "const",
+              "args": [],
+              "value": -7.90298,
+              "units": "1"
+             },
+             {
+              "op": "-",
+              "args": [
+               {
+                "op": "/",
+                "args": [
+                 {
+                  "op": "apply_expression_template",
+                  "args": [],
+                  "name": "tboil",
+                  "bindings": {}
+                 },
+                 "t"
+                ]
+               },
+               {
+                "op": "const",
+                "args": [],
+                "value": 1.0,
+                "units": "1"
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "op": "*",
+            "args": [
+             {
+              "op": "const",
+              "args": [],
+              "value": 5.02808,
+              "units": "1"
+             },
+             {
+              "op": "log10",
+              "args": [
+               {
+                "op": "/",
+                "args": [
+                 {
+                  "op": "apply_expression_template",
+                  "args": [],
+                  "name": "tboil",
+                  "bindings": {}
+                 },
+                 "t"
+                ]
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "op": "+",
+          "args": [
+           {
+            "op": "*",
+            "args": [
+             {
+              "op": "const",
+              "args": [],
+              "value": -1.3816e-07,
+              "units": "1"
+             },
+             {
+              "op": "-",
+              "args": [
+               {
+                "op": "^",
+                "args": [
+                 {
+                  "op": "const",
+                  "args": [],
+                  "value": 10.0,
+                  "units": "1"
+                 },
+                 {
+                  "op": "*",
+                  "args": [
+                   {
+                    "op": "const",
+                    "args": [],
+                    "value": 11.344,
+                    "units": "1"
+                   },
+                   {
+                    "op": "-",
+                    "args": [
+                     {
+                      "op": "const",
+                      "args": [],
+                      "value": 1.0,
+                      "units": "1"
+                     },
+                     {
+                      "op": "/",
+                      "args": [
+                       "t",
+                       {
+                        "op": "apply_expression_template",
+                        "args": [],
+                        "name": "tboil",
+                        "bindings": {}
+                       }
+                      ]
+                     }
+                    ]
+                   }
+                  ]
+                 }
+                ]
+               },
+               {
+                "op": "const",
+                "args": [],
+                "value": 1.0,
+                "units": "1"
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "op": "+",
+            "args": [
+             {
+              "op": "*",
+              "args": [
+               {
+                "op": "const",
+                "args": [],
+                "value": 0.0081328,
+                "units": "1"
+               },
+               {
+                "op": "-",
+                "args": [
+                 {
+                  "op": "^",
+                  "args": [
+                   {
+                    "op": "const",
+                    "args": [],
+                    "value": 10.0,
+                    "units": "1"
+                   },
+                   {
+                    "op": "*",
+                    "args": [
+                     {
+                      "op": "const",
+                      "args": [],
+                      "value": -3.49149,
+                      "units": "1"
+                     },
+                     {
+                      "op": "-",
+                      "args": [
+                       {
+                        "op": "/",
+                        "args": [
+                         {
+                          "op": "apply_expression_template",
+                          "args": [],
+                          "name": "tboil",
+                          "bindings": {}
+                         },
+                         "t"
+                        ]
+                       },
+                       {
+                        "op": "const",
+                        "args": [],
+                        "value": 1.0,
+                        "units": "1"
+                       }
+                      ]
+                     }
+                    ]
+                   }
+                  ]
+                 },
+                 {
+                  "op": "const",
+                  "args": [],
+                  "value": 1.0,
+                  "units": "1"
+                 }
+                ]
+               }
+              ]
+             },
+             {
+              "op": "log10",
+              "args": [
+               {
+                "op": "const",
+                "args": [],
+                "value": 1013.246,
+                "units": "1"
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "goff_gratch_ice": {
+   "description": "Saturation vapor pressure over ice, esati branch of svp_ice (wv_sat_methods.F90:611-620): es = 10^(-9.09718 (h2otrip/t - 1) - 3.56654 log10(h2otrip/t) + 0.876793 (1 - t/h2otrip) + log10(6.1071)) x 100, h2otrip = 273.16 K (TKTRIP). Coefficients dimensionless as in goff_gratch_water; the x100 factor carries the Pa dimension.",
+   "params": [
+    "t"
+   ],
+   "body": {
+    "op": "*",
+    "args": [
+     {
+      "op": "const",
+      "args": [],
+      "value": 100.0,
+      "units": "Pa"
+     },
+     {
+      "op": "^",
+      "args": [
+       {
+        "op": "const",
+        "args": [],
+        "value": 10.0,
+        "units": "1"
+       },
+       {
+        "op": "+",
+        "args": [
+         {
+          "op": "+",
+          "args": [
+           {
+            "op": "*",
+            "args": [
+             {
+              "op": "const",
+              "args": [],
+              "value": -9.09718,
+              "units": "1"
+             },
+             {
+              "op": "-",
+              "args": [
+               {
+                "op": "/",
+                "args": [
+                 {
+                  "op": "const",
+                  "args": [],
+                  "value": 273.16,
+                  "units": "K"
+                 },
+                 "t"
+                ]
+               },
+               {
+                "op": "const",
+                "args": [],
+                "value": 1.0,
+                "units": "1"
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "op": "*",
+            "args": [
+             {
+              "op": "const",
+              "args": [],
+              "value": -3.56654,
+              "units": "1"
+             },
+             {
+              "op": "log10",
+              "args": [
+               {
+                "op": "/",
+                "args": [
+                 {
+                  "op": "const",
+                  "args": [],
+                  "value": 273.16,
+                  "units": "K"
+                 },
+                 "t"
+                ]
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "op": "+",
+          "args": [
+           {
+            "op": "*",
+            "args": [
+             {
+              "op": "const",
+              "args": [],
+              "value": 0.876793,
+              "units": "1"
+             },
+             {
+              "op": "-",
+              "args": [
+               {
+                "op": "const",
+                "args": [],
+                "value": 1.0,
+                "units": "1"
+               },
+               {
+                "op": "/",
+                "args": [
+                 "t",
+                 {
+                  "op": "const",
+                  "args": [],
+                  "value": 273.16,
+                  "units": "K"
+                 }
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "op": "log10",
+            "args": [
+             {
+              "op": "const",
+              "args": [],
+              "value": 6.1071,
+              "units": "1"
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "svp_trans": {
+   "description": "Mixed-phase saturation vapor pressure of svp_trans (wv_sat_methods.F90:479-513), the estbl table-generation law of wv_sat_init (wv_saturation.F90:244-246): es = weight es_ice + (1 - weight) es_water0, where es_water0 is goff_gratch_water when t >= tmelt - ttrice and 0 below, and weight = ice_weight(t). At t < tmelt - ttrice the weight is 1 and the blend collapses to es_ice; at t >= tmelt it is 0 and the blend is es_water; in the 20 K transition band it interpolates linearly. tkfrz = 273.15 K, ttrice = 20 K.",
+   "params": [
+    "t"
+   ],
+   "body": {
+    "op": "+",
+    "args": [
+     {
+      "op": "*",
+      "args": [
+       {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "ice_weight",
+        "bindings": {
+         "t": "t"
+        }
+       },
+       {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "goff_gratch_ice",
+        "bindings": {
+         "t": "t"
+        }
+       }
+      ]
+     },
+     {
+      "op": "*",
+      "args": [
+       {
+        "op": "-",
+        "args": [
+         {
+          "op": "const",
+          "args": [],
+          "value": 1.0,
+          "units": "1"
+         },
+         {
+          "op": "apply_expression_template",
+          "args": [],
+          "name": "ice_weight",
+          "bindings": {
+           "t": "t"
+          }
+         }
+        ]
+       },
+       {
+        "op": "ifelse",
+        "args": [
+         {
+          "op": ">=",
+          "args": [
+           "t",
+           {
+            "op": "-",
+            "args": [
+             {
+              "op": "apply_expression_template",
+              "args": [],
+              "name": "tkfrz",
+              "bindings": {}
+             },
+             {
+              "op": "apply_expression_template",
+              "args": [],
+              "name": "ttrice",
+              "bindings": {}
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "op": "apply_expression_template",
+          "args": [],
+          "name": "goff_gratch_water",
+          "bindings": {
+           "t": "t"
+          }
+         },
+         {
+          "op": "const",
+          "args": [],
+          "value": 0.0,
+          "units": "Pa"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "svp_to_qsat": {
+   "description": "Saturation specific humidity of svp_to_qsat (wv_sat_methods.F90:185-197): qs = epsilo es / (p - omeps es), or exactly 1 when p - es <= 0 (saturated). epsilo = MWWV/MWDAIR = 18.016/28.966 = 0.6219705862045155, omeps = 1 - epsilo = 0.3780294137954845 (shr_const_mod.F90:52-54).",
+   "params": [
+    "es",
+    "p"
+   ],
+   "body": {
+    "op": "ifelse",
+    "args": [
+     {
+      "op": "<=",
+      "args": [
+       {
+        "op": "-",
+        "args": [
+         "p",
+         "es"
+        ]
+       },
+       {
+        "op": "const",
+        "args": [],
+        "value": 0.0,
+        "units": "Pa"
+       }
+      ]
+     },
+     {
+      "op": "const",
+      "args": [],
+      "value": 1.0,
+      "units": "kg/kg"
+     },
+     {
+      "op": "/",
+      "args": [
+       {
+        "op": "*",
+        "args": [
+         {
+          "op": "const",
+          "args": [],
+          "value": 0.6219705862045155,
+          "units": "1"
+         },
+         "es"
+        ]
+       },
+       {
+        "op": "-",
+        "args": [
+         "p",
+         {
+          "op": "*",
+          "args": [
+           {
+            "op": "const",
+            "args": [],
+            "value": 0.3780294137954845,
+            "units": "1"
+           },
+           "es"
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "hltalt_no_ip": {
+   "description": "Latent heat of vaporization without the ice-phase term, no_ip_hltalt branch of calc_hltalt (wv_saturation.F90:534-547): hltalt = latvap - 2369 (t - tmelt) when t >= tmelt, else latvap. latvap = 2.501e6 J/kg (LATVAP), the 2369 is the J/kg/K temperature adjustment (vap - h2otrip correction of shr_const_mod), tkfrz = 273.15 K.",
+   "params": [
+    "t"
+   ],
+   "body": {
+    "op": "ifelse",
+    "args": [
+     {
+      "op": ">=",
+      "args": [
+       "t",
+       {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "tkfrz",
+        "bindings": {}
+       }
+      ]
+     },
+     {
+      "op": "-",
+      "args": [
+       {
+        "op": "const",
+        "args": [],
+        "value": 2501000.0,
+        "units": "J/kg"
+       },
+       {
+        "op": "*",
+        "args": [
+         {
+          "op": "const",
+          "args": [],
+          "value": 2369.0,
+          "units": "J/(kg*K)"
+         },
+         {
+          "op": "-",
+          "args": [
+           "t",
+           {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "tkfrz",
+            "bindings": {}
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "op": "const",
+      "args": [],
+      "value": 2501000.0,
+      "units": "J/kg"
+     }
+    ]
+   }
+  },
+  "hltalt_mixed": {
+   "description": "Latent heat of vaporization of calc_hltalt (wv_saturation.F90:521-573) as evaluated by qsat_line with ip = 0 (the run's no_ip_hltalt path is overridden by the t < tmelt ice term): hltalt = hltalt_no_ip(t) + ice_weight(t) latice, latice = 3.337e5 J/kg (LATICE). The ice weight is 0 at and above tmelt and ramps to 1 at tmelt - ttrice and below, so the correction adds the ice-phase latent heat through the 20 K mixed-phase band.",
+   "params": [
+    "t"
+   ],
+   "body": {
+    "op": "+",
+    "args": [
+     {
+      "op": "apply_expression_template",
+      "args": [],
+      "name": "hltalt_no_ip",
+      "bindings": {
+       "t": "t"
+      }
+     },
+     {
+      "op": "*",
+      "args": [
+       {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "ice_weight",
+        "bindings": {
+         "t": "t"
+        }
+       },
+       {
+        "op": "const",
+        "args": [],
+        "value": 333700.0,
+        "units": "J/kg"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "pcf_transition_poly": {
+   "description": "The pcf(5) polynomial of the water-minus-ice es correction of calc_hltalt (wv_saturation.F90:548-573): pcf(1) + tc (pcf(2) + tc (pcf(3) + tc (pcf(4) + tc pcf(5)))), Horner-evaluated in the Fortran loop order with tc = t - tmelt (wv_saturation.F90:561-565). Approximates es(water) - es(ice) in Pa over the transition band; the coefficients carry dimensions Pa, Pa/K, Pa/K^2, Pa/K^3, Pa/K^4 so the polynomial reads as Pa. Shared by tterm_transition, which divides it by ttrice.",
+   "params": [
+    "tc"
+   ],
+   "body": {
+    "op": "+",
+    "args": [
+     {
+      "op": "const",
+      "args": [],
+      "value": 0.504469588506,
+      "units": "Pa"
+     },
+     {
+      "op": "*",
+      "args": [
+       "tc",
+       {
+        "op": "+",
+        "args": [
+         {
+          "op": "const",
+          "args": [],
+          "value": -5.47288442819,
+          "units": "Pa/K"
+         },
+         {
+          "op": "*",
+          "args": [
+           "tc",
+           {
+            "op": "+",
+            "args": [
+             {
+              "op": "const",
+              "args": [],
+              "value": -0.367471858735,
+              "units": "Pa/K^2"
+             },
+             {
+              "op": "*",
+              "args": [
+               "tc",
+               {
+                "op": "+",
+                "args": [
+                 {
+                  "op": "const",
+                  "args": [],
+                  "value": -0.00895963532403,
+                  "units": "Pa/K^3"
+                 },
+                 {
+                  "op": "*",
+                  "args": [
+                   "tc",
+                   {
+                    "op": "const",
+                    "args": [],
+                    "value": -7.78053686625e-05,
+                    "units": "Pa/K^4"
+                   }
+                  ]
+                 }
+                ]
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "tterm_transition": {
+   "description": "Transition-band d(es)/dT correction of calc_hltalt (wv_saturation.F90:548-573): tterm = pcf_transition_poly(t - tmelt)/ttrice when tmelt - ttrice <= t < tmelt, else 0. The pcf(5) polynomial (pcf(1) + tc (pcf(2) + tc (pcf(3) + tc (pcf(4) + tc pcf(5)))), Horner order as the Fortran loop, tc = t - tmelt) approximates es(water) - es(ice) in Pa over the transition band and is factored into the shared pcf_transition_poly template; pcf = [5.04469588506e-01, -5.47288442819e+00, -3.67471858735e-01, -8.95963532403e-03, -7.78053686625e-05] with dimensions Pa, Pa/K, Pa/K^2, Pa/K^3, Pa/K^4, so tterm reads as Pa/K. tkfrz and ttrice are the tkfrz/ttrice constant-fragment templates.",
+   "params": [
+    "t"
+   ],
+   "body": {
+    "op": "ifelse",
+    "args": [
+     {
+      "op": "<",
+      "args": [
+       "t",
+       {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "tkfrz",
+        "bindings": {}
+       }
+      ]
+     },
+     {
+      "op": "ifelse",
+      "args": [
+       {
+        "op": ">=",
+        "args": [
+         {
+          "op": "-",
+          "args": [
+           "t",
+           {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "tkfrz",
+            "bindings": {}
+           }
+          ]
+         },
+         {
+          "op": "-",
+          "args": [
+           {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "ttrice",
+            "bindings": {}
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "op": "/",
+        "args": [
+         {
+          "op": "apply_expression_template",
+          "args": [],
+          "name": "pcf_transition_poly",
+          "bindings": {
+           "tc": {
+            "op": "-",
+            "args": [
+             "t",
+             {
+              "op": "apply_expression_template",
+              "args": [],
+              "name": "tkfrz",
+              "bindings": {}
+             }
+            ]
+           }
+          }
+         },
+         {
+          "op": "apply_expression_template",
+          "args": [],
+          "name": "ttrice",
+          "bindings": {}
+         }
+        ]
+       },
+       {
+        "op": "const",
+        "args": [],
+        "value": 0.0,
+        "units": "Pa/K"
+       }
+      ]
+     },
+     {
+      "op": "const",
+      "args": [],
+      "value": 0.0,
+      "units": "Pa/K"
+     }
+    ]
+   }
+  },
+  "tboil": {
+   "description": "The boiling-point temperature of the Goff-Gratch water curve: tboil = TBOIL = 373.16 K (wv_saturation.F90 local). Zero-parameter constant-fragment template applied with empty bindings.",
+   "params": [],
+   "body": {
+    "op": "const",
+    "args": [],
+    "value": 373.16,
+    "units": "K"
+   }
+  },
+  "ttrice": {
+   "description": "The width of the mixed-phase transition band: ttrice = TTRICE = 20 K (wv_saturation.F90 local). Zero-parameter constant-fragment template applied with empty bindings.",
+   "params": [],
+   "body": {
+    "op": "const",
+    "args": [],
+    "value": 20.0,
+    "units": "K"
+   }
+  },
+  "interface_diffusivity": {
+   "description": "The vertical-diffusion solver's interface diffusion coefficient K = kv*dpidz_sq (the coef_q_diff of fin_vol_solve and fin_vol_lu_decomp, diffusion_solver.F90:524-528 and 952): the eddy diffusivity kv (m2/s) evaluated on the interfaces times (dp/dz)^2, converting the p-coordinate solve to the z-coordinate finite-volume flux form of linear_1d_operators.F90. One law shared by the momentum (kv = kvm), heat (kvh) and tracer (kvq) equations of cam_vertical_diffusion.esm.",
+   "params": [
+    "kv",
+    "dpidz_sq"
+   ],
+   "body": {
+    "op": "*",
+    "args": [
+     "kv",
+     "dpidz_sq"
+    ]
+   }
+  },
+  "surface_layer_source": {
+   "description": "The CAM vertical-diffusion surface-layer injection: a flux F entering through the surface interface becomes the layer source g*F/dz[1] in the lowest layer (esd lev 1 = CAM pver) and 0 in every other layer. The solver's flux-to-state conversion factor is f2s = dt*gravit*rdel(pver) applied to the state update (diffusion_solver.F90:440), so the tendency source is f2s*F/dt = g*F/pdel: momentum F = taures*ramda (the residual-stress injection, F90:491-499), heat F = shflx (F90:779), tracer F = cflx (F90:975) with the dry-constituent pdel/pdeldry tendency conversion folded into F (F90:1056-1061). The source form rather than the flux-rule boundary condition is required by the CLI: the varcoeff_face_laplacian_lev_flux_bc rule's prescribed-flux free names kdudz_bot/kdudz_top cannot be renamed at the import edge (rename reaches only exports; the names are free inside the rule body, esm-spec 9.7.7) and are shared across every firing of the rule, so one units-typed declaration can carry only one value and one unit class, while the four fields' fluxes differ in both (and all are nonzero in general; the window's CLUBB_SGS zeroing, vertical_diffusion.F90:1017-1035, makes them zero here). zero is a units-free parameter bound from a units-free model parameter (the ysu.esm idiom): the checker requires ifelse branches to share dimensions and the four consumers carry different units, so the false branch cannot be a units-typed literal in the template body.",
+   "params": [
+    "flux",
+    "g",
+    "dz",
+    "zero"
+   ],
+   "body": {
+    "op": "faq",
+    "output_idx": [
+     "i"
+    ],
+    "args": [],
+    "ranges": {
+     "i": {
+      "from": "lev"
+     }
+    },
+    "expr": {
+     "op": "ifelse",
+     "args": [
+      {
+       "op": "==",
+       "args": [
+        "i",
+        1
+       ]
+      },
+      {
+       "op": "/",
+       "args": [
+        {
+         "op": "*",
+         "args": [
+          "g",
+          "flux"
+         ]
+        },
+        {
+         "op": "index",
+         "args": [
+          "dz",
+          1
+         ]
+        }
+       ]
+      },
+      "zero"
+     ]
+    }
+   }
+  },
+  "surface_stress_coefficient": {
+   "description": "Total surface drag coefficient of the implicit-surface-stress branch, implicit_surface_stress_add_drag_coefficient_run (diffusion_solver.F90:232-239): ksrf = ksrftms + max(tau/ws, ksrfmin) with tau = sqrt(taux^2 + tauy^2) the turbulent surface stress and ws = max(sqrt(u0(pver)^2 + v0(pver)^2), wsmin) the lowest-level wind speed (esd order: u0[1], v0[1]); wsmin = 1 m/s and ksrfmin = 1e-4 kg/(m2 s) are the module parameters of diffusion_solver.F90:42-44 and the turbulent-mountain-stress drag ksrftms is added by turbulent_mountain_stress_add_drag_coefficient_run (diffusion_stubs.F90:161-184; ksrftms = 0 in the window). The ksrfmin floor makes the coefficient nonzero even when the stress vanishes (taux = tauy = 0 with CLUBB_SGS, vertical_diffusion.F90:1017-1035), so the resulting damping rate at pver never vanishes in the implicit branch.",
+   "params": [
+    "taux",
+    "tauy",
+    "u0",
+    "v0",
+    "ksrftms",
+    "wsmin",
+    "ksrfmin"
+   ],
+   "body": {
+    "op": "+",
+    "args": [
+     "ksrftms",
+     {
+      "op": "max",
+      "args": [
+       {
+        "op": "/",
+        "args": [
+         {
+          "op": "sqrt",
+          "args": [
+           {
+            "op": "+",
+            "args": [
+             {
+              "op": "^",
+              "args": [
+               "taux",
+               2
+              ]
+             },
+             {
+              "op": "^",
+              "args": [
+               "tauy",
+               2
+              ]
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "op": "max",
+          "args": [
+           {
+            "op": "sqrt",
+            "args": [
+             {
+              "op": "+",
+              "args": [
+               {
+                "op": "^",
+                "args": [
+                 {
+                  "op": "index",
+                  "args": [
+                   "u0",
+                   1
+                  ]
+                 },
+                 2
+                ]
+               },
+               {
+                "op": "^",
+                "args": [
+                 {
+                  "op": "index",
+                  "args": [
+                   "v0",
+                   1
+                  ]
+                 },
+                 2
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           "wsmin"
+          ]
+         }
+        ]
+       },
+       "ksrfmin"
+      ]
+     }
+    ]
+   }
+  },
+  "wind_damping_rate": {
+   "description": "Wind damping rate of vertical_diffusion_wind_damping_rate_run (diffusion_solver.F90:274-285): tau_damp = -gravit*ksrf*rdel in the lowest layer (pver) and 0 in every other layer, i.e. the surface-layer source of the flux -ksrf. On the esd column (lev 1 = CAM pver) the law is tau_damp[1] = -g*ksrf/dz[1], 0 elsewhere, lowered as surface_layer_source applied to the flux -ksrf. The Beljaars SGO profile term added by beljaars_add_wind_damping_rate_run (beljaars_drag_interstitials.F90:19-44) is zero in the window (dragblj = 0 on every dumped row) and not carried. ksrf comes from surface_stress_coefficient.",
+   "params": [
+    "ksrf",
+    "g",
+    "dz",
+    "zero"
+   ],
+   "body": {
+    "op": "apply_expression_template",
+    "args": [],
+    "name": "surface_layer_source",
+    "bindings": {
+     "flux": {
+      "op": "*",
+      "args": [
+       {
+        "op": "const",
+        "args": [],
+        "value": -1.0,
+        "units": "1"
+       },
+       "ksrf"
+      ]
+     },
+     "g": "g",
+     "dz": "dz",
+     "zero": "zero"
+    }
+   }
+  },
+  "density_dry_air": {
+   "description": "Dry-air density of cam_export (camsrfexch.F90:503): rho = p / (rair t). rair is the caller's dry-air gas constant (this run SHR_CONST_RDAIR = AVOGAD * BOLTZ / MWDAIR = 287.0423113650487 J/(kg K), physconst.F90:102). This is the dry form: the cdeps density law (datm_datamode_clmncep_mod.F90:428-429) is the moist variant rho = (p - eps1 vp) / (t RDAIR) = (p - 0.378 e)/(R T) with vp the vapor pressure and eps1 = 1 - eps = 0.378, which reduces to the dry form only when e = 0.",
+   "params": [
+    "p",
+    "t",
+    "rair"
+   ],
+   "body": {
+    "op": "/",
+    "args": [
+     "p",
+     {
+      "op": "*",
+      "args": [
+       "rair",
+       "t"
+      ]
+     }
+    ]
+   }
+  },
+  "exner_function": {
+   "description": "Exner function of the SE dycore pressure-temperature coupling (dp_coupling.F90:731-733) used by cam_export (camsrfexch.F90:496): thbot = tbot * exner_function(pmid, ps, cappa) with exner = (pint(pver+1)/pmid(pver))^cappav = (ps/p)^cappa; pint(pver+1) is the surface pressure. cappa is the caller's cappav = rairv/cpairv, with dry_air_species = '' (this run) rairv = rair and cpairv = cpair (air_composition.F90:354), i.e. the quotient SHR_CONST_RDAIR/SHR_CONST_CPDAIR.",
+   "params": [
+    "p",
+    "p_surf",
+    "cappa"
+   ],
+   "body": {
+    "op": "^",
+    "args": [
+     {
+      "op": "/",
+      "args": [
+       "p_surf",
+       "p"
+      ]
+     },
+     "cappa"
+    ]
+   }
+  },
+  "constituent_update": {
+   "description": "The constituent clamp step of physics_update (physics_types.F90:313-334), applied to the raw updated mixing ratio qraw = q + win*ptend_q*dt computed ONCE by the caller as a named intermediate (the Fortran's `state%q = state%q + ptend%q*dt` is written in both branches of the clamp, F90:315-329). Where the constituent's tendency flag lq is set, either the qneg3 floor qclamp = max(qraw, qmin) over the whole column (qneg_module qneg3, qmin the per-constituent floor of chemistry.F90: Q = 1e-12, chem gases and aerosol mass species = 1e-36, num_a1..4 = 1e-5, CLDLIQ/CLDICE/RAINQM/SNOWQM = 0) or, for the number-concentration species NUMICE/NUMLIQ/NUMRAI/NUMSNO (which qneg3 must NOT touch, F90:320-322), the windowed min/max clamp qclamp = min(max(qraw, 1e-12), 1e10) (F90:325-329; windowed because the Fortran's k loop runs top_level..bot_level). lq = 0 short-circuits to q unchanged (the whole block is inside `if(ptend%lq(m))`, F90:314), and win is the [top_level, bot_level] indicator of the caller. All four literals are the Fortran's: the 1e-12 and 1e10 number-concentration bounds (F90:327-328, in mixing-ratio units) and the caller-supplied qmin.",
+   "params": [
+    "qraw",
+    "lq",
+    "qmin",
+    "num_clamp",
+    "win"
+   ],
+   "body": {
+    "op": "ifelse",
+    "args": [
+     "lq",
+     {
+      "op": "ifelse",
+      "args": [
+       "num_clamp",
+       {
+        "op": "ifelse",
+        "args": [
+         "win",
+         {
+          "op": "min",
+          "args": [
+           {
+            "op": "const",
+            "args": [],
+            "value": 10000000000.0,
+            "units": "kg/kg"
+           },
+           {
+            "op": "max",
+            "args": [
+             {
+              "op": "const",
+              "args": [],
+              "value": 1e-12,
+              "units": "kg/kg"
+             },
+             "qraw"
+            ]
+           }
+          ]
+         },
+         "qraw"
+        ]
+       },
+       {
+        "op": "max",
+        "args": [
+         "qraw",
+         "qmin"
+        ]
+       }
+      ]
+     },
+     "qraw"
+    ]
+   }
+  },
+  "state_cnst_min_nz_mask": {
+   "description": "The zeroing predicate of the state_cnst_min_nz utility called by physics_update for CLDLIQ/CLDICE at the convect_deep / zm_conv_tend sites (physics_types.F90:353-375, 467-492): where the POST-clamp constituent value qclamped is below lim, the mass value is zeroed together with its paired number concentration. The template computes only the mask (cld_min_nz and qclamped < lim); the caller applies it as q_after = ifelse(mask, 0, qclamped) to the mass constituent and to the paired number constituent (NUMLIQ for CLDLIQ, NUMICE for CLDICE). This run's calls use lim = 1e-36 (the cldlim_names branch, F90:361-362, 372-373); the PERGRO 1e-12 branch (F90:357-359, 368-370) is not compiled in this build. cld_min_nz is the caller's effective flag: 1 only where the site's ptend%name is in cldlim_names and ptend%lq of the mass constituent is set, i.e. this run only at the convect_deep site (proc zm_conv_tend).",
+   "params": [
+    "qclamped",
+    "cld_min_nz",
+    "lim"
+   ],
+   "body": {
+    "op": "and",
+    "args": [
+     "cld_min_nz",
+     {
+      "op": "<",
+      "args": [
+       "qclamped",
+       "lim"
+      ]
+     }
+    ]
+   }
+  },
+  "virtual_temperature_factor": {
+   "description": "The virtual-temperature factor tvfac = Tv/T of the CAM hydrostatic geopotential (geopotential_temp.F90:133-207, the generalized virtual temperature of Lauritzen et al. 2018, doi:10.1029/2017MS001257): tvfac = (1 + (zvir + 1)*q_Q*qfac) * sum_dry, with qfac = 1/(1 - q_wet_sum) the wet-to-dry mixing-ratio conversion factor (F90:135-156: qfac = 1 - sum of thermodynamically active water mixing ratios, then inverted) and sum_dry = 1/(1 + qfac*q_wet_sum) the dry-air fraction of the moist air (F90:160-180: sum of dry water mixing ratios q_wet_sum*qfac, inverted). q_wet_sum is the sum of the thermodynamically active water species (this run, water_species_in_air = Q, CLDLIQ, CLDICE, RAINQM, SNOWQM with dry_air_species = ''); q_Q is the specific humidity (constituent 1); zvir = rh2o/rair - 1 (SHR_CONST_ZVIR). The Fortran computes qfac and sum_dry as full column arrays before the tvfac line; the template folds the two divisions into the factor they feed.",
+   "params": [
+    "q_Q",
+    "q_wet_sum",
+    "zvir"
+   ],
+   "body": {
+    "op": "*",
+    "args": [
+     {
+      "op": "+",
+      "args": [
+       {
+        "op": "const",
+        "args": [],
+        "value": 1.0,
+        "units": "1"
+       },
+       {
+        "op": "*",
+        "args": [
+         {
+          "op": "+",
+          "args": [
+           "zvir",
+           {
+            "op": "const",
+            "args": [],
+            "value": 1.0,
+            "units": "1"
+           }
+          ]
+         },
+         {
+          "op": "*",
+          "args": [
+           "q_Q",
+           {
+            "op": "/",
+            "args": [
+             {
+              "op": "const",
+              "args": [],
+              "value": 1.0,
+              "units": "1"
+             },
+             {
+              "op": "-",
+              "args": [
+               {
+                "op": "const",
+                "args": [],
+                "value": 1.0,
+                "units": "1"
+               },
+               "q_wet_sum"
+              ]
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "op": "/",
+      "args": [
+       {
+        "op": "const",
+        "args": [],
+        "value": 1.0,
+        "units": "1"
+       },
+       {
+        "op": "+",
+        "args": [
+         {
+          "op": "const",
+          "args": [],
+          "value": 1.0,
+          "units": "1"
+         },
+         {
+          "op": "*",
+          "args": [
+           {
+            "op": "/",
+            "args": [
+             {
+              "op": "const",
+              "args": [],
+              "value": 1.0,
+              "units": "1"
+             },
+             {
+              "op": "-",
+              "args": [
+               {
+                "op": "const",
+                "args": [],
+                "value": 1.0,
+                "units": "1"
+               },
+               "q_wet_sum"
+              ]
+             }
+            ]
+           },
+           "q_wet_sum"
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  },
+  "zm_mass_flux_excess": {
+   "description": "Mass-flux-weighted excess of the ZM plume properties used by q1q2_pjr (zm_convr.F90:2590-2601, 2612-2619): g = mu (x - xhat), the plume mass flux mu times the excess of the plume value x over the environmental value xhat at the same level. The four flux terms of each q1q2 tendency are four applications of this law at the k and k+1 neighbors (the cam_zm_q1q2 model applies it with index operands inside its level faq); the subcloud tendency is the negative sum of two applications divided by dsubcld (F90:2612-2619).",
+   "params": [
+    "mu",
+    "x",
+    "xhat"
+   ],
+   "body": {
+    "op": "*",
+    "args": [
+     "mu",
+     {
+      "op": "-",
+      "args": [
+       "x",
+       "xhat"
+      ]
+     }
+    ]
+   }
+  },
+  "zm_evap_flux_step": {
+   "description": "Per-level step of the top-down precipitation-flux integral of zm_conv_evap_run (zm_conv_evap.F90:219-224): flx_hi = max(flx_lo + prod pdel / gravit, 0). The precipitation flux is the vertical integral of the net production: the interface value flx_lo plus the layer contribution prod pdel / gravit (the integral of the production over the layer mass pdel/gravit), accumulated top-down; the max is the roundoff guard of F90:222-224, which fires on 4 of the 480 dumped levels of this lane by up to 3.0e-19 kg/m2/s. The cam_zm_evap model pins this per-level step with the accumulated flx_lo taken from the dump because the CLI rejects the coupled top-down recurrence: the evaporation at a level depends on the flux entering it, which is the integral of production-minus-evaporation above it (observed dependency cycle, esm-spec 4.9.6). Applied once for the rain flux (ntprprd) and once for the snow flux (ntsnprd).",
+   "params": [
+    "flx_lo",
+    "prod",
+    "pdel",
+    "gravit"
+   ],
+   "body": {
+    "op": "max",
+    "args": [
+     {
+      "op": "+",
+      "args": [
+       "flx_lo",
+       {
+        "op": "/",
+        "args": [
+         {
+          "op": "*",
+          "args": [
+           "prod",
+           "pdel"
+          ]
+         },
+         "gravit"
+        ]
+       }
+      ]
+     },
+     {
+      "op": "const",
+      "args": [],
+      "value": 0.0,
+      "units": "kg/(m^2*s)"
+     }
+    ]
+   }
+  },
+  "zm_evap_snow_frac": {
+   "description": "Snow fraction of the precipitation flux entering a layer, clamped to [0, 1] (zm_conv_evap.F90:186-192 and 205-209, the work1 expressions): w = min(max(0, flxsnow / flxprec), 1) when flxprec > 0, else 0 (the flxprec = 0 guard of F90:190-192 prevents a 0/0). Applied twice in the evap chain: with flxsntm, the snow flux after melting (F90:186-192), the share of evaporated rain that is snow evaporation; and with flxsnow, the snow flux into the layer (F90:205-209), the lower bound of the net-snow-production phase fraction work2 = max(fsnow_conv, work1).",
+   "params": [
+    "flxprec",
+    "flxsnow"
+   ],
+   "body": {
+    "op": "ifelse",
+    "args": [
+     {
+      "op": ">",
+      "args": [
+       "flxprec",
+       {
+        "op": "const",
+        "args": [],
+        "value": 0.0,
+        "units": "kg/(m^2*s)"
+       }
+      ]
+     },
+     {
+      "op": "min",
+      "args": [
+       {
+        "op": "max",
+        "args": [
+         {
+          "op": "const",
+          "args": [],
+          "value": 0.0,
+          "units": "1"
+         },
+         {
+          "op": "/",
+          "args": [
+           "flxsnow",
+           "flxprec"
+          ]
+         }
+        ]
+       },
+       {
+        "op": "const",
+        "args": [],
+        "value": 1.0,
+        "units": "1"
+       }
+      ]
+     },
+     {
+      "op": "const",
+      "args": [],
+      "value": 0.0,
+      "units": "1"
+     }
+    ]
+   }
+  },
+  "zm_flux": {
+   "description": "Layer-centered total plume mass flux F = mu (xu - xhat) + md (xd - xhat) of q1q2_pjr (zm_convr.F90:2589-2601, 2612-2619): the updraft mass flux mu times the updraft excess over the environment plus the downdraft mass flux md times the downdraft excess. The flux divergence of each q1q2 tendency is (F[min(k+1, pver)] - F[k])/dp[k] (zm_flux_divergence) and the subcloud tendency is -F[k]/dsubcld (zm_subcloud_tendency); both are applications of this law at the k and k+1 neighbors.",
+   "params": [
+    "mu",
+    "xu",
+    "md",
+    "xd",
+    "xhat"
+   ],
+   "body": {
+    "op": "+",
+    "args": [
+     {
+      "op": "apply_expression_template",
+      "args": [],
+      "name": "zm_mass_flux_excess",
+      "bindings": {
+       "mu": "mu",
+       "x": "xu",
+       "xhat": "xhat"
+      }
+     },
+     {
+      "op": "apply_expression_template",
+      "args": [],
+      "name": "zm_mass_flux_excess",
+      "bindings": {
+       "mu": "md",
+       "x": "xd",
+       "xhat": "xhat"
+      }
+     }
+    ]
+   }
+  },
+  "zm_flux_divergence": {
+   "description": "Vertical divergence of the ZM plume mass flux in the pressure coordinate, (F[min(k+1, pver)] - F[k])/dp[k] with F = zm_flux the layer-centered plume flux (zm_convr.F90:2589-2601, the four flux terms of each q1q2 tendency): the flux at the level below (index k+1, clamped to the surface level min(k+1, pver)) minus the flux at level k, divided by the layer pressure thickness dp[k] (dp = 0.01 pdel). Applied once for moisture (fd_q, xu = qu, xd = qd, xhat = qhat) and once for dry static energy (fd_s, xu = su, xd = sd, xhat = shat).",
+   "params": [
+    "mu",
+    "xu",
+    "md",
+    "xd",
+    "xhat",
+    "dp",
+    "pver"
+   ],
+   "body": {
+    "op": "faq",
+    "output_idx": [
+     "k"
+    ],
+    "args": [
+     "mu",
+     "xu",
+     "md",
+     "xd",
+     "xhat",
+     "dp"
+    ],
+    "ranges": {
+     "k": {
+      "from": "lev"
+     }
+    },
+    "expr": {
+     "op": "/",
+     "args": [
+      {
+       "op": "-",
+       "args": [
+        {
+         "op": "apply_expression_template",
+         "args": [],
+         "name": "zm_flux",
+         "bindings": {
+          "mu": {
+           "op": "index",
+           "args": [
+            "mu",
+            {
+             "op": "min",
+             "args": [
+              {
+               "op": "+",
+               "args": [
+                "k",
+                1
+               ]
+              },
+              "pver"
+             ]
+            }
+           ]
+          },
+          "xu": {
+           "op": "index",
+           "args": [
+            "xu",
+            {
+             "op": "min",
+             "args": [
+              {
+               "op": "+",
+               "args": [
+                "k",
+                1
+               ]
+              },
+              "pver"
+             ]
+            }
+           ]
+          },
+          "md": {
+           "op": "index",
+           "args": [
+            "md",
+            {
+             "op": "min",
+             "args": [
+              {
+               "op": "+",
+               "args": [
+                "k",
+                1
+               ]
+              },
+              "pver"
+             ]
+            }
+           ]
+          },
+          "xd": {
+           "op": "index",
+           "args": [
+            "xd",
+            {
+             "op": "min",
+             "args": [
+              {
+               "op": "+",
+               "args": [
+                "k",
+                1
+               ]
+              },
+              "pver"
+             ]
+            }
+           ]
+          },
+          "xhat": {
+           "op": "index",
+           "args": [
+            "xhat",
+            {
+             "op": "min",
+             "args": [
+              {
+               "op": "+",
+               "args": [
+                "k",
+                1
+               ]
+              },
+              "pver"
+             ]
+            }
+           ]
+          }
+         }
+        },
+        {
+         "op": "apply_expression_template",
+         "args": [],
+         "name": "zm_flux",
+         "bindings": {
+          "mu": {
+           "op": "index",
+           "args": [
+            "mu",
+            "k"
+           ]
+          },
+          "xu": {
+           "op": "index",
+           "args": [
+            "xu",
+            "k"
+           ]
+          },
+          "md": {
+           "op": "index",
+           "args": [
+            "md",
+            "k"
+           ]
+          },
+          "xd": {
+           "op": "index",
+           "args": [
+            "xd",
+            "k"
+           ]
+          },
+          "xhat": {
+           "op": "index",
+           "args": [
+            "xhat",
+            "k"
+           ]
+          }
+         }
+        }
+       ]
+      },
+      {
+       "op": "index",
+       "args": [
+        "dp",
+        "k"
+       ]
+      }
+     ]
+    }
+   }
+  },
+  "zm_subcloud_tendency": {
+   "description": "Subcloud tendency of q1q2_pjr, -F[k]/dsubcld with F = zm_flux the layer-centered plume flux (zm_convr.F90:2612-2619, 2677-2684): the negative of the plume flux at level k divided by the subcloud layer thickness dsubcld, gathered at index maxg by the tendency masks; also the subcloud launch-level change dtbdt/dqbdt of the closure (F90:2469-2471) with the roles of xhat and xu/xd swapped (shat - su = -(su - shat)). Applied once for moisture (sub_dqdt, xu = qu, xd = qd, xhat = qhat) and once for dry static energy (sub_dsdt, xu = su, xd = sd, xhat = shat).",
+   "params": [
+    "mu",
+    "xu",
+    "md",
+    "xd",
+    "xhat",
+    "dsubcld"
+   ],
+   "body": {
+    "op": "faq",
+    "output_idx": [
+     "k"
+    ],
+    "args": [
+     "mu",
+     "xu",
+     "md",
+     "xd",
+     "xhat"
+    ],
+    "ranges": {
+     "k": {
+      "from": "lev"
+     }
+    },
+    "expr": {
+     "op": "/",
+     "args": [
+      {
+       "op": "*",
+       "args": [
+        {
+         "op": "const",
+         "args": [],
+         "value": -1.0,
+         "units": "1"
+        },
+        {
+         "op": "apply_expression_template",
+         "args": [],
+         "name": "zm_flux",
+         "bindings": {
+          "mu": {
+           "op": "index",
+           "args": [
+            "mu",
+            "k"
+           ]
+          },
+          "xu": {
+           "op": "index",
+           "args": [
+            "xu",
+            "k"
+           ]
+          },
+          "md": {
+           "op": "index",
+           "args": [
+            "md",
+            "k"
+           ]
+          },
+          "xd": {
+           "op": "index",
+           "args": [
+            "xd",
+            "k"
+           ]
+          },
+          "xhat": {
+           "op": "index",
+           "args": [
+            "xhat",
+            "k"
+           ]
+          }
+         }
+        }
+       ]
+      },
+      "dsubcld"
+     ]
+    }
+   }
+  },
+  "estbl_tmax": {
+   "description": "The upper clamp of the estbl saturation-vapor-pressure lookup: tmax = 375.16 K (wv_saturation.F90:96, the public module parameter; estblf clamps T to it at wv_saturation.F90:388, so the 251st table knot at 377.16 K is unreachable). Zero-parameter constant-fragment template applied with empty bindings.",
+   "params": [],
+   "body": {
+    "op": "const",
+    "args": [],
+    "value": 375.16,
+    "units": "K"
+   }
+  },
+  "estbl_es0": {
+   "description": "The saturation vapor pressure of the estbl table lookup, es0 = estbl[min(T, tmax)]: the linear interpolation of the 251-knot estbl function table on the clamped temperature min(T, tmax) (estblf of wv_saturation.F90:388, estbl_tmax the wv_saturation.F90:96 clamp), flat outside the axis. The table data (Goff-Gratch mixed-phase SVP of wv_sat_init, wv_saturation.F90:191-254) now lives IN this template as the esm:std/interp.esm `linear` application's const table (esm 2.0.0 removed function_tables/table_lookup; the 1.x table lowering of esm-spec 1.x §9.5.3 becomes the interp template), so cam_wv_saturation.esm and cam_zm_evap.esm call the single law without per-document table copies: WvSaturation binds T to its T, ZMevap to its layer temperature t1; the saturation mixing ratio is then svp_to_qsat(es0, p) in both callers. The interp blend table[i] + w (table[i+1] - table[i]) differs from the Fortran (1 - w) t_i + w t_i+1 by at most 1 ulp, as before.",
+   "params": [
+    "T"
+   ],
+   "body": {
+    "op": "apply_expression_template",
+    "args": [],
+    "name": "linear",
+    "bindings": {
+     "table": {
+      "op": "const",
+      "args": [],
+      "value": [
+       4.218158277483428e-09,
+       6.116868700806532e-09,
+       8.820231685929848e-09,
+       1.2648273602767794e-08,
+       1.8040024216503212e-08,
+       2.5594705716764813e-08,
+       3.612611909967037e-08,
+       5.0734116019946845e-08,
+       7.089808845516389e-08,
+       9.859870550305773e-08,
+       1.364757306378527e-07,
+       1.8803172815092236e-07,
+       2.5789389032582003e-07,
+       3.521491765921896e-07,
+       4.787715572798236e-07,
+       6.481645200000699e-07,
+       8.738472683947691e-07,
+       1.1733193858564578e-06,
+       1.5691463411362774e-06,
+       2.090317297422093e-06,
+       2.7739375024233565e-06,
+       3.6673303709134986e-06,
+       4.830639549456786e-06,
+       6.340039146102938e-06,
+       8.29168133468752e-06,
+       1.0806535176518401e-05,
+       1.4036299272791676e-05,
+       1.8170604364294982e-05,
+       2.34457608958744e-05,
+       3.015535160265836e-05,
+       3.866302117609287e-05,
+       4.941787494197283e-05,
+       6.297296723660788e-05,
+       8.000743890989723e-05,
+       0.00010135295333343214,
+       0.0001280251827820529,
+       0.00016126121354634968,
+       0.00020256387020995036,
+       0.0002537541089156039,
+       0.0003170327980197792,
+       0.0003950533943208821,
+       0.000491007236224333,
+       0.0006087234141280662,
+       0.0007527854454958827,
+       0.0009286672802337457,
+       0.0011428914939793765,
+       0.001403212895832525,
+       0.0017188311861588799,
+       0.0021006367528612693,
+       0.0025614941945941616,
+       0.0031165687106732938,
+       0.0037837011039797567,
+       0.0045838378092597975,
+       0.005541523089373469,
+       0.006685461340940722,
+       0.00804915832338044,
+       0.009671651076636064,
+       0.011598337328235916,
+       0.013881916315238068,
+       0.016583454166740383,
+       0.019773588313849243,
+       0.0235338868223279,
+       0.027958380084759753,
+       0.033155283970311505,
+       0.03924893531750853,
+       0.046381962575445704,
+       0.05471771645822449,
+       0.06444298768291301,
+       0.07577104121981298,
+       0.08894499900217906,
+       0.10424160572769858,
+       0.12197541524292686,
+       0.14250343804140433,
+       0.1662302936332299,
+       0.193613914965247,
+       0.22517185569341866,
+       0.2614882549390548,
+       0.30322151820472754,
+       0.35111277739033236,
+       0.405995197340778,
+       0.46880420108023885,
+       0.5405886908492102,
+       0.622523347265251,
+       0.7159220943809986,
+       0.8222528241188413,
+       0.9431534795243027,
+       1.0804496025040486,
+       1.236173458202447,
+       1.412584854926184,
+       1.6121937855514863,
+       1.837785023645554,
+       2.092444815103558,
+       2.3795898139465135,
+       2.7029984190430225,
+       3.066844676909294,
+       3.475734924405791,
+       3.9347473540835796,
+       4.44947469413619,
+       5.026070204381324,
+       5.671297199425633,
+       6.392582320152311,
+       7.1980727849081605,
+       8.096697862249735,
+       9.098234817827638,
+       10.213379598941339,
+       11.453822531467365,
+       12.832329315252048,
+       14.362827615646562,
+       16.060499560644082,
+       17.941880465037862,
+       20.02496411514838,
+       22.329314959948952,
+       24.876187566843726,
+       27.68865371290007,
+       30.791737494995854,
+       34.212558855095814,
+       37.98048592970152,
+       42.127296645408336,
+       46.68734999543408,
+       51.69776744493531,
+       57.19862492588788,
+       63.23315589523856,
+       69.84796594294532,
+       77.09325944935233,
+       85.02307880411718,
+       93.69555671155977,
+       103.18429580767774,
+       114.69043157689902,
+       127.22476892525403,
+       140.8548560732734,
+       155.6503254546551,
+       171.68269484457426,
+       189.02512784937147,
+       207.752149889716,
+       227.9393155788685,
+       249.66282316013235,
+       272.9990714230719,
+       298.02415426677334,
+       324.8132878203888,
+       353.4401647666941,
+       383.9762302434716,
+       416.4898734205361,
+       451.0455285672044,
+       487.7026791363912,
+       526.5147580973277,
+       567.5279374496766,
+       610.779764665194,
+       656.6166752496093,
+       705.475424865171,
+       757.5260046527021,
+       812.9461727702799,
+       871.921714622723,
+       934.6467076589322,
+       1001.3237906678338,
+       1072.1644374985751,
+       1147.3892351256638,
+       1227.2281659747816,
+       1311.9208944202796,
+       1401.7170573604365,
+       1496.876558772139,
+       1597.6698681419623,
+       1704.378322666244,
+       1817.2944331085223,
+       1936.7221931985146,
+       2062.977392452695,
+       2196.3879322928788,
+       2337.2941453352582,
+       2486.0491177189133,
+       2643.0190143393847,
+       2808.5834068496724,
+       2983.135604287802,
+       3167.0829861875964,
+       3360.847338026077,
+       3564.865188858792,
+       3779.588150991952,
+       4005.483261537923,
+       4243.033325698884,
+       4492.7372616217635,
+       4755.110446665693,
+       5030.685064922219,
+       5320.010455827298,
+       5623.653463702888,
+       5942.1987880656125,
+       6276.249334539097,
+       6626.4265662066155,
+       6993.370855240123,
+       7377.7418346420745,
+       7780.218749936964,
+       8201.500810649302,
+       8642.307541406271,
+       9103.379132503473,
+       9585.476789773647,
+       10089.383083599596,
+       10615.902296913267,
+       11165.86077202598,
+       11740.107256134905,
+       12339.513245354417,
+       12964.973327122,
+       13617.405520831708,
+       14297.751616549647,
+       15006.977511669655,
+       15746.073545369563,
+       16516.054830731067,
+       17317.96158439127,
+       18152.859453593865,
+       19021.839840515255,
+       19926.02022374127,
+       20866.544476775514,
+       21844.58318346366,
+       22861.33395022242,
+       23918.021714964776,
+       25015.899052618548,
+       26156.246477138575,
+       27340.372739918068,
+       28569.615124507498,
+       29845.339737556315,
+       31168.941795894574,
+       32541.845909678625,
+       33965.50636152704,
+       35441.40738158167,
+       36971.063418428115,
+       38556.01940582053,
+       40197.85102515514,
+       41898.16496364615,
+       43658.59916815975,
+       45480.82309466795,
+       47366.53795328994,
+       49317.476948889875,
+       51335.40551721121,
+       53422.121556525795,
+       55579.45565478618,
+       57809.27131227123,
+       60113.46515972152,
+       62493.967171967764,
+       64952.74087705295,
+       67491.78356086614,
+       70113.12646729645,
+       72818.83499393359,
+       75611.00888333435,
+       78491.78240989032,
+       81463.32456232696,
+       84527.8392218728,
+       87687.56533614582,
+       90944.77708880094,
+       94301.78406499061,
+       97760.93141269806,
+       101324.59999999969,
+       104995.20656832322,
+       108775.20388176915,
+       112667.08087257046,
+       116673.36278276157
+      ]
+     },
+     "axis": {
+      "op": "const",
+      "args": [],
+      "value": [
+       127.16,
+       128.16,
+       129.16,
+       130.16,
+       131.16,
+       132.16,
+       133.16,
+       134.16,
+       135.16,
+       136.16,
+       137.16,
+       138.16,
+       139.16,
+       140.16,
+       141.16,
+       142.16,
+       143.16,
+       144.16,
+       145.16,
+       146.16,
+       147.16,
+       148.16,
+       149.16,
+       150.16,
+       151.16,
+       152.16,
+       153.16,
+       154.16,
+       155.16,
+       156.16,
+       157.16,
+       158.16,
+       159.16,
+       160.16,
+       161.16,
+       162.16,
+       163.16,
+       164.16,
+       165.16,
+       166.16,
+       167.16,
+       168.16,
+       169.16,
+       170.16,
+       171.16,
+       172.16,
+       173.16,
+       174.16,
+       175.16,
+       176.16,
+       177.16,
+       178.16,
+       179.16,
+       180.16,
+       181.16,
+       182.16,
+       183.16,
+       184.16,
+       185.16,
+       186.16,
+       187.16,
+       188.16,
+       189.16,
+       190.16,
+       191.16,
+       192.16,
+       193.16,
+       194.16,
+       195.16,
+       196.16,
+       197.16,
+       198.16,
+       199.16,
+       200.16,
+       201.16,
+       202.16,
+       203.16,
+       204.16,
+       205.16,
+       206.16,
+       207.16,
+       208.16,
+       209.16,
+       210.16,
+       211.16,
+       212.16,
+       213.16,
+       214.16,
+       215.16,
+       216.16,
+       217.16,
+       218.16,
+       219.16,
+       220.16,
+       221.16,
+       222.16,
+       223.16,
+       224.16,
+       225.16,
+       226.16,
+       227.16,
+       228.16,
+       229.16,
+       230.16,
+       231.16,
+       232.16,
+       233.16,
+       234.16,
+       235.16,
+       236.16,
+       237.16,
+       238.16,
+       239.16,
+       240.16,
+       241.16,
+       242.16,
+       243.16,
+       244.16,
+       245.16,
+       246.16,
+       247.16,
+       248.16,
+       249.16,
+       250.16,
+       251.16,
+       252.16,
+       253.16,
+       254.16,
+       255.16,
+       256.15999999999997,
+       257.15999999999997,
+       258.15999999999997,
+       259.15999999999997,
+       260.15999999999997,
+       261.15999999999997,
+       262.15999999999997,
+       263.15999999999997,
+       264.15999999999997,
+       265.15999999999997,
+       266.15999999999997,
+       267.15999999999997,
+       268.15999999999997,
+       269.15999999999997,
+       270.15999999999997,
+       271.15999999999997,
+       272.15999999999997,
+       273.15999999999997,
+       274.15999999999997,
+       275.15999999999997,
+       276.15999999999997,
+       277.15999999999997,
+       278.15999999999997,
+       279.15999999999997,
+       280.15999999999997,
+       281.15999999999997,
+       282.15999999999997,
+       283.15999999999997,
+       284.15999999999997,
+       285.15999999999997,
+       286.15999999999997,
+       287.15999999999997,
+       288.15999999999997,
+       289.15999999999997,
+       290.15999999999997,
+       291.15999999999997,
+       292.15999999999997,
+       293.15999999999997,
+       294.15999999999997,
+       295.15999999999997,
+       296.15999999999997,
+       297.15999999999997,
+       298.15999999999997,
+       299.15999999999997,
+       300.15999999999997,
+       301.15999999999997,
+       302.15999999999997,
+       303.15999999999997,
+       304.15999999999997,
+       305.15999999999997,
+       306.15999999999997,
+       307.15999999999997,
+       308.15999999999997,
+       309.15999999999997,
+       310.15999999999997,
+       311.15999999999997,
+       312.15999999999997,
+       313.15999999999997,
+       314.15999999999997,
+       315.15999999999997,
+       316.15999999999997,
+       317.15999999999997,
+       318.15999999999997,
+       319.15999999999997,
+       320.15999999999997,
+       321.15999999999997,
+       322.15999999999997,
+       323.15999999999997,
+       324.15999999999997,
+       325.15999999999997,
+       326.15999999999997,
+       327.15999999999997,
+       328.15999999999997,
+       329.15999999999997,
+       330.15999999999997,
+       331.15999999999997,
+       332.15999999999997,
+       333.15999999999997,
+       334.15999999999997,
+       335.15999999999997,
+       336.15999999999997,
+       337.15999999999997,
+       338.15999999999997,
+       339.15999999999997,
+       340.15999999999997,
+       341.15999999999997,
+       342.15999999999997,
+       343.15999999999997,
+       344.15999999999997,
+       345.15999999999997,
+       346.15999999999997,
+       347.15999999999997,
+       348.15999999999997,
+       349.15999999999997,
+       350.15999999999997,
+       351.15999999999997,
+       352.15999999999997,
+       353.15999999999997,
+       354.15999999999997,
+       355.15999999999997,
+       356.15999999999997,
+       357.15999999999997,
+       358.15999999999997,
+       359.15999999999997,
+       360.15999999999997,
+       361.15999999999997,
+       362.15999999999997,
+       363.15999999999997,
+       364.15999999999997,
+       365.15999999999997,
+       366.15999999999997,
+       367.15999999999997,
+       368.15999999999997,
+       369.15999999999997,
+       370.15999999999997,
+       371.15999999999997,
+       372.15999999999997,
+       373.15999999999997,
+       374.15999999999997,
+       375.15999999999997,
+       376.15999999999997,
+       377.15999999999997
+      ],
+      "units": "K"
+     },
+     "x": {
+      "op": "min",
+      "args": [
+       "T",
+       {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "estbl_tmax",
+        "bindings": {}
+       }
+      ]
+     },
+     "n": 251
+    }
+   }
+  },
+  "guarded_ratio": {
+   "description": "Guarded ratio of the RRTMG shortwave cloud-optics conversion (radsw.F90:437-475): ratio = x/y when y > 0, else fallback. The three solver-input ratios share the one branch structure: ssa = tau_w/tau with fallback 1 (tau = 0 -> ssa = 1), asm = tau_w_g/tau_w and fsfc = tau_w_f/tau_w with fallback 0 (tau_w = 0 -> 0). The Fortran guards the denominator with max(y, 1e-80) instead of branching, but the two are identical whenever y <= 0 selects the fallback (x/max(y,1e-80) is never evaluated in the else branch) and the max is vacuous for y > 0 (every dump ratio y > 1e-80; the stage-1 validator verifies ssa = tau_w/tau, asm = tau_w_g/tau_w, fsfc = tau_w_f/tau_w to rel 1e-12 where the denominators are positive).",
+   "params": [
+    "x",
+    "y",
+    "fallback"
+   ],
+   "body": {
+    "op": "ifelse",
+    "args": [
+     {
+      "op": ">",
+      "args": [
+       "y",
+       {
+        "op": "const",
+        "args": [],
+        "value": 0.0,
+        "units": "1"
+       }
+      ]
+     },
+     {
+      "op": "/",
+      "args": [
+       "x",
+       "y"
+      ]
+     },
+     "fallback"
+    ]
+   }
+  },
+  "edge_shift": {
+   "description": "The shared-edge law of the RRTMG state construction (rrtmg_state.F90:141-144, 110-120): the upper interface of RRTMG layer k is the lower interface of layer k+1, so hi(k) = lo(k+1) for k = 1..n-1 and hi(n) = the surface boundary value sfc, written as a per-k gather over the index set kset. Used for the pressure edges (pint_hi from pint_lo, with the surface pressure r_state%pintmb(num_rrtmg_levs+1) = pstate%pint(pverp), F90:158-159) and the temperature edges (T_ifc_hi from T_ifc_lo, with the surface interface temperature tint(pverp) from the surface upwelling flux, F90:110-120).",
+   "params": [
+    "lo",
+    "sfc",
+    "n",
+    "kset"
+   ],
+   "body": {
+    "op": "faq",
+    "output_idx": [
+     "kk"
+    ],
+    "args": [],
+    "ranges": {
+     "kk": {
+      "from": "kset"
+     }
+    },
+    "expr": {
+     "op": "ifelse",
+     "args": [
+      {
+       "op": "<=",
+       "args": [
+        "kk",
+        "n"
+       ]
+      },
+      {
+       "op": "index",
+       "args": [
+        "lo",
+        {
+         "op": "+",
+         "args": [
+          "kk",
+          1
+         ]
+        }
+       ]
+      },
+      "sfc"
+     ]
+    }
+   }
+  },
+  "band_gather": {
+   "description": "Gather of a per-band (band x lev) optics field to the McICA g-point axis: out[g, k] = x[band_of[g], k] over the g-point and level index sets named by the gset/lset template parameters (the SW and LW models bind them to their own gpt axes, ngptsw = 112 and ngptlw = 140). band_of is the fixed RRTMG k-distribution band->g-point map (rrtmg_sw_init.f90:266-280, counts 6,12,8,8,10,10,2,10,8,6,6,8,6,12; rrtmg_lw_init.f90:308, counts 10,12,16,14,16,8,12,8,12,6,8,8,4,2,2,2), declared as a [gpt]-shaped parameter in the consuming models.",
+   "params": [
+    "x",
+    "band_of",
+    "gset",
+    "lset"
+   ],
+   "body": {
+    "op": "faq",
+    "output_idx": [
+     "g",
+     "k"
+    ],
+    "args": [],
+    "ranges": {
+     "g": {
+      "from": "gset"
+     },
+     "k": {
+      "from": "lset"
+     }
+    },
+    "expr": {
+     "op": "index",
+     "args": [
+      "x",
+      {
+       "op": "index",
+       "args": [
+        "band_of",
+        "g"
+       ]
+      },
+      "k"
+     ]
+    }
+   }
+  },
+  "physics_update_step": {
+   "description": "The explicit state-update step of the CAM physics_update law (physics_types.F90:207-495): x_new = x + dt*tend, the single forward step applied to every state variable after each parameterization (T = T + ptend_s*dt/cpairv, F90:415-421; q = q + ptend_q*dt inside the lq gate, F90:315-317; u/v likewise), with the caller folding the ptend lq/ls flags, the win update window and the cpairv conversion into the tendency tend. Shared by cam_physics_update.esm (T_after, qraw) and the zm_convr_run -> zm_conv_evap_run state1 handoff of cam_zm.esm (t1 = t + delt dsdt, q1 = q + delt dqdt of zm_conv_intr.F90:640, with dsdt/dqdt the q1q2 tendencies).",
+   "params": [
+    "x",
+    "tend",
+    "dt"
+   ],
+   "body": {
+    "op": "+",
+    "args": [
+     "x",
+     {
+      "op": "*",
+      "args": [
+       "tend",
+       "dt"
+      ]
+     }
+    ]
+   }
+  },
+  "zero_if": {
+   "description": "The threshold zeroing of the GW stress propagation (gw_common.F90:560-561: 'where (tausat <= taumin) tausat = 0' and the taudmp twin): zero_if(x, thresh, zero) = x when x > thresh, else zero. The zero is a third parameter so the fallback branch carries the units of x (the esm unit checker requires ifelse branches to share dimensions). The Fortran limits the arrays rather than the min result so that the PGI-compiled runs stay bit-reproducible; the two zeroings are the two min arguments of tau = min(taudmp, tausat) (F90:563).",
+   "params": ["x", "thresh", "zero"],
+   "body": {
+    "op": "ifelse",
+    "args": [
+     {"op": "<=", "args": ["x", "thresh"]},
+     "zero",
+     "x"
+    ]
+   }
+  },
+  "fortran_sign": {
+   "description": "The Fortran sign intrinsic as a branch (gw_common.F90:667: gwut = sign(ubtl, c - ubm)): fortran_sign(x, y, zero) = |x| when y >= zero (sign(b, a) returns |b| with the sign of a, and a = 0 counts as positive), else -|x|. The threshold zero is a third parameter so the comparison carries the units of y; the esm unit checker compares dimensioned quantities only. The Fortran sign renders the ubt/ubm sign check unnecessary for mountain waves (the comment at F90:664-666).",
+   "params": ["x", "y", "zero"],
+   "body": {
+    "op": "ifelse",
+    "args": [
+     {"op": ">=", "args": ["y", "zero"]},
+     {"op": "abs", "args": ["x"]},
+     {"op": "*", "args": [{"op": "const", "args": [], "value": -1.0, "units": "1"}, {"op": "abs", "args": ["x"]}]}
+    ]
+   }
+  },
+  "tndmax_ratio": {
+   "description": "The second (ratio) tendency limiter of the GW drag (gw_common.F90:675-685): ubt_lim_ratio = tndmax/|ubt| when |ubt| > tndmax else 1, applied to both ubt and every gwut wave (F90:691-693) so the stress carried down is reduced consistently. Never binds in the orographic window (the first umcfac limiter holds |ubtl| < 4.6e-3 = tndmax at every level; the validator's ratio chain is exactly 1), but it is part of the law and is pinned structurally.",
+   "params": ["x", "tndmax"],
+   "body": {
+    "op": "ifelse",
+    "args": [
+     {"op": ">", "args": [{"op": "abs", "args": ["x"]}, "tndmax"]},
+     {"op": "/", "args": ["tndmax", {"op": "abs", "args": ["x"]}]},
+     {"op": "const", "args": [], "value": 1.0, "units": "1"}
+    ]
+   }
+  }
+ }
+}
